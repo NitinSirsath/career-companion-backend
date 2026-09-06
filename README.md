@@ -66,3 +66,38 @@ Run `npm run dev` to start the development server.
 ## Shared Contracts
 
 The `src/contracts` directory contains Zod schemas and types that are shared with the frontend. The frontend repository pulls these files using its own sync script. Do not introduce breaking changes to these contracts without coordinating with the frontend.
+
+## Application API & Development Authentication (COM-13)
+
+For Sprint 1 local development, this repository uses a **Development-Only Authentication Boundary**. 
+This is an architectural placeholder for Google OAuth and MUST NEVER be enabled in production environments.
+
+### Making Authenticated Requests
+To authenticate as the development user, you must include the `X-Development-User` header with the user's email (default seeded user: `dev@career-companion.local`) in your requests. Also ensure `ENABLE_DEV_AUTH=true` is set in your `.env`.
+
+#### Example POST Request
+```bash
+curl -X POST http://localhost:3000/api/applications \
+  -H "Content-Type: application/json" \
+  -H "X-Development-User: dev@career-companion.local" \
+  -d '{"companyName": "Acme Corp", "jobTitle": "Software Engineer"}'
+```
+
+#### Example GET Request
+```bash
+curl -X GET http://localhost:3000/api/applications \
+  -H "X-Development-User: dev@career-companion.local"
+```
+
+### Error Response Shape
+All API errors follow a consistent, typed shape to make it easier for clients to consume:
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid request data",
+    "details": [...]
+  }
+}
+```
+Standard error codes include `VALIDATION_ERROR`, `UNAUTHORIZED`, and `INTERNAL_SERVER_ERROR`.

@@ -51,7 +51,7 @@ describe('Database Persistence Foundation', () => {
         data: {
           userId: user!.id,
           jobTitle: 'No Company',
-        } as any,
+        } as unknown as import('@prisma/client').Prisma.ApplicationCreateInput,
       })
     ).rejects.toThrow();
   });
