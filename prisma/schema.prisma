@@ -8,12 +8,16 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid()) @db.Uuid
-  email     String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(uuid()) @db.Uuid
+  email      String   @unique
+  googleId   String?  @unique
+  name       String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  applications Application[]
+  applications     Application[]
+  gmailConnection  GmailConnection?
+  emails           Email[]
 
   @@map("users")
 }
@@ -42,7 +46,80 @@ model Application {
   updatedAt       DateTime          @updatedAt
 
   user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emails          Email[]
 
   @@index([userId])
   @@map("applications")
+}
+
+// --- Email Ingestion (COM-20) ---
+
+enum EmailRelevanceState {
+  UNPROCESSED
+  RELEVANT
+  IRRELEVANT
+}
+
+enum EmailMatchState {
+  UNMATCHED
+  MATCHED
+  AMBIGUOUS
+  IGNORED
+}
+
+model Email {
+  id              String            @id @default(uuid()) @db.Uuid
+  userId          String            @db.Uuid
+  gmailMessageId  String            // stable Gmail message ID
+  threadId        String?           // Gmail thread ID; stored for future matching
+  subject         String?           // email subject header
+  sender          String?           // From header value
+  receivedAt      DateTime?         // message received timestamp
+  relevanceState  EmailRelevanceState @default(UNPROCESSED)
+  matchState      EmailMatchState     @default(UNMATCHED)
+  applicationId   String?           @db.Uuid  // nullable FK to Application
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application     Application?      @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, gmailMessageId])   // idempotency constraint
+  @@index([userId])
+  @@index([userId, relevanceState])    // future AI processing queue queries
+  @@map("emails")
+}
+
+// --- Gmail Integration (COM-19) ---
+
+enum GmailConnectionStatus {
+  NOT_CONNECTED
+  CONNECTED
+  REVOKED
+}
+
+enum GmailSyncStatus {
+  IDLE
+  SYNCING
+  FAILED
+}
+
+model GmailConnection {
+  id            String                @id @default(uuid()) @db.Uuid
+  userId        String                @unique @db.Uuid
+  gmailEmail    String
+  status        GmailConnectionStatus @default(NOT_CONNECTED)
+  syncStatus    GmailSyncStatus       @default(IDLE)
+  // Tokens are AES-256-GCM encrypted at the application layer; never stored in plaintext.
+  accessToken   String
+  refreshToken  String?
+  // Gmail sync cursor — populated after the first successful sync (COM-20).
+  lastHistoryId String?
+  lastSyncedAt  DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("gmail_connections")
 }
