@@ -58,6 +58,75 @@ function extractBody(message: gmail_v1.Schema$Message): string {
 }
 
 export class GmailFetcherService {
+  
+  static async fetchMessageMetadata(userId: string, gmailMessageId: string): Promise<{ labelIds: string[] | null, snippet: string | null }> {
+    const connection = await prisma.gmailConnection.findUnique({
+      where: { userId },
+    });
+
+    if (!connection || connection.status !== 'CONNECTED') {
+      throw new Error('Gmail is not connected or revoked');
+    }
+
+    const oauth2Client = createOAuth2Client();
+    const accessToken = decryptToken(connection.accessToken);
+    let refreshToken: string | null = null;
+    if (connection.refreshToken) {
+      refreshToken = decryptToken(connection.refreshToken);
+    }
+
+    oauth2Client.setCredentials({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    let message;
+    try {
+      const res = await gmail.users.messages.get({
+        userId: 'me',
+        id: gmailMessageId,
+        format: 'metadata',
+      });
+      message = res.data;
+    } catch (err: unknown) {
+      if (err instanceof Error && 'code' in err && err.code === 401 && refreshToken) {
+        // Try to refresh token
+        try {
+          const { credentials } = await oauth2Client.refreshAccessToken();
+          if (credentials.access_token) {
+            await prisma.gmailConnection.update({
+              where: { userId },
+              data: {
+                accessToken: encryptToken(credentials.access_token),
+                ...(credentials.refresh_token ? { refreshToken: encryptToken(credentials.refresh_token) } : {})
+              }
+            });
+            oauth2Client.setCredentials(credentials);
+            const res = await gmail.users.messages.get({
+              userId: 'me',
+              id: gmailMessageId,
+              format: 'metadata',
+            });
+            message = res.data;
+          }
+        } catch (refreshErr) {
+          throw new Error('Failed to refresh Gmail token', { cause: refreshErr });
+        }
+      } else {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        throw new Error(`Gmail API request failed: ${errorMsg}`, { cause: err });
+      }
+    }
+
+    if (!message) {
+      throw new Error('Message not found');
+    }
+
+    return { labelIds: message.labelIds || null, snippet: message.snippet || null };
+  }
+
   static async fetchMessageBody(userId: string, gmailMessageId: string): Promise<string> {
     const connection = await prisma.gmailConnection.findUnique({
       where: { userId },

@@ -8,16 +8,16 @@ datasource db {
 }
 
 model User {
-  id         String   @id @default(uuid()) @db.Uuid
-  email      String   @unique
-  googleId   String?  @unique
-  name       String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique
+  googleId  String?  @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  applications     Application[]
-  gmailConnection  GmailConnection?
-  emails           Email[]
+  applications    Application[]
+  gmailConnection GmailConnection?
+  emails          Email[]
 
   @@map("users")
 }
@@ -33,8 +33,8 @@ enum ApplicationStatus {
 }
 
 model Application {
-  id              String            @id @default(uuid()) @db.Uuid
-  userId          String            @db.Uuid
+  id              String             @id @default(uuid()) @db.Uuid
+  userId          String             @db.Uuid
   companyName     String
   jobTitle        String?
   location        String?
@@ -42,11 +42,11 @@ model Application {
   userStatus      ApplicationStatus?
   userStatusSetAt DateTime?
   appliedAt       DateTime?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
-  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emails          Email[]
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emails Email[]
 
   @@index([userId])
   @@map("applications")
@@ -73,26 +73,27 @@ enum EmailProcessingState {
 }
 
 model Email {
-  id              String            @id @default(uuid()) @db.Uuid
-  userId          String            @db.Uuid
-  gmailMessageId  String            // stable Gmail message ID
-  threadId        String?           // Gmail thread ID; stored for future matching
-  subject         String?           // email subject header
-  sender          String?           // From header value
-  receivedAt      DateTime?         // message received timestamp
-  relevanceState  EmailRelevanceState @default(UNPROCESSED)
-  matchState      EmailMatchState     @default(UNMATCHED)
-  processingState EmailProcessingState @default(PENDING)
-  applicationId   String?           @db.Uuid  // nullable FK to Application
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  aiProcessingResult AIProcessingResult?
+  id                 String               @id @default(uuid()) @db.Uuid
+  userId             String               @db.Uuid
+  gmailMessageId     String // stable Gmail message ID
+  threadId           String? // Gmail thread ID; stored for future matching
+  subject            String? // email subject header
+  sender             String? // From header value
+  receivedAt         DateTime? // message received timestamp
+  relevanceState     EmailRelevanceState  @default(UNPROCESSED)
+  matchState         EmailMatchState      @default(UNMATCHED)
+  processingState    EmailProcessingState @default(PENDING)
+  applicationId      String?              @db.Uuid // nullable FK to Application
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
 
-  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  application     Application?      @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
 
-  @@unique([userId, gmailMessageId])   // idempotency constraint
+  @@unique([userId, gmailMessageId]) // idempotency constraint
   @@index([userId])
-  @@index([userId, relevanceState])    // future AI processing queue queries
+  @@index([userId, relevanceState]) // future AI processing queue queries
   @@map("emails")
 }
 
@@ -132,4 +133,74 @@ model Session {
   expire DateTime @db.Timestamp(6)
 
   @@map("session")
+}
+
+enum AIProcessingStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum AIRelevanceDecision {
+  RELEVANT
+  IRRELEVANT
+  UNCERTAIN
+}
+
+enum EmailCategory {
+  RECRUITER
+  INTERVIEW
+  ASSESSMENT
+  OFFER
+  REJECTION
+  FOLLOW_UP
+  NEWSLETTER
+  SPAM
+}
+
+model AIProcessingResult {
+  id                String               @id @default(uuid()) @db.Uuid
+  emailId           String               @unique @db.Uuid
+  provider          String
+  model             String
+  contractVersion   String
+  processingStatus  AIProcessingStatus   @default(PENDING)
+  relevanceDecision AIRelevanceDecision?
+  category          EmailCategory?
+  confidence        Float?
+  deterministic     Boolean              @default(false)
+
+  companyName        String?
+  jobTitle           String?
+  recruiterName      String?
+  recruiterEmail     String?
+  interviewStage     String?
+  interviewType      String?
+  interviewDate      String?
+  interviewTime      String?
+  assessmentInfo     String?
+  assessmentDeadline String?
+  offerInfo          String?
+  rejectionInfo      String?
+  actionRequired     Boolean?
+  requestedAction    String?
+  actionDeadline     String?
+  followUpRequired   Boolean?
+  followUpDate       String?
+
+  extractionConfidence Float?
+  provenance           String?
+
+  errorCategory String?
+  errorDetails  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  email Email @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@index([emailId])
+  @@index([processingStatus])
+  @@map("ai_processing_results")
 }

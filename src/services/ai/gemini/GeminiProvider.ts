@@ -3,7 +3,8 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { z } from 'zod';
 import { 
   RelevanceClassifier, 
-  EmailAnalyzer, 
+  EmailAnalyzer,
+  RelevanceClassifierInput,
   EmailRelevanceSchema, 
   EmailRelevanceResult,
   JobExtractionSchema,
@@ -16,21 +17,22 @@ import {
   SchemaValidationFailure 
 } from '../errors';
 
-// Deterministic, versioned prompts
 const PROMPTS = {
   [AI_CONTRACT_VERSIONS.CLASSIFICATION]: `
 You are an AI assistant that determines if an email is related to a user's job search.
-Analyze the following email body.
-If the email is an application confirmation, interview invitation, rejection, or recruiter outreach, classify it as job search related.
-Otherwise, classify it as not related.
-Return your decision as a structured JSON object.
+Analyze the provided email metadata (sender, subject, labels, snippet).
+Classify if it is RELEVANT, IRRELEVANT, or UNCERTAIN.
+Provide a confidence score (0 to 1).
+If RELEVANT, categorize it into one of: RECRUITER, INTERVIEW, ASSESSMENT, OFFER, REJECTION, FOLLOW_UP, NEWSLETTER, SPAM.
+Return your decision as a structured JSON object according to the schema.
   `.trim(),
 
   [AI_CONTRACT_VERSIONS.EXTRACTION]: `
-You are an AI assistant that extracts structured job application data from an email.
-Analyze the following email body and extract the company name, job title, and current status.
-The status must be one of: APPLIED, INTERVIEW, OFFER, REJECTED, UNKNOWN.
-Return your findings as a structured JSON object.
+You are an AI assistant that extracts structured job application data from an email body.
+Extract all requested fields. If information is missing, use null.
+Do not invent or assume information.
+Provide an extractionConfidence score (0 to 1).
+Return your findings as a structured JSON object according to the schema.
   `.trim()
 };
 
@@ -38,6 +40,7 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
   private client: GoogleGenAI;
   private relevanceModel: string;
   private extractionModel: string;
+  private static instance: GeminiProvider;
 
   constructor() {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -49,6 +52,13 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
     this.relevanceModel = process.env.GEMINI_RELEVANCE_MODEL || 'gemini-2.5-flash-lite';
     this.extractionModel = process.env.GEMINI_EXTRACTION_MODEL || 'gemini-2.5-flash';
   }
+  
+  static getInstance(): GeminiProvider {
+    if (!this.instance) {
+      this.instance = new GeminiProvider();
+    }
+    return this.instance;
+  }
 
   private mapError(err: unknown): never {
     if (err instanceof TerminalAIError || err instanceof RetryableAIError) {
@@ -57,8 +67,6 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
 
     const errorMsg = err instanceof Error ? err.message : String(err);
     
-    // Classify Gemini-specific errors based on message or code
-    // @google/genai might throw generic errors for 429, 503, etc.
     const retryableKeywords = ['429', '503', '504', 'timeout', 'quota', 'rate limit'];
     const isRetryable = retryableKeywords.some(kw => errorMsg.toLowerCase().includes(kw));
 
@@ -78,7 +86,6 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const jsonSchema = zodToJsonSchema(schema as any, { target: 'jsonSchema7' }) as any;
-      // Google GenAI expects type inside schema, without top-level $schema
       delete jsonSchema.$schema;
 
       const response = await this.client.models.generateContent({
@@ -88,7 +95,7 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
           systemInstruction,
           responseMimeType: 'application/json',
           responseSchema: jsonSchema,
-          temperature: 0.1, // low temperature for structured deterministic extraction
+          temperature: 0.1,
         }
       });
 
@@ -118,12 +125,13 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
     }
   }
 
-  async classifyRelevance(emailBody: string): Promise<{ version: string; data: EmailRelevanceResult }> {
+  async classifyRelevance(input: RelevanceClassifierInput): Promise<{ version: string; data: EmailRelevanceResult }> {
     const version = AI_CONTRACT_VERSIONS.CLASSIFICATION;
+    const content = JSON.stringify(input);
     const data = await this.generateStructuredOutput(
       this.relevanceModel,
       PROMPTS[version],
-      emailBody,
+      content,
       EmailRelevanceSchema
     );
 
@@ -140,5 +148,17 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
     );
 
     return { version, data };
+  }
+  
+  getProviderName(): string {
+    return 'gemini';
+  }
+  
+  getRelevanceModel(): string {
+    return this.relevanceModel;
+  }
+  
+  getExtractionModel(): string {
+    return this.extractionModel;
   }
 }

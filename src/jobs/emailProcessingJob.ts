@@ -1,7 +1,6 @@
 import { getQueue } from '../services/queue';
 import { prisma } from '../db/prisma';
-import { GmailFetcherService } from '../services/gmailFetcher';
-import { AIProcessorStub } from '../services/aiProcessorStub';
+import { EmailAIPipeline } from '../services/ai/pipeline';
 
 export const EMAIL_PROCESSING_JOB = 'email-processing-job';
 
@@ -35,21 +34,7 @@ export async function startEmailProcessingWorker() {
     });
 
     try {
-      const email = await prisma.email.findFirst({
-        where: { id: emailId, userId }
-      });
-
-      if (!email) {
-        // Terminal failure: Email doesn't exist or isn't owned by this user
-        console.warn(`Terminal failure: Email ${emailId} not found for user ${userId}`);
-        return;
-      }
-
-      // Fetch secure bounded body
-      const body = await GmailFetcherService.fetchMessageBody(userId, email.gmailMessageId);
-      
-      // Pass to AI pipeline (stubbed for now)
-      await AIProcessorStub.processEmailBody(userId, emailId, body);
+      await EmailAIPipeline.processEmail(userId, emailId);
 
       await prisma.email.updateMany({
         where: { id: emailId, userId },
