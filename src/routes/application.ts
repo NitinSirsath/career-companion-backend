@@ -1,11 +1,11 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { CreateApplicationRequestSchema } from '../contracts';
 import { ApplicationService } from '../services/application';
-import { developmentAuthMiddleware } from '../middleware/auth';
+import { requireAuth } from '../middleware/auth';
 
 const router = Router();
 
-router.use(developmentAuthMiddleware);
+router.use(requireAuth);
 
 router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {

@@ -52,8 +52,6 @@ model Application {
   @@map("applications")
 }
 
-// --- Email Ingestion (COM-20) ---
-
 enum EmailRelevanceState {
   UNPROCESSED
   RELEVANT
@@ -67,6 +65,13 @@ enum EmailMatchState {
   IGNORED
 }
 
+enum EmailProcessingState {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 model Email {
   id              String            @id @default(uuid()) @db.Uuid
   userId          String            @db.Uuid
@@ -77,6 +82,7 @@ model Email {
   receivedAt      DateTime?         // message received timestamp
   relevanceState  EmailRelevanceState @default(UNPROCESSED)
   matchState      EmailMatchState     @default(UNMATCHED)
+  processingState EmailProcessingState @default(PENDING)
   applicationId   String?           @db.Uuid  // nullable FK to Application
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
@@ -89,8 +95,6 @@ model Email {
   @@index([userId, relevanceState])    // future AI processing queue queries
   @@map("emails")
 }
-
-// --- Gmail Integration (COM-19) ---
 
 enum GmailConnectionStatus {
   NOT_CONNECTED
@@ -110,10 +114,8 @@ model GmailConnection {
   gmailEmail    String
   status        GmailConnectionStatus @default(NOT_CONNECTED)
   syncStatus    GmailSyncStatus       @default(IDLE)
-  // Tokens are AES-256-GCM encrypted at the application layer; never stored in plaintext.
   accessToken   String
   refreshToken  String?
-  // Gmail sync cursor — populated after the first successful sync (COM-20).
   lastHistoryId String?
   lastSyncedAt  DateTime?
   createdAt     DateTime              @default(now())
@@ -122,4 +124,12 @@ model GmailConnection {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("gmail_connections")
+}
+
+model Session {
+  sid    String   @id @db.VarChar
+  sess   Json     @db.Json
+  expire DateTime @db.Timestamp(6)
+
+  @@map("session")
 }

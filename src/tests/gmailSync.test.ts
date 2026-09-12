@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { extractHeaders } from '../services/gmailSync';
+
+vi.mock('../jobs/emailProcessingJob', () => ({
+  enqueueEmailProcessingJob: vi.fn().mockResolvedValue(undefined),
+}));
 
 describe('GmailSyncService Helpers', () => {
   describe('extractHeaders', () => {

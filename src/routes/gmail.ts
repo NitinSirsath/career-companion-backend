@@ -18,7 +18,7 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { google } from 'googleapis';
-import { developmentAuthMiddleware } from '../middleware/auth';
+import { requireAuth } from '../middleware/auth';
 import { encryptToken, decryptToken, loadEncryptionKey } from '../utils/gmailTokenEncryption';
 import { prisma } from '../db/prisma';
 
@@ -59,7 +59,7 @@ function getFrontendUrl(): string {
 
 // ─── Protect all routes with dev auth ───────────────────────────────────────
 
-router.use(developmentAuthMiddleware);
+router.use(requireAuth);
 
 // ─── GET /api/gmail/status ───────────────────────────────────────────────────
 

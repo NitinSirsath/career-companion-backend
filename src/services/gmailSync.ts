@@ -143,7 +143,7 @@ export class GmailSyncService {
 
           const { subject, sender, receivedAt } = extractHeaders(payload?.headers);
 
-          await prisma.email.upsert({
+          const emailRecord = await prisma.email.upsert({
             where: {
               userId_gmailMessageId: {
                 userId,
@@ -158,10 +158,15 @@ export class GmailSyncService {
               sender,
               receivedAt,
               relevanceState: 'UNPROCESSED',
-              matchState: 'UNMATCHED'
+              matchState: 'UNMATCHED',
+              processingState: 'PENDING'
             },
             update: {} // No-op update if it somehow conflicts during race
           });
+
+          // Enqueue for processing
+          const { enqueueEmailProcessingJob } = await import('../jobs/emailProcessingJob');
+          await enqueueEmailProcessingJob(userId, emailRecord.id);
 
           messagesIngested++;
         }

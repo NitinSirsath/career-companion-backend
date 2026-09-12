@@ -37,7 +37,7 @@ describe('Application API (COM-13)', () => {
       expect(res.body).toEqual({
         error: {
           code: 'UNAUTHORIZED',
-          message: 'Missing X-Development-User header'
+          message: 'Not authenticated'
         }
       });
     });

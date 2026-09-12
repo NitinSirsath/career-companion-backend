@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import session from 'express-session';
+import pgSession from 'connect-pg-simple';
+import { Pool } from 'pg';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -14,6 +17,32 @@ app.use(express.json());
 // OAUTH_STATE_COOKIE_SECRET is a required env var when Gmail OAuth routes are used.
 app.use(cookieParser(process.env.OAUTH_STATE_COOKIE_SECRET ?? 'dev-cookie-secret-change-in-prod'));
 
+// --- Session Setup ---
+const PgStore = pgSession(session);
+const dbPool = new Pool({
+  connectionString: process.env.DATABASE_URL
+});
+
+app.use(
+  session({
+    store: new PgStore({
+      pool: dbPool,
+      tableName: 'session'
+    }),
+    secret: process.env.SESSION_SECRET || 'dev-session-secret-change-in-prod',
+    resave: false,
+    saveUninitialized: false,
+    name: 'cc_session',
+    cookie: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+    }
+  })
+);
+
+import { authRouter } from './routes/auth';
 import { applicationRouter } from './routes/application';
 import { gmailRouter } from './routes/gmail';
 import { errorHandler } from './middleware/error';
@@ -22,12 +51,18 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'Career Companion Backend is healthy.' });
 });
 
+app.use('/api/auth', authRouter);
 app.use('/api/applications', applicationRouter);
 app.use('/api/gmail', gmailRouter);
 
 app.use(errorHandler);
 
+import { startEmailProcessingWorker } from './jobs/emailProcessingJob';
+
 if (process.env.NODE_ENV !== 'test') {
+  startEmailProcessingWorker().catch(err => {
+    console.error('Failed to start worker', err);
+  });
   app.listen(port, () => {
     console.log(`Backend server is running on port ${port}`);
   });

@@ -17,6 +17,10 @@ import { app } from '../index';
 import { prisma } from '../db/prisma';
 import { encryptToken } from '../utils/gmailTokenEncryption';
 
+vi.mock('../jobs/emailProcessingJob', () => ({
+  enqueueEmailProcessingJob: vi.fn().mockResolvedValue(undefined),
+}));
+
 // ─── Test encryption key ───────────────────────────────────────────────────
 const TEST_ENCRYPTION_KEY = 'b'.repeat(64);
 const TEST_COOKIE_SECRET = 'test-cookie-secret-for-vitest';
@@ -538,6 +542,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
 
     it('isolates messages between users', async () => {
       // Create another user
+      await prisma.user.deleteMany({ where: { email: 'other@test.local' } });
       const otherUser = await prisma.user.create({
         data: { email: 'other@test.local' },
       });
