@@ -3,6 +3,7 @@ import { GeminiProvider } from './gemini/GeminiProvider';
 import { GmailFetcherService } from '../gmailFetcher';
 import { AIProviderError } from './errors';
 import { AIRelevanceDecision, EmailCategory } from '@prisma/client';
+import { MatcherService } from '../matcher';
 
 export class EmailAIPipeline {
   private static getConfidenceThreshold(): number {
@@ -151,6 +152,9 @@ export class EmailAIPipeline {
         }
       });
       
+      // 5. Match Application and Infer State
+      await MatcherService.matchEmailToApplication(email.id);
+
     } catch (err) {
       
       const errorCategory = err instanceof AIProviderError ? err.name : 'UnknownError';

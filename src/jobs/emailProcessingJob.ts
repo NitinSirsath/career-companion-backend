@@ -24,8 +24,16 @@ export async function enqueueEmailProcessingJob(userId: string, emailId: string)
 export async function startEmailProcessingWorker() {
   const queue = await getQueue();
 
-  await queue.work(EMAIL_PROCESSING_JOB, async (job: { data: EmailProcessingJobData }) => {
+  await queue.work(EMAIL_PROCESSING_JOB, async (job: { id: string, data: EmailProcessingJobData }) => {
     const { userId, emailId } = job.data;
+    const startTime = Date.now();
+    
+    console.log(JSON.stringify({
+      event: 'job_started',
+      jobId: job.id,
+      emailId,
+      timestamp: new Date().toISOString()
+    }));
     
     // Update processing state
     await prisma.email.updateMany({
@@ -40,11 +48,31 @@ export async function startEmailProcessingWorker() {
         where: { id: emailId, userId },
         data: { processingState: 'COMPLETED' }
       });
+      
+      const durationMs = Date.now() - startTime;
+      console.log(JSON.stringify({
+        event: 'job_completed',
+        jobId: job.id,
+        emailId,
+        durationMs,
+        timestamp: new Date().toISOString()
+      }));
     } catch (err) {
       await prisma.email.updateMany({
         where: { id: emailId, userId },
         data: { processingState: 'FAILED' }
       });
+      
+      const durationMs = Date.now() - startTime;
+      const errorCategory = err instanceof Error ? err.name : 'UnknownError';
+      console.error(JSON.stringify({
+        event: 'job_failed',
+        jobId: job.id,
+        emailId,
+        errorCategory,
+        durationMs,
+        timestamp: new Date().toISOString()
+      }));
       // Rethrow to let pg-boss handle retry/dead-letter
       throw err;
     }

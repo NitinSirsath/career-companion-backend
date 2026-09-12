@@ -45,8 +45,10 @@ model Application {
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emails Email[]
+  user    User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emails  Email[]
+  events  ApplicationEvent[]
+  actions Action[]
 
   @@index([userId])
   @@map("applications")
@@ -74,27 +76,35 @@ enum EmailProcessingState {
 
 model Email {
   aiProcessingResult AIProcessingResult?
-  id                 String               @id @default(uuid()) @db.Uuid
-  userId             String               @db.Uuid
+  id                 String                   @id @default(uuid()) @db.Uuid
+  userId             String                   @db.Uuid
   gmailMessageId     String // stable Gmail message ID
   threadId           String? // Gmail thread ID; stored for future matching
   subject            String? // email subject header
   sender             String? // From header value
   receivedAt         DateTime? // message received timestamp
-  relevanceState     EmailRelevanceState  @default(UNPROCESSED)
-  matchState         EmailMatchState      @default(UNMATCHED)
-  processingState    EmailProcessingState @default(PENDING)
-  applicationId      String?              @db.Uuid // nullable FK to Application
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
+  relevanceState     EmailRelevanceState      @default(UNPROCESSED)
+  matchState         EmailMatchState          @default(UNMATCHED)
+  matchConfirmedBy   MatchConfirmationSource?
+  processingState    EmailProcessingState     @default(PENDING)
+  applicationId      String?                  @db.Uuid // nullable FK to Application
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
 
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  application Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application Application?       @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  events      ApplicationEvent[]
+  actions     Action[]
 
   @@unique([userId, gmailMessageId]) // idempotency constraint
   @@index([userId])
   @@index([userId, relevanceState]) // future AI processing queue queries
   @@map("emails")
+}
+
+enum MatchConfirmationSource {
+  AI_AUTO
+  USER_CONFIRMED
 }
 
 enum GmailConnectionStatus {
@@ -203,4 +213,44 @@ model AIProcessingResult {
   @@index([emailId])
   @@index([processingStatus])
   @@map("ai_processing_results")
+}
+
+model ApplicationEvent {
+  id            String             @id @default(uuid()) @db.Uuid
+  applicationId String             @db.Uuid
+  emailId       String?            @db.Uuid // nullable to allow manual events later
+  type          String // e.g., 'STATE_INFERRED', 'NOTE_ADDED'
+  oldState      ApplicationStatus?
+  newState      ApplicationStatus?
+  description   String?
+  provenance    String? // to track why this event was created
+
+  createdAt DateTime @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  email       Email?      @relation(fields: [emailId], references: [id], onDelete: SetNull)
+
+  @@index([applicationId])
+  @@index([emailId])
+  @@map("application_events")
+}
+
+model Action {
+  id            String    @id @default(uuid()) @db.Uuid
+  applicationId String    @db.Uuid
+  emailId       String?   @db.Uuid
+  type          String // e.g., 'ACTION_REQUIRED', 'FOLLOW_UP_REQUIRED'
+  description   String? // e.g. "Send thank you note"
+  deadline      DateTime?
+  status        String    @default("PENDING") // e.g., 'PENDING', 'COMPLETED', 'DISMISSED'
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  email       Email?      @relation(fields: [emailId], references: [id], onDelete: SetNull)
+
+  @@index([applicationId])
+  @@index([emailId])
+  @@map("actions")
 }

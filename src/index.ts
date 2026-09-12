@@ -58,14 +58,31 @@ app.use('/api/gmail', gmailRouter);
 app.use(errorHandler);
 
 import { startEmailProcessingWorker } from './jobs/emailProcessingJob';
+import { stopQueue } from './services/queue';
+import { prisma } from './db/prisma';
 
 if (process.env.NODE_ENV !== 'test') {
   startEmailProcessingWorker().catch(err => {
     console.error('Failed to start worker', err);
   });
-  app.listen(port, () => {
+  
+  const server = app.listen(port, () => {
     console.log(`Backend server is running on port ${port}`);
   });
+
+  const shutdown = async () => {
+    console.log('Shutting down server...');
+    server.close(async () => {
+      console.log('HTTP server closed.');
+      await stopQueue();
+      await prisma.$disconnect();
+      console.log('Resources released.');
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
 
 export { app };
