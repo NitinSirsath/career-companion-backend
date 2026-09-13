@@ -86,7 +86,7 @@ export class MatcherService {
       .trim();
   }
 
-  private static async applyMatch(
+  public static async applyMatch(
     emailId: string, 
     applicationId: string, 
     aiResult: AIProcessingResult,
@@ -179,6 +179,64 @@ export class MatcherService {
         });
       }
     }
+  }
+
+  public static async getAmbiguousMatches(userId: string) {
+    return prisma.email.findMany({
+      where: {
+        userId,
+        matchState: EmailMatchState.AMBIGUOUS
+      },
+      include: {
+        aiProcessingResult: true
+      },
+      orderBy: {
+        receivedAt: 'desc'
+      }
+    });
+  }
+
+  public static async resolveAmbiguousMatch(userId: string, emailId: string, applicationId: string | null): Promise<void> {
+    const email = await prisma.email.findUnique({
+      where: { id: emailId, userId }, // isolation check
+      include: { aiProcessingResult: true }
+    });
+
+    if (!email) {
+      return; // Handled by route as 404/403
+    }
+
+    if (email.matchState !== EmailMatchState.AMBIGUOUS) {
+      // Already resolved or not ambiguous
+      return;
+    }
+
+    if (!applicationId) {
+      // No match
+      await prisma.email.update({
+        where: { id: emailId },
+        data: {
+          matchState: EmailMatchState.IGNORED,
+          matchConfirmedBy: MatchConfirmationSource.USER_CONFIRMED
+        }
+      });
+      return;
+    }
+
+    // Ownership check for application
+    const app = await prisma.application.findUnique({
+      where: { id: applicationId, userId } // isolation check
+    });
+
+    if (!app) {
+      throw new Error('APPLICATION_NOT_FOUND');
+    }
+
+    if (!email.aiProcessingResult) {
+      throw new Error('NO_AI_RESULT');
+    }
+
+    await this.applyMatch(email.id, applicationId, email.aiProcessingResult, MatchConfirmationSource.USER_CONFIRMED);
   }
 
   private static inferState(aiResult: AIProcessingResult): ApplicationStatus | null {
