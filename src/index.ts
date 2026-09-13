@@ -46,6 +46,7 @@ import { authRouter } from './routes/auth';
 import { applicationRouter } from './routes/application';
 import { gmailRouter } from './routes/gmail';
 import { emailRouter } from './routes/email';
+import { actionRouter } from './routes/action';
 import { errorHandler } from './middleware/error';
 
 app.get('/health', (req, res) => {
@@ -56,6 +57,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/applications', applicationRouter);
 app.use('/api/gmail', gmailRouter);
 app.use('/api/emails', emailRouter);
+app.use('/api/actions', actionRouter);
 
 app.use(errorHandler);
 
