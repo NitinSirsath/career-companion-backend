@@ -14,6 +14,10 @@ export async function getQueue(): Promise<any> {
     boss.on('error', (error: any) => console.error('[pg-boss] error', error));
 
     await boss.start();
+    
+    // Ensure queues exist (idempotent)
+    await boss.createQueue('email-processing-job');
+    await boss.createQueue('discord-notification-job');
   }
   return boss;
 }

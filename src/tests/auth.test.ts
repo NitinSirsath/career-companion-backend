@@ -49,7 +49,7 @@ describe('Google OAuth Sign-In (COM-24)', () => {
 
   afterAll(async () => {
     if (testUser) {
-      await prisma.user.delete({ where: { id: testUser.id } }).catch(() => {});
+      await prisma.user.deleteMany({ where: { id: testUser.id } });
     }
   });
 
