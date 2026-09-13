@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { app } from '../index';
@@ -113,6 +114,7 @@ describe('Action API (COM-33)', () => {
         .set('X-Development-User', userA.email)
         .send({ status: 'COMPLETED' });
       
+      if (res.status !== 200) console.log(res.body);
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('COMPLETED');
       

@@ -1,5 +1,6 @@
 import { prisma } from '../db/prisma';
 import { ApplicationStatus, EmailMatchState, AIProcessingResult, MatchConfirmationSource } from '@prisma/client';
+import { enqueueNotificationJob } from '../jobs/notificationJob';
 
 export class MatcherService {
   /**
@@ -168,7 +169,7 @@ export class MatcherService {
 
         // Only create if we have a valid deadline or if we don't care about NaN.
         // Let's just create it.
-        await prisma.action.create({
+        const createdAction = await prisma.action.create({
           data: {
             applicationId,
             emailId: email.id,
@@ -177,6 +178,13 @@ export class MatcherService {
             deadline: deadline && !isNaN(deadline.getTime()) ? deadline : null
           }
         });
+        
+        try {
+          // Fire-and-forget enqueue to avoid failing the transaction/process
+          await enqueueNotificationJob(createdAction.id);
+        } catch (jobErr) {
+          console.error('[Matcher] Failed to enqueue notification job', jobErr);
+        }
       }
     }
   }

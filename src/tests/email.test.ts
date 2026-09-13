@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { app } from '../index';
@@ -80,6 +81,7 @@ describe('Email API (COM-32)', () => {
         .get('/api/emails/ambiguous')
         .set('X-Development-User', 'user-b-email@test.local');
 
+      if (res.status !== 200) console.log(res.body);
       expect(res.status).toBe(200);
       expect(res.body.length).toBe(0);
     });
@@ -97,6 +99,7 @@ describe('Email API (COM-32)', () => {
         .set('X-Development-User', 'user-a-email@test.local')
         .send({ applicationId: appB.id });
 
+      if (res.status !== 403) console.log(res.body);
       expect(res.status).toBe(403);
     });
 
@@ -106,6 +109,7 @@ describe('Email API (COM-32)', () => {
         .set('X-Development-User', 'user-a-email@test.local')
         .send({ applicationId: appA.id });
 
+      if (res.status !== 200) console.log(res.body);
       expect(res.status).toBe(200);
 
       const email = await prisma.email.findUnique({ where: { id: ambiguousEmail.id } });

@@ -62,12 +62,17 @@ app.use('/api/actions', actionRouter);
 app.use(errorHandler);
 
 import { startEmailProcessingWorker } from './jobs/emailProcessingJob';
+import { startNotificationWorker } from './jobs/notificationJob';
 import { stopQueue } from './services/queue';
 import { prisma } from './db/prisma';
 
 if (process.env.NODE_ENV !== 'test') {
   startEmailProcessingWorker().catch(err => {
     console.error('Failed to start worker', err);
+  });
+  
+  startNotificationWorker().catch(err => {
+    console.error('Failed to start notification worker', err);
   });
   
   const server = app.listen(port, () => {

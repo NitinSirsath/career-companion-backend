@@ -43,14 +43,15 @@ router.get('/ambiguous', async (req: Request, res: Response, next: NextFunction)
 router.post('/:id/resolve', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.auth!.user.id;
-    const emailId = req.params.id;
+    const emailId = req.params.id as string;
     const data = ResolveAmbiguityRequestSchema.parse(req.body);
 
     try {
       await MatcherService.resolveAmbiguousMatch(userId, emailId, data.applicationId);
       res.status(200).json({ success: true });
-    } catch (e: any) {
-      if (e.message === 'APPLICATION_NOT_FOUND') {
+    } catch (e) {
+      const err = e as Error;
+      if (err.message === 'APPLICATION_NOT_FOUND') {
         res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Application not found or access denied.' } });
       } else {
         throw e;

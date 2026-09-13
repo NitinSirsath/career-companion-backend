@@ -1,5 +1,5 @@
 import { prisma } from '../db/prisma';
-import { ActionWithContextResponse, UpdateActionRequest } from '../contracts';
+import { ActionWithContextResponse } from '../contracts';
 
 export class ActionService {
   static async getUserActions(userId: string, status?: string): Promise<ActionWithContextResponse[]> {

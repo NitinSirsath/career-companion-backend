@@ -29,7 +29,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.auth!.user.id;
-    const actionId = req.params.id;
+    const actionId = req.params.id as string;
     const data = UpdateActionRequestSchema.parse(req.body);
 
     const updated = await ActionService.updateActionStatus(userId, actionId, data.status);
