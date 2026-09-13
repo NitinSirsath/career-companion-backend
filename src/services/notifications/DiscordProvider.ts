@@ -31,13 +31,22 @@ export class DiscordProvider implements NotificationProvider {
         embeds: [embed],
       };
 
-      const response = await fetch(webhookUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(message),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 seconds timeout
+
+      let response: Response;
+      try {
+        response = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(message),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (response.ok || response.status === 204) {
         return { success: true, retryable: false };
@@ -58,11 +67,17 @@ export class DiscordProvider implements NotificationProvider {
       
     } catch (error) {
       // Network errors (e.g. timeout, DNS failure) are generally retryable
+      let errorCategory = 'NetworkError';
+      if (error instanceof Error && error.name === 'AbortError') {
+        errorCategory = 'TimeoutError';
+      }
+
       return {
         success: false,
         retryable: true,
-        errorCategory: 'NetworkError',
-        errorDetails: error instanceof Error ? error.message : 'Unknown network error',
+        errorCategory,
+        // Sanitized stable string to prevent leaking sensitive info from raw error messages
+        errorDetails: 'Request failed due to a network error or timeout.',
       };
     }
   }

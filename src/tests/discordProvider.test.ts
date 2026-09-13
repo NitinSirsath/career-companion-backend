@@ -56,13 +56,26 @@ describe('DiscordProvider', () => {
     // Webhook secret is never logged (we just check the provider doesn't output it)
   });
 
-  it('handles network failure as retryable', async () => {
-    fetchMock.mockRejectedValueOnce(new Error('fetch failed'));
+  it('handles network failure as retryable and sanitizes error details', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('Sensitive detailed fetch failure internal url https://xyz'));
 
     const result = await provider.send(validPayload);
     expect(result.success).toBe(false);
     expect(result.retryable).toBe(true);
     expect(result.errorCategory).toBe('NetworkError');
+    expect(result.errorDetails).toBe('Request failed due to a network error or timeout.');
+  });
+
+  it('handles timeout (AbortError) as retryable', async () => {
+    const abortError = new Error('The operation was aborted');
+    abortError.name = 'AbortError';
+    fetchMock.mockRejectedValueOnce(abortError);
+
+    const result = await provider.send(validPayload);
+    expect(result.success).toBe(false);
+    expect(result.retryable).toBe(true);
+    expect(result.errorCategory).toBe('TimeoutError');
+    expect(result.errorDetails).toBe('Request failed due to a network error or timeout.');
   });
 
   it('handles HTTP 429 as retryable', async () => {
