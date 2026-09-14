@@ -8,10 +8,28 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// ── Startup configuration warnings ───────────────────────────────────────────
+// These surface missing required env vars at startup rather than at request time.
+if (!process.env.SESSION_SECRET) {
+  console.warn(
+    '[Config] SESSION_SECRET is not set — using an insecure dev default. ' +
+      'Set SESSION_SECRET in .env before running in any shared or production environment.'
+  );
+}
+if (!process.env.FRONTEND_URL) {
+  console.warn(
+    '[Config] FRONTEND_URL is not set — defaulting to http://localhost:5173 (Vite dev server). ' +
+      'Set FRONTEND_URL in .env for production.'
+  );
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.use(cors({ credentials: true, origin: process.env.FRONTEND_URL ?? 'http://localhost:3000' }));
+// Default to the Vite dev server port so CORS works in local development
+// without requiring FRONTEND_URL to be set.
+app.use(cors({ credentials: true, origin: process.env.FRONTEND_URL ?? 'http://localhost:5173' }));
 app.use(express.json());
 // cookie-parser with a secret enables signed cookies used for OAuth state (CSRF protection).
 // OAUTH_STATE_COOKIE_SECRET is a required env var when Gmail OAuth routes are used.
