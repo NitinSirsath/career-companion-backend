@@ -161,14 +161,16 @@ router.get('/callback', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
+import { requireAuth } from '../middleware/auth';
+
+router.get('/me', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!req.session?.userId) {
+    if (!req.auth?.user) {
       return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } });
     }
 
     const user = await prisma.user.findUnique({
-      where: { id: req.session.userId },
+      where: { id: req.auth.user.id },
       select: {
         id: true,
         email: true,
