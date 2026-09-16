@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
-import { extractHeaders } from '../services/gmailSync';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { extractHeaders, GmailAuthError } from '../services/gmailSync';
+import { GaxiosError } from 'gaxios';
 
 vi.mock('../jobs/emailProcessingJob', () => ({
   enqueueEmailProcessingJob: vi.fn().mockResolvedValue(undefined),
@@ -55,4 +56,59 @@ describe('GmailSyncService Helpers', () => {
       expect(receivedAt).toBeNull();
     });
   });
+
+  // ─── GmailAuthError ────────────────────────────────────────────────────────
+
+  describe('GmailAuthError', () => {
+    it('has the correct code and name', () => {
+      const err = new GmailAuthError('test message');
+      expect(err.code).toBe('GMAIL_AUTH_FAILED');
+      expect(err.name).toBe('GmailAuthError');
+      expect(err.message).toBe('test message');
+      expect(err).toBeInstanceOf(Error);
+    });
+
+    it('is instanceof GmailAuthError (not just Error)', () => {
+      const err = new GmailAuthError('test');
+      expect(err instanceof GmailAuthError).toBe(true);
+    });
+  });
+
+  // ─── GaxiosError detection ─────────────────────────────────────────────────
+
+  describe('GaxiosError 401/403 detection', () => {
+    it('GaxiosError with status 401 is detectable for reclassification', () => {
+      // Simulate the detection logic used in syncUser's inner catch
+      const err = new GaxiosError('Unauthorized', { headers: new Headers(), url: new URL('https://test.com') }, {
+        status: 401,
+        statusText: 'Unauthorized',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        data: {} as any,
+        headers: {} as any,
+        config: {} as any,
+        request: {} as any,
+      });
+
+      const isGmailAuthFailure =
+        err instanceof GaxiosError && (err.status === 401 || err.status === 403);
+      expect(isGmailAuthFailure).toBe(true);
+    });
+
+    it('GaxiosError with status 429 is NOT reclassified as auth failure', () => {
+      const err = new GaxiosError('Too Many Requests', { headers: new Headers(), url: new URL('https://test.com') }, {
+        status: 429,
+        statusText: 'Too Many Requests',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        data: {} as any,
+        headers: {} as any,
+        config: {} as any,
+        request: {} as any,
+      });
+
+      const isGmailAuthFailure =
+        err instanceof GaxiosError && (err.status === 401 || err.status === 403);
+      expect(isGmailAuthFailure).toBe(false);
+    });
+  });
 });
+

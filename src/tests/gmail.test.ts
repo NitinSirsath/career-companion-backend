@@ -487,7 +487,67 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       const count = await prisma.email.count({ where: { userId: testUser.id } });
       expect(count).toBe(2);
     });
+
+    it('returns 503 GMAIL_AUTH_FAILED when Gmail API returns 401 (root cause fix)', async () => {
+      // Simulate expired/invalid access token by making messages.list reject with
+      // a GaxiosError status 401 — the exact failure observed in backend.log.
+      const { GaxiosError } = await import('gaxios');
+      const { google } = await import('googleapis');
+
+      const mockGmail = vi.mocked(google.gmail);
+      const original = mockGmail.getMockImplementation();
+
+      mockGmail.mockReturnValueOnce({
+        users: {
+          getProfile: vi.fn(),
+          messages: {
+            list: vi.fn().mockRejectedValueOnce(
+              new GaxiosError('Request had invalid authentication credentials', { headers: new Headers(), url: new URL('https://test.com') }, {
+                status: 401,
+                statusText: 'Unauthorized',
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                data: { error: { code: 401, message: 'Invalid Credentials' } } as any,
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                headers: {} as any,
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                config: {} as any,
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                request: {} as any,
+              })
+            ),
+            get: vi.fn(),
+          },
+        },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+
+      await prisma.gmailConnection.create({
+        data: {
+          userId: testUser.id,
+          gmailEmail: 'testuser@gmail.com',
+          status: 'CONNECTED',
+          syncStatus: 'IDLE',
+          accessToken: encryptToken('expired_access_token'),
+          refreshToken: null, // no refresh token — cannot auto-refresh
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/gmail/sync')
+        .set('X-Development-User', testUser.email);
+
+      expect(res.status).toBe(503);
+      expect(res.body.error.code).toBe('GMAIL_AUTH_FAILED');
+
+      // Connection should be marked FAILED
+      const connection = await prisma.gmailConnection.findUnique({ where: { userId: testUser.id } });
+      expect(connection?.syncStatus).toBe('FAILED');
+
+      // Restore original mock for subsequent tests
+      if (original) mockGmail.mockImplementation(original);
+    });
   });
+
 
   // ─── GET /api/gmail/messages ───────────────────────────────────────────────
 

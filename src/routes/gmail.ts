@@ -298,7 +298,7 @@ export const gmailRouter = router;
 
 // ─── POST /api/gmail/sync ────────────────────────────────────────────────────
 
-import { GmailSyncService } from '../services/gmailSync';
+import { GmailSyncService, GmailAuthError, SyncInProgressError } from '../services/gmailSync';
 
 router.post('/sync', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -319,9 +319,25 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
     const result = await GmailSyncService.syncUser(userId);
     return res.status(200).json(result);
   } catch (err) {
+    if (err instanceof SyncInProgressError) {
+      return res.status(409).json({ error: { code: 'SYNC_IN_PROGRESS', message: err.message } });
+    }
+
+    // Return a safe, descriptive 503 when Gmail rejects our credentials.
+    // This tells the frontend to prompt the user to reconnect Gmail rather
+    // than showing a generic "unexpected error" for an auth failure.
+    if (err instanceof GmailAuthError) {
+      return res.status(503).json({
+        error: {
+          code: err.code,
+          message: err.message,
+        },
+      });
+    }
     next(err);
   }
 });
+
 
 // ─── GET /api/gmail/messages ─────────────────────────────────────────────────
 
