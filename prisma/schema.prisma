@@ -250,7 +250,37 @@ model Action {
   application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   email       Email?      @relation(fields: [emailId], references: [id], onDelete: SetNull)
 
+  notificationDeliveries NotificationDelivery[]
+
   @@index([applicationId])
   @@index([emailId])
   @@map("actions")
+}
+
+enum NotificationProviderType {
+  DISCORD
+}
+
+enum NotificationStatus {
+  PENDING
+  DELIVERED
+  FAILED_RETRYABLE
+  FAILED_PERMANENT
+}
+
+model NotificationDelivery {
+  id            String                   @id @default(uuid()) @db.Uuid
+  actionId      String                   @db.Uuid
+  provider      NotificationProviderType
+  status        NotificationStatus       @default(PENDING)
+  attemptCount  Int                      @default(0)
+  lastAttemptAt DateTime?
+  errorDetails  String?
+  createdAt     DateTime                 @default(now())
+
+  action Action @relation(fields: [actionId], references: [id], onDelete: Cascade)
+
+  @@unique([actionId, provider])
+  @@index([status])
+  @@map("notification_deliveries")
 }

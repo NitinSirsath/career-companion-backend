@@ -19,6 +19,16 @@ export const CreateApplicationRequestSchema = z.object({
 
 export type CreateApplicationRequest = z.infer<typeof CreateApplicationRequestSchema>;
 
+// ─── Recent event summary (embedded in list response) ──────────────────────
+
+export const RecentEventSchema = z.object({
+  type: z.string(),
+  createdAt: z.union([z.date(), z.string()]),
+});
+export type RecentEvent = z.infer<typeof RecentEventSchema>;
+
+// ─── ApplicationResponse (list + single) ───────────────────────────────────
+
 export const ApplicationResponseSchema = z.object({
   id: z.string(),
   companyName: z.string(),
@@ -26,13 +36,49 @@ export const ApplicationResponseSchema = z.object({
   location: z.string().nullable(),
   aiStatus: ApplicationStatusSchema.nullable(),
   userStatus: ApplicationStatusSchema.nullable(),
-  userStatusSetAt: z.date().nullable(),
-  appliedAt: z.date().nullable(),
-  createdAt: z.date(),
-  updatedAt: z.date(),
+  userStatusSetAt: z.union([z.date(), z.string()]).nullable(),
+  appliedAt: z.union([z.date(), z.string()]).nullable(),
+  createdAt: z.union([z.date(), z.string()]),
+  updatedAt: z.union([z.date(), z.string()]),
+  // Intelligence enrichment
+  recentEvent: RecentEventSchema.nullable(),
+  pendingActionCount: z.number(),
 });
 
 export type ApplicationResponse = z.infer<typeof ApplicationResponseSchema>;
 
 export const ListApplicationsResponseSchema = z.array(ApplicationResponseSchema);
 export type ListApplicationsResponse = z.infer<typeof ListApplicationsResponseSchema>;
+
+// ─── ApplicationEvent ────────────────────────────────────────────────────────
+
+export const ApplicationEventResponseSchema = z.object({
+  id: z.string(),
+  applicationId: z.string(),
+  emailId: z.string().nullable(),
+  type: z.string(),
+  oldState: ApplicationStatusSchema.nullable(),
+  newState: ApplicationStatusSchema.nullable(),
+  description: z.string().nullable(),
+  provenance: z.string().nullable(),
+  createdAt: z.union([z.date(), z.string()]),
+});
+
+export type ApplicationEventResponse = z.infer<typeof ApplicationEventResponseSchema>;
+export type ListApplicationEventsResponse = ApplicationEventResponse[];
+
+// ─── Action ─────────────────────────────────────────────────────────────────
+
+export const ApplicationActionResponseSchema = z.object({
+  id: z.string(),
+  applicationId: z.string(),
+  emailId: z.string().nullable(),
+  type: z.string(),
+  description: z.string().nullable(),
+  deadline: z.union([z.date(), z.string()]).nullable(),
+  status: z.string(),
+  createdAt: z.union([z.date(), z.string()]),
+});
+
+export type ApplicationActionResponse = z.infer<typeof ApplicationActionResponseSchema>;
+export type ListApplicationActionsResponse = ApplicationActionResponse[];

@@ -49,7 +49,7 @@ describe('Google OAuth Sign-In (COM-24)', () => {
 
   afterAll(async () => {
     if (testUser) {
-      await prisma.user.delete({ where: { id: testUser.id } }).catch(() => {});
+      await prisma.user.deleteMany({ where: { id: testUser.id } });
     }
   });
 
@@ -160,5 +160,49 @@ describe('Google OAuth Sign-In (COM-24)', () => {
 
     const user = await prisma.user.findUnique({ where: { googleId: 'mock_google_id_123' } });
     expect(user!.name).toBe('Auth Test User');
+  });
+
+  describe('Development Authentication', () => {
+    let devUser: import('@prisma/client').User;
+
+    beforeAll(async () => {
+      devUser = await prisma.user.create({
+        data: {
+          email: 'dev@career-companion.local',
+          name: 'Dev User'
+        }
+      });
+    });
+
+    afterAll(async () => {
+      if (devUser) {
+        await prisma.user.delete({ where: { id: devUser.id } });
+      }
+    });
+
+    it('returns 200 for /api/auth/me when development auth is enabled and header is present', async () => {
+      process.env.ENABLE_DEV_AUTH = 'true';
+      const res = await request(app)
+        .get('/api/auth/me')
+        .set('X-Development-User', 'dev@career-companion.local');
+      
+      expect(res.status).toBe(200);
+      expect(res.body.email).toBe('dev@career-companion.local');
+    });
+
+    it('returns 401 for /api/auth/me when development auth is disabled', async () => {
+      process.env.ENABLE_DEV_AUTH = 'false';
+      const res = await request(app)
+        .get('/api/auth/me')
+        .set('X-Development-User', 'dev@career-companion.local');
+      
+      expect(res.status).toBe(401);
+    });
+
+    it('returns 401 for /api/auth/me when unauthenticated without headers or session', async () => {
+      process.env.ENABLE_DEV_AUTH = 'true';
+      const res = await request(app).get('/api/auth/me');
+      expect(res.status).toBe(401);
+    });
   });
 });

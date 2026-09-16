@@ -70,7 +70,7 @@ The `src/contracts` directory contains Zod schemas and types that are shared wit
 ## Application API & Development Authentication (COM-13)
 
 For Sprint 1 local development, this repository uses a **Development-Only Authentication Boundary**. 
-This is an architectural placeholder for Google OAuth and MUST NEVER be enabled in production environments.
+This is a fallback for local testing. Google OAuth is the primary and fully-implemented mechanism for authentication.
 
 ### Making Authenticated Requests
 To authenticate as the development user, you must include the `X-Development-User` header with the user's email (default seeded user: `dev@career-companion.local`) in your requests. Also ensure `ENABLE_DEV_AUTH=true` is set in your `.env`.

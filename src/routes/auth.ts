@@ -9,14 +9,30 @@ const AUTH_STATE_COOKIE_NAME = 'google_login_state';
 const FRONTEND_LOGIN_PATH = '/login';
 const FRONTEND_DASHBOARD_PATH = '/';
 
+/**
+ * Warn at startup when required Google OAuth variables are absent.
+ * This surfaces the configuration gap early (before any request hits /connect)
+ * rather than producing an opaque 500. In ENABLE_DEV_AUTH mode the warning
+ * is expected and safe to ignore.
+ */
+const OAUTH_REQUIRED_VARS = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REDIRECT_URI'] as const;
+const missingOAuthVars = OAUTH_REQUIRED_VARS.filter((v) => !process.env[v]);
+if (missingOAuthVars.length > 0) {
+  console.warn(
+    `[Auth] Google OAuth is not configured — missing env vars: ${missingOAuthVars.join(', ')}. ` +
+      'Google login will return 500. Set ENABLE_DEV_AUTH=true for local dev bypass.'
+  );
+}
+
 function createOAuth2Client() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/api/auth/callback';
+  // Default matches the Vite dev server port so the redirect works without extra config.
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5173/api/auth/callback';
 
-  if (!clientId || !clientSecret || !redirectUri) {
+  if (!clientId || !clientSecret) {
     throw new Error(
-      'Google Auth is not configured: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI must all be set'
+      `Google Auth is not configured: ${missingOAuthVars.join(', ')} must all be set`
     );
   }
 
@@ -24,7 +40,9 @@ function createOAuth2Client() {
 }
 
 function getFrontendUrl(): string {
-  return process.env.FRONTEND_URL?.replace(/\/$/, '') ?? 'http://localhost:3000';
+  // Default to the Vite dev server — NOT the backend port — so post-OAuth
+  // redirects land on the correct origin in local development.
+  return process.env.FRONTEND_URL?.replace(/\/$/, '') ?? 'http://localhost:5173';
 }
 
 router.get('/connect', async (req: Request, res: Response, next: NextFunction) => {
@@ -161,14 +179,16 @@ router.get('/callback', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
+import { requireAuth } from '../middleware/auth';
+
+router.get('/me', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!req.session?.userId) {
+    if (!req.auth?.user) {
       return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } });
     }
 
     const user = await prisma.user.findUnique({
-      where: { id: req.session.userId },
+      where: { id: req.auth.user.id },
       select: {
         id: true,
         email: true,

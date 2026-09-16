@@ -1,11 +1,12 @@
-/* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any */
-const PgBoss = require('pg-boss');
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import * as PgBossModule from 'pg-boss';
 
 let boss: any = null;
 
 export async function getQueue(): Promise<any> {
   if (!boss) {
-    boss = new PgBoss({
+    const PgBossClass = (PgBossModule as any).PgBoss || (PgBossModule as any).default || PgBossModule;
+    boss = new PgBossClass({
       connectionString: process.env.DATABASE_URL,
       schema: 'pgboss',
     });
@@ -13,6 +14,10 @@ export async function getQueue(): Promise<any> {
     boss.on('error', (error: any) => console.error('[pg-boss] error', error));
 
     await boss.start();
+    
+    // Ensure queues exist (idempotent)
+    await boss.createQueue('email-processing-job');
+    await boss.createQueue('discord-notification-job');
   }
   return boss;
 }

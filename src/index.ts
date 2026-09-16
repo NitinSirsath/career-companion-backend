@@ -8,10 +8,28 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// ── Startup configuration warnings ───────────────────────────────────────────
+// These surface missing required env vars at startup rather than at request time.
+if (!process.env.SESSION_SECRET) {
+  console.warn(
+    '[Config] SESSION_SECRET is not set — using an insecure dev default. ' +
+      'Set SESSION_SECRET in .env before running in any shared or production environment.'
+  );
+}
+if (!process.env.FRONTEND_URL) {
+  console.warn(
+    '[Config] FRONTEND_URL is not set — defaulting to http://localhost:5173 (Vite dev server). ' +
+      'Set FRONTEND_URL in .env for production.'
+  );
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.use(cors({ credentials: true, origin: process.env.FRONTEND_URL ?? 'http://localhost:3000' }));
+// Default to the Vite dev server port so CORS works in local development
+// without requiring FRONTEND_URL to be set.
+app.use(cors({ credentials: true, origin: process.env.FRONTEND_URL ?? 'http://localhost:5173' }));
 app.use(express.json());
 // cookie-parser with a secret enables signed cookies used for OAuth state (CSRF protection).
 // OAUTH_STATE_COOKIE_SECRET is a required env var when Gmail OAuth routes are used.
@@ -45,6 +63,8 @@ app.use(
 import { authRouter } from './routes/auth';
 import { applicationRouter } from './routes/application';
 import { gmailRouter } from './routes/gmail';
+import { emailRouter } from './routes/email';
+import { actionRouter } from './routes/action';
 import { errorHandler } from './middleware/error';
 
 app.get('/health', (req, res) => {
@@ -54,16 +74,23 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRouter);
 app.use('/api/applications', applicationRouter);
 app.use('/api/gmail', gmailRouter);
+app.use('/api/emails', emailRouter);
+app.use('/api/actions', actionRouter);
 
 app.use(errorHandler);
 
 import { startEmailProcessingWorker } from './jobs/emailProcessingJob';
+import { startNotificationWorker } from './jobs/notificationJob';
 import { stopQueue } from './services/queue';
 import { prisma } from './db/prisma';
 
 if (process.env.NODE_ENV !== 'test') {
   startEmailProcessingWorker().catch(err => {
     console.error('Failed to start worker', err);
+  });
+  
+  startNotificationWorker().catch(err => {
+    console.error('Failed to start notification worker', err);
   });
   
   const server = app.listen(port, () => {
