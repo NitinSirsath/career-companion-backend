@@ -141,20 +141,21 @@ export class GmailSyncService {
 
           const messages = listRes.data.messages || [];
 
+          // Batch check existing emails to prevent sequential DB query overhead
+          const msgIds = messages.map((m: any) => m.id).filter(Boolean);
+          const existingEmails = msgIds.length > 0 ? await prisma.email.findMany({
+            where: {
+              userId,
+              gmailMessageId: { in: msgIds }
+            },
+            select: { gmailMessageId: true }
+          }) : [];
+          const existingSet = new Set(existingEmails.map(e => e.gmailMessageId));
+
           for (const msg of messages) {
             if (!msg.id) continue;
 
-            // Check if it already exists to avoid redundant fetch + upsert
-            const existing = await prisma.email.findUnique({
-              where: {
-                userId_gmailMessageId: {
-                  userId,
-                  gmailMessageId: msg.id
-                }
-              }
-            });
-
-            if (existing) {
+            if (existingSet.has(msg.id)) {
               messagesSkipped++;
               continue;
             }
