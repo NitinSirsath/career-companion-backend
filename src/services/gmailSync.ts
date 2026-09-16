@@ -142,6 +142,7 @@ export class GmailSyncService {
           const messages = listRes.data.messages || [];
 
           // Batch check existing emails to prevent sequential DB query overhead
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const msgIds = messages.map((m: any) => m.id).filter(Boolean);
           const existingEmails = msgIds.length > 0 ? await prisma.email.findMany({
             where: {
