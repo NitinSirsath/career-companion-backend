@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { describe, it, expect, vi } from 'vitest';
 import { extractHeaders, GmailAuthError } from '../services/gmailSync';
 import { GaxiosError } from 'gaxios';
 
@@ -87,7 +88,8 @@ describe('GmailSyncService Helpers', () => {
         headers: {} as any,
         config: {} as any,
         request: {} as any,
-      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
 
       const isGmailAuthFailure =
         err instanceof GaxiosError && (err.status === 401 || err.status === 403);
@@ -103,7 +105,8 @@ describe('GmailSyncService Helpers', () => {
         headers: {} as any,
         config: {} as any,
         request: {} as any,
-      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
 
       const isGmailAuthFailure =
         err instanceof GaxiosError && (err.status === 401 || err.status === 403);

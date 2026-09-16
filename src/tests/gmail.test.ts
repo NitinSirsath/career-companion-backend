@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Integration tests for Gmail OAuth routes (COM-19).
  *
@@ -513,7 +514,8 @@ describe('Gmail OAuth Routes (COM-19)', () => {
                 config: {} as any,
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 request: {} as any,
-              })
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              } as any)
             ),
             get: vi.fn(),
           },
