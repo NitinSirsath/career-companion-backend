@@ -24,7 +24,8 @@ export async function enqueueEmailProcessingJob(userId: string, emailId: string)
 export async function startEmailProcessingWorker() {
   const queue = await getQueue();
 
-  await queue.work(EMAIL_PROCESSING_JOB, async (job: { id: string, data: EmailProcessingJobData }) => {
+  await queue.work(EMAIL_PROCESSING_JOB, async (jobs: { id: string, data: EmailProcessingJobData }[]) => {
+    const job = jobs[0];
     const { userId, emailId } = job.data;
     const startTime = Date.now();
     
@@ -44,9 +45,22 @@ export async function startEmailProcessingWorker() {
     try {
       await EmailAIPipeline.processEmail(userId, emailId);
 
+      const aiResult = await prisma.aIProcessingResult.findUnique({
+        where: { emailId },
+        select: { relevanceDecision: true }
+      });
+
+      let mappedRelevanceState = undefined;
+      if (aiResult?.relevanceDecision === 'RELEVANT') mappedRelevanceState = 'RELEVANT';
+      else if (aiResult?.relevanceDecision === 'IRRELEVANT') mappedRelevanceState = 'IRRELEVANT';
+      else if (aiResult?.relevanceDecision === 'UNCERTAIN') mappedRelevanceState = 'RELEVANT';
+
       await prisma.email.updateMany({
         where: { id: emailId, userId },
-        data: { processingState: 'COMPLETED' }
+        data: { 
+          processingState: 'COMPLETED',
+          ...(mappedRelevanceState ? { relevanceState: mappedRelevanceState as import('@prisma/client').EmailRelevanceState } : {})
+        }
       });
       
       const durationMs = Date.now() - startTime;
