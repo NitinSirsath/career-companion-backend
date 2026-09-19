@@ -9,15 +9,19 @@ import { AIRelevanceDecision } from '@prisma/client';
 
 const mockGenerateContent = vi.fn();
 
-vi.mock('@google/genai', () => ({
-  GoogleGenAI: vi.fn().mockImplementation(function() {
-    return {
-      models: {
-        generateContent: mockGenerateContent,
-      }
-    };
-  })
-}));
+vi.mock('@google/genai', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as object),
+    GoogleGenAI: vi.fn().mockImplementation(function() {
+      return {
+        models: {
+          generateContent: mockGenerateContent,
+        }
+      };
+    })
+  };
+});
 
 vi.mock('../services/gmailFetcher', () => ({
   GmailFetcherService: {

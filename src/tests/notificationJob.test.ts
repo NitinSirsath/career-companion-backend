@@ -70,7 +70,7 @@ describe('Notification Job', () => {
     DiscordProvider.prototype.send = sendMock;
 
     await startNotificationWorker();
-    await workHandler({ data: { actionId: action.id } });
+    await workHandler([{ data: { actionId: action.id } }]);
 
     expect(sendMock).toHaveBeenCalledTimes(1);
 
@@ -101,7 +101,7 @@ describe('Notification Job', () => {
     DiscordProvider.prototype.send = sendMock;
 
     await startNotificationWorker();
-    await workHandler({ data: { actionId: action.id } });
+    await workHandler([{ data: { actionId: action.id } }]);
 
     expect(sendMock).not.toHaveBeenCalled();
 
@@ -139,7 +139,7 @@ describe('Notification Job', () => {
     DiscordProvider.prototype.send = sendMock;
 
     await startNotificationWorker();
-    await workHandler({ data: { actionId: action.id } });
+    await workHandler([{ data: { actionId: action.id } }]);
 
     // Should not call send because it was already delivered
     expect(sendMock).not.toHaveBeenCalled();
