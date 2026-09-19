@@ -1,5 +1,5 @@
 import { prisma } from '../db/prisma';
-import { ApplicationStatus, EmailMatchState, AIProcessingResult, MatchConfirmationSource } from '@prisma/client';
+import { ApplicationStatus, EmailMatchState, EmailRelevanceState, AIProcessingResult, MatchConfirmationSource } from '@prisma/client';
 import { enqueueNotificationJob } from '../jobs/notificationJob';
 
 export class MatcherService {
@@ -204,23 +204,55 @@ export class MatcherService {
     });
   }
 
-  public static async resolveAmbiguousMatch(userId: string, emailId: string, applicationId: string | null): Promise<void> {
+  /**
+   * Get relevant emails that had zero candidate applications during matching.
+   * These need user-driven resolution to link them to an existing application.
+   */
+  public static async getUnmatchedEmails(userId: string) {
+    return prisma.email.findMany({
+      where: {
+        userId,
+        relevanceState: EmailRelevanceState.RELEVANT,
+        matchState: EmailMatchState.UNMATCHED,
+      },
+      include: {
+        aiProcessingResult: true,
+      },
+      orderBy: {
+        receivedAt: 'desc',
+      },
+    });
+  }
+
+  /**
+   * Resolve an email that needs human-in-the-loop matching.
+   * Supports both AMBIGUOUS (multiple candidates) and UNMATCHED (zero candidates) emails.
+   *
+   * For AMBIGUOUS: applicationId can be null (→ IGNORED) or a valid application ID.
+   * For UNMATCHED: applicationId must be non-null (linking to an application is mandatory).
+   */
+  public static async resolveEmailMatch(userId: string, emailId: string, applicationId: string | null): Promise<void> {
     const email = await prisma.email.findUnique({
       where: { id: emailId, userId }, // isolation check
       include: { aiProcessingResult: true }
     });
 
     if (!email) {
-      return; // Handled by route as 404/403
+      throw new Error('EMAIL_NOT_FOUND');
     }
 
-    if (email.matchState !== EmailMatchState.AMBIGUOUS) {
-      // Already resolved or not ambiguous
-      return;
+    // Validate match state — only AMBIGUOUS and UNMATCHED can be resolved
+    if (email.matchState !== EmailMatchState.AMBIGUOUS && email.matchState !== EmailMatchState.UNMATCHED) {
+      throw new Error('INVALID_MATCH_STATE');
+    }
+
+    // UNMATCHED emails require an applicationId (linking is mandatory)
+    if (email.matchState === EmailMatchState.UNMATCHED && !applicationId) {
+      throw new Error('APPLICATION_REQUIRED_FOR_UNMATCHED');
     }
 
     if (!applicationId) {
-      // No match
+      // No match — only valid for AMBIGUOUS emails
       await prisma.email.update({
         where: { id: emailId },
         data: {
