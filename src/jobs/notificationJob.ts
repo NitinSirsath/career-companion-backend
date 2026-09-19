@@ -24,7 +24,8 @@ export async function startNotificationWorker() {
   const queue = await getQueue();
   const discordProvider = new DiscordProvider();
 
-  await queue.work(NOTIFICATION_JOB, async (job: { id: string, data: NotificationJobData }) => {
+  await queue.work(NOTIFICATION_JOB, async (jobs: { id: string, data: NotificationJobData }[]) => {
+    const job = jobs[0];
     const { actionId } = job.data;
 
     // 1. Fetch action and check if we already delivered this successfully

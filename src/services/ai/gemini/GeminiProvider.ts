@@ -1,5 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { GoogleGenAI, Type, Schema } from '@google/genai';
 import { z } from 'zod';
 import { 
   RelevanceClassifier, 
@@ -34,6 +33,64 @@ Do not invent or assume information.
 Provide an extractionConfidence score (0 to 1).
 Return your findings as a structured JSON object according to the schema.
   `.trim()
+};
+
+
+const nativeEmailRelevanceSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    decision: {
+      type: Type.STRING,
+      description: 'Classification of the email relevance for job searching.',
+      enum: ['RELEVANT', 'IRRELEVANT', 'UNCERTAIN']
+    },
+    category: {
+      type: Type.STRING,
+      description: 'The category of the email if it is relevant.',
+      enum: ['RECRUITER', 'INTERVIEW', 'ASSESSMENT', 'OFFER', 'REJECTION', 'FOLLOW_UP', 'NEWSLETTER', 'SPAM']
+    },
+    confidence: {
+      type: Type.NUMBER,
+      description: 'Confidence score between 0 and 1 for this classification.'
+    },
+    reasoning: {
+      type: Type.STRING,
+      description: 'A brief explanation of why the email was classified as relevant or not relevant.'
+    }
+  },
+  required: ['decision', 'confidence', 'reasoning']
+};
+
+
+const nativeJobExtractionSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    companyName: { type: Type.STRING, nullable: true, description: 'The name of the company the application is for.' },
+    jobTitle: { type: Type.STRING, nullable: true, description: 'The job title applied for, if found.' },
+    recruiterName: { type: Type.STRING, nullable: true, description: 'Recruiter or contact name if explicitly present.' },
+    recruiterEmail: { type: Type.STRING, nullable: true, description: 'Recruiter or contact email if explicitly present.' },
+    interviewStage: { type: Type.STRING, nullable: true, description: 'Interview stage, e.g., First Round, Onsite, Final.' },
+    interviewType: { type: Type.STRING, nullable: true, description: 'Interview type, e.g., Phone, Video, In-person.' },
+    interviewDate: { type: Type.STRING, nullable: true, description: 'Interview date if available.' },
+    interviewTime: { type: Type.STRING, nullable: true, description: 'Interview time if available.' },
+    assessmentInfo: { type: Type.STRING, nullable: true, description: 'Information about any required assessment or take-home assignment.' },
+    assessmentDeadline: { type: Type.STRING, nullable: true, description: 'Deadline for the assessment if specified.' },
+    offerInfo: { type: Type.STRING, nullable: true, description: 'Information regarding a job offer.' },
+    rejectionInfo: { type: Type.STRING, nullable: true, description: 'Information regarding a rejection.' },
+    actionRequired: { type: Type.BOOLEAN, nullable: true, description: 'Whether user action is required based on the email.' },
+    requestedAction: { type: Type.STRING, nullable: true, description: 'The specific action requested from the user.' },
+    actionDeadline: { type: Type.STRING, nullable: true, description: 'The deadline for the requested action.' },
+    followUpRequired: { type: Type.BOOLEAN, nullable: true, description: 'Whether a follow-up is required or suggested.' },
+    followUpDate: { type: Type.STRING, nullable: true, description: 'Suggested follow-up date.' },
+    extractionConfidence: { type: Type.NUMBER, nullable: true, description: 'Confidence score between 0 and 1 for the extraction.' },
+    provenance: { type: Type.STRING, nullable: true, description: 'Source indication or reasoning for extracted fields.' }
+  },
+  required: [
+    'companyName', 'jobTitle', 'recruiterName', 'recruiterEmail', 'interviewStage', 
+    'interviewType', 'interviewDate', 'interviewTime', 'assessmentInfo', 'assessmentDeadline', 
+    'offerInfo', 'rejectionInfo', 'actionRequired', 'requestedAction', 'actionDeadline', 
+    'followUpRequired', 'followUpDate', 'extractionConfidence', 'provenance'
+  ]
 };
 
 export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
@@ -81,12 +138,11 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
     model: string, 
     systemInstruction: string, 
     input: string, 
-    schema: z.ZodSchema<T>
+    schema: z.ZodSchema<T>,
+    nativeSchema: Schema
   ): Promise<T> {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const jsonSchema = zodToJsonSchema(schema as any, { target: 'jsonSchema7' }) as any;
-      delete jsonSchema.$schema;
+
 
       const response = await this.client.models.generateContent({
         model,
@@ -94,7 +150,7 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
         config: {
           systemInstruction,
           responseMimeType: 'application/json',
-          responseSchema: jsonSchema,
+          responseSchema: nativeSchema,
           temperature: 0.1,
         }
       });
@@ -132,7 +188,8 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
       this.relevanceModel,
       PROMPTS[version],
       content,
-      EmailRelevanceSchema
+      EmailRelevanceSchema,
+      nativeEmailRelevanceSchema
     );
 
     return { version, data };
@@ -144,7 +201,8 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
       this.extractionModel,
       PROMPTS[version],
       emailBody,
-      JobExtractionSchema
+      JobExtractionSchema,
+      nativeJobExtractionSchema
     );
 
     return { version, data };
