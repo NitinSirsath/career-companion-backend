@@ -1,6 +1,6 @@
 import { MatcherService } from '../services/matcher';
 import { prisma } from '../db/prisma';
-import { ApplicationStatus, EmailMatchState } from '@prisma/client';
+import { ApplicationStatus, EmailMatchState, MatchConfirmationSource } from '@prisma/client';
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 
 describe('MatcherService', () => {
@@ -262,5 +262,52 @@ describe('MatcherService', () => {
     expect(updatedEmail?.matchState).toBe(EmailMatchState.UNMATCHED);
     
     await prisma.user.delete({ where: { id: user2.id } });
+  });
+
+  it('USER_CONFIRMED matches are preserved upon AI reprocessing', async () => {
+    const appA = await prisma.application.create({
+      data: { userId: user.id, companyName: 'Company A' }
+    });
+    
+    const appB = await prisma.application.create({
+      data: { userId: user.id, companyName: 'Company B' }
+    });
+
+    // Email already matched by user to appA
+    const newEmail = await prisma.email.create({
+      data: {
+        userId: user.id,
+        gmailMessageId: 'msg-user-confirmed',
+        matchState: EmailMatchState.MATCHED,
+        matchConfirmedBy: MatchConfirmationSource.USER_CONFIRMED,
+        applicationId: appA.id,
+        aiProcessingResult: {
+          create: {
+            provider: 'test',
+            model: 'test',
+            contractVersion: '1',
+            companyName: 'Company B', // AI wrongly thinks it's Company B now
+            actionRequired: true,
+            requestedAction: 'Reply'
+          }
+        }
+      }
+    });
+
+    await MatcherService.matchEmailToApplication(newEmail.id);
+
+    const updatedEmail = await prisma.email.findUnique({ where: { id: newEmail.id } });
+    
+    // Core assertions for preservation
+    expect(updatedEmail?.applicationId).toBe(appA.id); // Stayed appA!
+    expect(updatedEmail?.matchState).toBe(EmailMatchState.MATCHED);
+    expect(updatedEmail?.matchConfirmedBy).toBe(MatchConfirmationSource.USER_CONFIRMED);
+
+    // Ensure downstream events applied correctly to appA, NOT appB
+    const actionsA = await prisma.action.findMany({ where: { applicationId: appA.id } });
+    expect(actionsA.length).toBe(1); // Action applied to appA
+    
+    const actionsB = await prisma.action.findMany({ where: { applicationId: appB.id } });
+    expect(actionsB.length).toBe(0); // No action on appB
   });
 });

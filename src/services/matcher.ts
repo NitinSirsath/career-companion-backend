@@ -17,7 +17,14 @@ export class MatcherService {
       return;
     }
 
-    const { aiProcessingResult, userId } = email;
+    const { aiProcessingResult, userId, matchConfirmedBy, applicationId } = email;
+
+    if (matchConfirmedBy === MatchConfirmationSource.USER_CONFIRMED && applicationId) {
+      // Re-apply the match using the existing user-confirmed application to allow 
+      // new AI data (e.g. actions/state) to be recorded, but PRESERVE the user's decision.
+      await this.applyMatch(email.id, applicationId, aiProcessingResult, MatchConfirmationSource.USER_CONFIRMED);
+      return;
+    }
 
     // 1. Thread Match
     if (email.threadId) {
