@@ -3,6 +3,8 @@ import { CreateApplicationRequestSchema } from '../contracts';
 import { ApplicationService } from '../services/application';
 import { requireAuth } from '../middleware/auth';
 
+import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
+
 const router = Router();
 
 router.use(requireAuth);
@@ -22,9 +24,10 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.auth!.user.id;
+    const { limit, offset } = getPaginationParams(req.query);
 
-    const applications = await ApplicationService.listApplications(userId);
-    res.status(200).json(applications);
+    const applications = await ApplicationService.listApplications(userId, limit, offset);
+    res.status(200).json(createPaginatedResponse(applications, limit, offset));
   } catch (err) {
     next(err);
   }

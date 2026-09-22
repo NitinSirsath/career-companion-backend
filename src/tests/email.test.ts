@@ -91,10 +91,10 @@ describe('Email API (COM-32)', () => {
         .set('X-Development-User', 'user-a-email@test.local');
 
       expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-      expect(res.body.length).toBe(1);
-      expect(res.body[0].id).toBe(ambiguousEmail.id);
-      expect(res.body[0].aiProcessingResult.companyName).toBe('MatchCo');
+      expect(Array.isArray(res.body.items)).toBe(true);
+      expect(res.body.items.length).toBe(1);
+      expect(res.body.items[0].id).toBe(ambiguousEmail.id);
+      expect(res.body.items[0].aiProcessingResult.companyName).toBe('MatchCo');
     });
 
     it('does not return ambiguous emails for another user', async () => {
@@ -104,7 +104,7 @@ describe('Email API (COM-32)', () => {
 
       if (res.status !== 200) console.log(res.body);
       expect(res.status).toBe(200);
-      expect(res.body.length).toBe(0);
+      expect(res.body.items.length).toBe(0);
     });
   });
 
@@ -120,10 +120,10 @@ describe('Email API (COM-32)', () => {
         .set('X-Development-User', 'user-a-email@test.local');
 
       expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-      expect(res.body.length).toBe(1);
-      expect(res.body[0].id).toBe(unmatchedEmail.id);
-      expect(res.body[0].aiProcessingResult.companyName).toBe('Startup');
+      expect(Array.isArray(res.body.items)).toBe(true);
+      expect(res.body.items.length).toBe(1);
+      expect(res.body.items[0].id).toBe(unmatchedEmail.id);
+      expect(res.body.items[0].aiProcessingResult.companyName).toBe('Startup');
     });
 
     it('does not return unmatched emails for another user', async () => {
@@ -132,7 +132,7 @@ describe('Email API (COM-32)', () => {
         .set('X-Development-User', 'user-b-email@test.local');
 
       expect(res.status).toBe(200);
-      expect(res.body.length).toBe(0);
+      expect(res.body.items.length).toBe(0);
     });
   });
 

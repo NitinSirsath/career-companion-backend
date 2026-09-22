@@ -3,6 +3,8 @@ import { requireAuth } from '../middleware/auth';
 import { ActionService } from '../services/action';
 import { UpdateActionRequestSchema } from '../contracts';
 
+import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
+
 const router = Router();
 router.use(requireAuth);
 
@@ -14,9 +16,10 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.auth!.user.id;
     const status = req.query.status as string | undefined;
+    const { limit, offset } = getPaginationParams(req.query);
 
-    const actions = await ActionService.getUserActions(userId, status);
-    res.status(200).json(actions);
+    const actions = await ActionService.getUserActions(userId, status, limit, offset);
+    res.status(200).json(createPaginatedResponse(actions, limit, offset));
   } catch (err) {
     next(err);
   }

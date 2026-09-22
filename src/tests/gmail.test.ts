@@ -560,8 +560,8 @@ describe('Gmail OAuth Routes (COM-19)', () => {
         .set('X-Development-User', testUser.email);
         
       expect(res.status).toBe(200);
-      expect(res.body.total).toBe(0);
-      expect(res.body.messages).toEqual([]);
+      expect(res.body.items.length).toBe(0);
+      expect(res.body.items).toEqual([]);
     });
 
     it('returns messages matching the strict contract shape', async () => {
@@ -581,9 +581,9 @@ describe('Gmail OAuth Routes (COM-19)', () => {
         .set('X-Development-User', testUser.email);
         
       expect(res.status).toBe(200);
-      expect(res.body.total).toBe(1);
+      expect(res.body.items.length).toBe(1);
       
-      const msg = res.body.messages[0];
+      const msg = res.body.items[0];
       const keys = Object.keys(msg).sort();
       // Should strictly match EmailMessageSchema
       expect(keys).toEqual([
@@ -626,8 +626,8 @@ describe('Gmail OAuth Routes (COM-19)', () => {
         .set('X-Development-User', testUser.email);
         
       expect(res.status).toBe(200);
-      expect(res.body.total).toBe(0);
-      expect(res.body.messages).toEqual([]); // Should not see otherUser's emails
+      expect(res.body.items.length).toBe(0);
+      expect(res.body.items).toEqual([]); // Should not see otherUser's emails
       
       // cleanup
       await prisma.email.deleteMany();

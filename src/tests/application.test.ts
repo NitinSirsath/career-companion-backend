@@ -47,7 +47,7 @@ describe('Application API (COM-13)', () => {
         .get('/api/applications')
         .set('X-Development-User', 'user-a@test.local');
       expect(res.status).toBe(200);
-      expect(res.body).toEqual([]);
+      expect(res.body.items).toEqual([]);
     });
 
     it('fails if ENABLE_DEV_AUTH is not true', async () => {
@@ -121,8 +121,8 @@ describe('Application API (COM-13)', () => {
         .set('X-Development-User', 'user-a@test.local');
       
       expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-      for (const app of res.body) {
+      expect(Array.isArray(res.body.items)).toBe(true);
+      for (const app of res.body.items) {
         expect(app).toHaveProperty('recentEvent');
         expect(app).toHaveProperty('pendingActionCount');
         expect(typeof app.pendingActionCount).toBe('number');
@@ -147,10 +147,10 @@ describe('Application API (COM-13)', () => {
         .set('X-Development-User', 'user-a@test.local');
       
       expect(res.status).toBe(200);
-      expect(res.body.length).toBeGreaterThanOrEqual(1);
+      expect(res.body.items.length).toBeGreaterThanOrEqual(1);
       
       // returned applications belong only to authenticated user
-      for (const application of res.body) {
+      for (const application of res.body.items) {
         const dbApp = await prisma.application.findUnique({ where: { id: application.id } });
         expect(dbApp?.userId).toBe(userA.id);
       }
@@ -161,7 +161,7 @@ describe('Application API (COM-13)', () => {
         .get('/api/applications')
         .set('X-Development-User', 'user-a@test.local');
       
-      const appNames = res.body.map((a: import('../contracts').ApplicationResponse) => a.companyName);
+      const appNames = res.body.items.map((a: import('../contracts').ApplicationResponse) => a.companyName);
       expect(appNames).toContain('Company A');
       expect(appNames).not.toContain('Company B');
     });

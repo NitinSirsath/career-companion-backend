@@ -24,9 +24,11 @@ export class ApplicationService {
     return this.mapToResponse(application, null, 0);
   }
 
-  static async listApplications(userId: string): Promise<ApplicationResponse[]> {
+  static async listApplications(userId: string, limit: number = 50, offset: number = 0): Promise<ApplicationResponse[]> {
     const applications = await prisma.application.findMany({
       where: { userId },
+      take: limit + 1,
+      skip: offset,
       orderBy: { createdAt: 'desc' },
       include: {
         events: {

@@ -70,15 +70,15 @@ describe('Action API (COM-33)', () => {
         .set('X-Development-User', userA.email);
       
       expect(res.status).toBe(200);
-      expect(res.body.length).toBe(2);
+      expect(res.body.items.length).toBe(2);
       
-      const ids = res.body.map((a: any) => a.id);
+      const ids = res.body.items.map((a: any) => a.id);
       expect(ids).toContain(actionA_Pending.id);
       expect(ids).toContain(actionA_Completed.id);
       expect(ids).not.toContain(actionB_Pending.id);
       
       // Ensure context is loaded
-      expect(res.body[0].application.companyName).toBe('App A');
+      expect(res.body.items[0].application.companyName).toBe('App A');
     });
 
     it('filters by status', async () => {
@@ -87,8 +87,8 @@ describe('Action API (COM-33)', () => {
         .set('X-Development-User', userA.email);
       
       expect(res.status).toBe(200);
-      expect(res.body.length).toBe(1);
-      expect(res.body[0].id).toBe(actionA_Pending.id);
+      expect(res.body.items.length).toBe(1);
+      expect(res.body.items[0].id).toBe(actionA_Pending.id);
     });
   });
 

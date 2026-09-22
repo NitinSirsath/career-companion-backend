@@ -196,12 +196,14 @@ export class MatcherService {
     }
   }
 
-  public static async getAmbiguousMatches(userId: string) {
+  public static async getAmbiguousMatches(userId: string, limit: number = 50, offset: number = 0) {
     return prisma.email.findMany({
       where: {
         userId,
         matchState: EmailMatchState.AMBIGUOUS
       },
+      take: limit + 1,
+      skip: offset,
       include: {
         aiProcessingResult: true
       },
@@ -215,13 +217,15 @@ export class MatcherService {
    * Get relevant emails that had zero candidate applications during matching.
    * These need user-driven resolution to link them to an existing application.
    */
-  public static async getUnmatchedEmails(userId: string) {
+  public static async getUnmatchedEmails(userId: string, limit: number = 50, offset: number = 0) {
     return prisma.email.findMany({
       where: {
         userId,
         relevanceState: EmailRelevanceState.RELEVANT,
         matchState: EmailMatchState.UNMATCHED,
       },
+      take: limit + 1,
+      skip: offset,
       include: {
         aiProcessingResult: true,
       },

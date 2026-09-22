@@ -21,6 +21,7 @@ import { google } from 'googleapis';
 import { requireAuth } from '../middleware/auth';
 import { encryptToken, decryptToken, loadEncryptionKey } from '../utils/gmailTokenEncryption';
 import { prisma } from '../db/prisma';
+import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
 
 const router = Router();
 
@@ -344,34 +345,25 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
 router.get('/messages', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.auth!.user.id;
-    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 100);
-    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+    const { limit, offset } = getPaginationParams(req.query);
 
-    const [total, messages] = await Promise.all([
-      prisma.email.count({ where: { userId } }),
-      prisma.email.findMany({
-        where: { userId },
-        take: limit,
-        skip: offset,
-        orderBy: { receivedAt: 'desc' },
-        select: {
-          id: true,
-          gmailMessageId: true,
-          subject: true,
-          sender: true,
-          receivedAt: true,
-          relevanceState: true,
-          matchState: true,
-        }
-      })
-    ]);
-
-    return res.status(200).json({
-      messages,
-      total,
-      limit,
-      offset
+    const messages = await prisma.email.findMany({
+      where: { userId },
+      take: limit + 1,
+      skip: offset,
+      orderBy: { receivedAt: 'desc' },
+      select: {
+        id: true,
+        gmailMessageId: true,
+        subject: true,
+        sender: true,
+        receivedAt: true,
+        relevanceState: true,
+        matchState: true,
+      }
     });
+
+    return res.status(200).json(createPaginatedResponse(messages, limit, offset));
   } catch (err) {
     next(err);
   }

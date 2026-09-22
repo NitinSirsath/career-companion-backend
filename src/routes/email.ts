@@ -3,6 +3,8 @@ import { requireAuth } from '../middleware/auth';
 import { MatcherService } from '../services/matcher';
 import { ResolveAmbiguityRequestSchema } from '../contracts/email';
 
+import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
+
 const router = Router();
 
 router.use(requireAuth);
@@ -14,7 +16,8 @@ router.use(requireAuth);
 router.get('/ambiguous', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.auth!.user.id;
-    const emails = await MatcherService.getAmbiguousMatches(userId);
+    const { limit, offset } = getPaginationParams(req.query);
+    const emails = await MatcherService.getAmbiguousMatches(userId, limit, offset);
     
     // Map to response schema to omit any PII/raw bodies if they existed, though Prisma already doesn't load bodies
     const response = emails.map(email => ({
@@ -30,7 +33,7 @@ router.get('/ambiguous', async (req: Request, res: Response, next: NextFunction)
       } : null,
     }));
 
-    res.status(200).json(response);
+    res.status(200).json(createPaginatedResponse(response, limit, offset));
   } catch (err) {
     next(err);
   }
@@ -44,7 +47,8 @@ router.get('/ambiguous', async (req: Request, res: Response, next: NextFunction)
 router.get('/unmatched', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.auth!.user.id;
-    const emails = await MatcherService.getUnmatchedEmails(userId);
+    const { limit, offset } = getPaginationParams(req.query);
+    const emails = await MatcherService.getUnmatchedEmails(userId, limit, offset);
 
     const response = emails.map(email => ({
       id: email.id,
@@ -59,7 +63,7 @@ router.get('/unmatched', async (req: Request, res: Response, next: NextFunction)
       } : null,
     }));
 
-    res.status(200).json(response);
+    res.status(200).json(createPaginatedResponse(response, limit, offset));
   } catch (err) {
     next(err);
   }
