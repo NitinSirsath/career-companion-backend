@@ -46,16 +46,16 @@ describe('System-Wide Pagination (COM-48)', () => {
 
   describe('GET /api/emails/unmatched', () => {
     it('1. default pagination', async () => {
-      await createEmails(55); // Default limit is 50
+      await createEmails(25); // Default limit is 20
       const res = await request(app)
         .get('/api/emails/unmatched')
         .set('X-Development-User', userEmail);
       
       expect(res.status).toBe(200);
-      expect(res.body.items.length).toBe(50);
-      expect(res.body.metadata.limit).toBe(50);
+      expect(res.body.items.length).toBe(20);
+      expect(res.body.metadata.limit).toBe(20);
       expect(res.body.metadata.offset).toBe(0);
-      expect(res.body.metadata.nextOffset).toBe(50);
+      expect(res.body.metadata.nextOffset).toBe(20);
     });
 
     it('2. explicit page size', async () => {
@@ -70,14 +70,14 @@ describe('System-Wide Pagination (COM-48)', () => {
     });
 
     it('3. maximum page size enforcement', async () => {
-      await createEmails(150); // Create more than max (100)
+      await createEmails(30); // Create more than max (20)
       const res = await request(app)
         .get('/api/emails/unmatched?limit=200') // Requesting beyond max
         .set('X-Development-User', userEmail);
       
-      expect(res.body.items.length).toBe(100); // Should clamp to max
-      expect(res.body.metadata.limit).toBe(100);
-      expect(res.body.metadata.nextOffset).toBe(100);
+      expect(res.body.items.length).toBe(20); // Should clamp to max
+      expect(res.body.metadata.limit).toBe(20);
+      expect(res.body.metadata.nextOffset).toBe(20);
     });
 
     it('4. first page, 5. middle page, 6. final page, 8. deterministic ordering, 9. multiple pages', async () => {
@@ -132,14 +132,14 @@ describe('System-Wide Pagination (COM-48)', () => {
     });
 
     it('11. prevention of unbounded requests & 12. contract shape', async () => {
-      await createEmails(150); // Create enough to hit the clamp
+      await createEmails(30); // Create enough to hit the clamp
       const res = await request(app)
         .get('/api/emails/unmatched?limit=9999999999999')
         .set('X-Development-User', userEmail);
         
-      expect(res.body.items.length).toBe(100);
+      expect(res.body.items.length).toBe(20);
       expect(res.body.metadata).toBeDefined();
-      expect(res.body.metadata.limit).toBe(100);
+      expect(res.body.metadata.limit).toBe(20);
       expect(res.body.items[0]).toHaveProperty('id');
     });
   });

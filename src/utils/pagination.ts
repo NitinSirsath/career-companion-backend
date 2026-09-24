@@ -1,6 +1,6 @@
 import { PaginatedResponse } from '../contracts';
 
-export function getPaginationParams(query: Record<string, any>, defaultLimit = 50, maxLimit = 100) {
+export function getPaginationParams(query: Record<string, any>, defaultLimit = 20, maxLimit = 20) {
   const limit = Math.min(Math.max(parseInt(query.limit as string) || defaultLimit, 1), maxLimit);
   const offset = Math.max(parseInt(query.offset as string) || 0, 0);
   return { limit, offset };
