@@ -593,13 +593,13 @@ describe('Gmail OAuth Routes (COM-19)', () => {
         'receivedAt',
         'relevanceState',
         'sender',
-        'subject'
+        'subject',
+        'threadId'
       ]);
       expect(keys).not.toContain('createdAt');
       expect(keys).not.toContain('updatedAt');
       expect(keys).not.toContain('userId');
       expect(keys).not.toContain('applicationId');
-      expect(keys).not.toContain('threadId');
     });
 
     it('isolates messages between users', async () => {

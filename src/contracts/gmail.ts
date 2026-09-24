@@ -52,6 +52,7 @@ export const EmailMatchStateSchema = z.enum(['UNMATCHED', 'MATCHED', 'AMBIGUOUS'
 export const EmailMessageSchema = z.object({
   id: z.string(),
   gmailMessageId: z.string(),
+  threadId: z.string().nullable(),
   subject: z.string().nullable(),
   sender: z.string().nullable(),
   receivedAt: z.union([z.string(), z.date()]).nullable(),

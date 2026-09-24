@@ -355,6 +355,7 @@ router.get('/messages', async (req: Request, res: Response, next: NextFunction) 
       select: {
         id: true,
         gmailMessageId: true,
+        threadId: true,
         subject: true,
         sender: true,
         receivedAt: true,
