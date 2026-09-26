@@ -1,9 +1,8 @@
 import dotenv from 'dotenv';
 import path from 'path';
+import { assertTestDatabase } from '../utils/testDatabase';
 
 // Load .env.test
 dotenv.config({ path: path.resolve(__dirname, '../../.env.test'), override: true });
 
-if (!process.env.DATABASE_URL?.includes('test')) {
-  throw new Error('SAFETY GUARD: DATABASE_URL does not contain "test". Refusing to run tests against potentially real database.');
-}
+assertTestDatabase(process.env.DATABASE_URL, process.env.TEST_DATABASE_URL);

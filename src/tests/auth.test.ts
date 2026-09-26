@@ -1,5 +1,7 @@
+import { OAuth2Client } from 'google-auth-library';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import request from 'supertest';
+import { randomUUID } from 'node:crypto';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
 
@@ -17,6 +19,7 @@ vi.mock('google-auth-library', () => {
       iss: 'https://accounts.google.com',
       sub: 'mock_google_id_123',
       email: 'auth_test_user@gmail.com',
+      email_verified: true,
       name: 'Auth Test User',
     }),
   });
@@ -48,9 +51,7 @@ describe('Google OAuth Sign-In (COM-24)', () => {
   });
 
   afterAll(async () => {
-    if (testUser) {
-      await prisma.user.deleteMany({ where: { id: testUser.id } });
-    }
+    await prisma.user.deleteMany({ where: { email: 'auth_test_user@gmail.com' } });
   });
 
   beforeEach(async () => {
@@ -103,6 +104,29 @@ describe('Google OAuth Sign-In (COM-24)', () => {
 
     expect(meRes.status).toBe(200);
     expect(meRes.body.email).toBe('auth_test_user@gmail.com');
+  });
+
+  it('rejects unverified email claims before linking an existing user', async () => {
+    testUser = await prisma.user.create({ data: { email: 'auth_test_user@gmail.com' } });
+    vi.mocked(new OAuth2Client().verifyIdToken).mockResolvedValueOnce({
+      getPayload: () => ({ iss: 'https://accounts.google.com', sub: 'unverified-id', email: testUser.email, email_verified: false }),
+    } as never);
+    const connected = await request(app).get('/api/auth/connect');
+    const cookie = (connected.headers['set-cookie'] as unknown as string[]).find(c => c.startsWith('google_login_state='))!.split(';')[0];
+    const state = /s%3A([^.]+)/.exec(cookie)![1];
+    const response = await request(app).get(`/api/auth/callback?code=mock&state=${state}`).set('Cookie', cookie);
+    expect(response.headers.location).toContain('error=server_error');
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: testUser.id } })).googleId).toBeNull();
+  });
+
+  it('does not replace a different existing Google identity', async () => {
+    testUser = await prisma.user.create({ data: { email: 'auth_test_user@gmail.com', googleId: 'existing-google-id' } });
+    const connected = await request(app).get('/api/auth/connect');
+    const cookie = (connected.headers['set-cookie'] as unknown as string[]).find(c => c.startsWith('google_login_state='))!.split(';')[0];
+    const state = /s%3A([^.]+)/.exec(cookie)![1];
+    const response = await request(app).get(`/api/auth/callback?code=mock&state=${state}`).set('Cookie', cookie);
+    expect(response.headers.location).toContain('error=server_error');
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: testUser.id } })).googleId).toBe('existing-google-id');
   });
 
   it('returns 401 for protected endpoints without session', async () => {
@@ -168,7 +192,7 @@ describe('Google OAuth Sign-In (COM-24)', () => {
     beforeAll(async () => {
       devUser = await prisma.user.create({
         data: {
-          email: 'dev@career-companion.local',
+          email: `auth-dev-${randomUUID()}@audit.test`,
           name: 'Dev User'
         }
       });
@@ -184,17 +208,17 @@ describe('Google OAuth Sign-In (COM-24)', () => {
       process.env.ENABLE_DEV_AUTH = 'true';
       const res = await request(app)
         .get('/api/auth/me')
-        .set('X-Development-User', 'dev@career-companion.local');
+        .set('X-Development-User', devUser.email);
       
       expect(res.status).toBe(200);
-      expect(res.body.email).toBe('dev@career-companion.local');
+      expect(res.body.email).toBe(devUser.email);
     });
 
     it('returns 401 for /api/auth/me when development auth is disabled', async () => {
       process.env.ENABLE_DEV_AUTH = 'false';
       const res = await request(app)
         .get('/api/auth/me')
-        .set('X-Development-User', 'dev@career-companion.local');
+        .set('X-Development-User', devUser.email);
       
       expect(res.status).toBe(401);
     });
