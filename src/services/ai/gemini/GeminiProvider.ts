@@ -11,6 +11,7 @@ import {
   AI_CONTRACT_VERSIONS
 } from '../contracts';
 import { 
+  AIProviderError,
   RetryableAIError, 
   TerminalAIError, 
   SchemaValidationFailure 
@@ -105,7 +106,7 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
       throw new TerminalAIError('GEMINI_API_KEY is not configured');
     }
 
-    this.client = new GoogleGenAI({ apiKey });
+    this.client = new GoogleGenAI({ apiKey, httpOptions: { timeout: 30_000, retryOptions: { attempts: 1 } } });
     this.relevanceModel = process.env.GEMINI_RELEVANCE_MODEL || 'gemini-2.5-flash-lite';
     this.extractionModel = process.env.GEMINI_EXTRACTION_MODEL || 'gemini-2.5-flash';
   }
@@ -122,16 +123,10 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
       throw err;
     }
 
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    
-    const retryableKeywords = ['429', '503', '504', 'timeout', 'quota', 'rate limit'];
-    const isRetryable = retryableKeywords.some(kw => errorMsg.toLowerCase().includes(kw));
-
-    if (isRetryable) {
-      throw new RetryableAIError('Transient AI provider error', err);
-    }
-    
-    throw new TerminalAIError(`Terminal AI provider error: ${errorMsg}`, err);
+    const status = typeof err === 'object' && err !== null && 'status' in err ? Number(err.status) : undefined;
+    if (status === 429 || status === 503) throw new RetryableAIError('AI provider rejected request; retry after cooldown');
+    if (status && status >= 400 && status < 500) throw new TerminalAIError('AI provider rejected request');
+    throw new AIProviderError('AI provider outcome unknown; reconciliation required', false);
   }
 
   private async generateStructuredOutput<T>(
@@ -152,9 +147,15 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
           responseMimeType: 'application/json',
           responseSchema: nativeSchema,
           temperature: 0.1,
+          maxOutputTokens: 2048,
+          thinkingConfig: { thinkingBudget: 0 },
         }
       });
 
+      console.log(JSON.stringify({ event: 'ai_usage', model,
+        inputTokens: response.usageMetadata?.promptTokenCount,
+        outputTokens: response.usageMetadata?.candidatesTokenCount,
+      }));
       const text = response.text;
       if (!text) {
         throw new TerminalAIError('AI provider returned empty response');
@@ -171,7 +172,7 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
       if (!validationResult.success) {
         throw new SchemaValidationFailure(
           'AI provider returned malformed structured data',
-          validationResult.error.format()
+          'Structured response failed validation'
         );
       }
 

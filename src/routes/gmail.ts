@@ -21,6 +21,7 @@ import { google } from 'googleapis';
 import { requireAuth } from '../middleware/auth';
 import { encryptToken, decryptToken, loadEncryptionKey } from '../utils/gmailTokenEncryption';
 import { prisma } from '../db/prisma';
+import { requestGmailSync } from '../jobs/gmailSyncJob';
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
 
 const router = Router();
@@ -75,6 +76,8 @@ router.get('/status', async (req: Request, res: Response, next: NextFunction) =>
         status: true,
         syncStatus: true,
         lastSyncedAt: true,
+        syncLeaseUntil: true,
+        syncError: true,
         // accessToken and refreshToken are deliberately NOT selected.
       },
     });
@@ -93,7 +96,8 @@ router.get('/status', async (req: Request, res: Response, next: NextFunction) =>
       connected: connection.status === 'CONNECTED',
       gmailEmail: connection.gmailEmail,
       status: connection.status,
-      syncStatus: connection.syncStatus,
+      syncStatus: connection.syncStatus === 'SYNCING' && (!connection.syncLeaseUntil || connection.syncLeaseUntil < new Date()) ? 'FAILED' : connection.syncStatus,
+      syncError: connection.syncError,
       lastSyncedAt: connection.lastSyncedAt,
     });
   } catch (err) {
@@ -114,7 +118,7 @@ router.get('/connect', async (req: Request, res: Response, next: NextFunction) =
 
     // Generate a cryptographically random CSRF state token (32 bytes = 64 hex chars).
     const { randomBytes } = await import('crypto');
-    const state = randomBytes(32).toString('hex');
+    const state = `${req.auth!.user.id}.${randomBytes(32).toString('hex')}`;
 
     const authUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline',
@@ -166,7 +170,7 @@ router.get('/callback', async (req: Request, res: Response) => {
     // Clear the state cookie immediately — it is single-use.
     res.clearCookie(STATE_COOKIE_NAME);
 
-    if (!storedState || !state || storedState !== state) {
+    if (!storedState || !state || storedState !== state || !state.startsWith(`${userId}.`)) {
       // Do NOT log `state` param — it could reveal correlation data.
       return res.status(400).json({
         error: {
@@ -204,6 +208,11 @@ router.get('/callback', async (req: Request, res: Response) => {
       throw new Error('Could not determine Gmail address from Google profile');
     }
 
+    const previous = await prisma.gmailConnection.findUnique({ where: { userId } });
+    if (previous && previous.gmailEmail.toLowerCase() !== gmailEmail.toLowerCase()) {
+      return res.redirect(302, `${frontendGmailUrl}?gmailError=account_change`);
+    }
+
     // ── Encrypt tokens ────────────────────────────────────────────────────
     // SECURITY: Tokens are encrypted immediately after receipt.
     // The plaintext value must not be stored in any variable that persists
@@ -215,7 +224,8 @@ router.get('/callback', async (req: Request, res: Response) => {
 
     // ── Upsert GmailConnection ────────────────────────────────────────────
     await prisma.gmailConnection.upsert({
-      where: { userId },
+      // Including mailbox identity prevents a concurrent first grant from overwriting a different mailbox.
+      where: { userId, gmailEmail: { equals: gmailEmail, mode: 'insensitive' } },
       create: {
         userId,
         gmailEmail,
@@ -229,6 +239,7 @@ router.get('/callback', async (req: Request, res: Response) => {
         status: 'CONNECTED',
         syncStatus: 'IDLE',
         accessToken: encryptedAccessToken,
+        syncClaim: null, syncLeaseUntil: null, syncError: null,
         // Only update refreshToken if Google returned a new one.
         // Google only returns a refresh_token when prompt=consent is used.
         ...(encryptedRefreshToken ? { refreshToken: encryptedRefreshToken } : {}),
@@ -238,7 +249,7 @@ router.get('/callback', async (req: Request, res: Response) => {
     return res.redirect(302, frontendGmailUrl);
   } catch (err) {
     // Do not expose error details to the browser — redirect with a generic error.
-    console.error('[Gmail OAuth] Callback error (no sensitive data below):', (err as Error).message);
+    console.error(JSON.stringify({ event: 'gmail_oauth_failed', category: err instanceof Error ? err.name : 'UnknownError' }));
     return res.redirect(302, `${frontendGmailUrl}?gmailError=server_error`);
   }
 });
@@ -271,7 +282,7 @@ router.post('/disconnect', async (req: Request, res: Response, next: NextFunctio
       await oauth2Client.revokeToken(decryptedAccessToken);
     } catch (revokeErr) {
       // Log that revocation failed, but do NOT log the token value.
-      console.warn('[Gmail Disconnect] Token revocation failed (continuing disconnect):', (revokeErr as Error).message);
+      console.warn(JSON.stringify({ event: 'gmail_revocation_failed', category: revokeErr instanceof Error ? revokeErr.name : 'UnknownError' }));
     }
 
     // ── Clear tokens and mark NOT_CONNECTED ───────────────────────────────
@@ -286,6 +297,9 @@ router.post('/disconnect', async (req: Request, res: Response, next: NextFunctio
         accessToken: '', // Cleared — not a valid encrypted value
         refreshToken: null,
         lastHistoryId: null,
+        syncClaim: null,
+        syncLeaseUntil: null,
+        syncError: null,
       },
     });
 
@@ -299,7 +313,7 @@ export const gmailRouter = router;
 
 // ─── POST /api/gmail/sync ────────────────────────────────────────────────────
 
-import { GmailSyncService, GmailAuthError, SyncInProgressError } from '../services/gmailSync';
+import { GmailAuthError, SyncInProgressError } from '../services/gmailSync';
 
 router.post('/sync', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -313,12 +327,12 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
       return res.status(400).json({ error: { code: 'GMAIL_NOT_CONNECTED', message: 'Gmail is not connected' } });
     }
 
-    if (connection.syncStatus === 'SYNCING') {
+    if (connection.syncStatus === 'SYNCING' && connection.syncLeaseUntil && connection.syncLeaseUntil > new Date()) {
       return res.status(409).json({ error: { code: 'SYNC_IN_PROGRESS', message: 'A sync is already in progress' } });
     }
 
-    const result = await GmailSyncService.syncUser(userId);
-    return res.status(200).json(result);
+    const result = await requestGmailSync(userId);
+    return res.status(202).json(result);
   } catch (err) {
     if (err instanceof SyncInProgressError) {
       return res.status(409).json({ error: { code: 'SYNC_IN_PROGRESS', message: err.message } });
@@ -351,7 +365,7 @@ router.get('/messages', async (req: Request, res: Response, next: NextFunction) 
       where: { userId },
       take: limit + 1,
       skip: offset,
-      orderBy: { receivedAt: 'desc' },
+      orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
       select: {
         id: true,
         gmailMessageId: true,
@@ -361,6 +375,7 @@ router.get('/messages', async (req: Request, res: Response, next: NextFunction) 
         receivedAt: true,
         relevanceState: true,
         matchState: true,
+        processingState: true,
       }
     });
 

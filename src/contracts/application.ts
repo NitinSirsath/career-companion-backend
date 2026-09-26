@@ -1,3 +1,4 @@
+import { createPaginatedResponseSchema, PaginatedResponse } from './pagination';
 import { z } from 'zod';
 
 export const ApplicationStatusSchema = z.enum([
@@ -10,8 +11,10 @@ export const ApplicationStatusSchema = z.enum([
   'CLOSED',
 ]);
 
+export type ApplicationStatus = z.infer<typeof ApplicationStatusSchema>;
+
 export const CreateApplicationRequestSchema = z.object({
-  companyName: z.string().min(1, 'Company name is required'),
+  companyName: z.string().trim().min(1, 'Company name is required').max(200),
   jobTitle: z.string().optional(),
   location: z.string().optional(),
   appliedAt: z.string().datetime().optional().or(z.date().optional()),
@@ -47,7 +50,7 @@ export const ApplicationResponseSchema = z.object({
 
 export type ApplicationResponse = z.infer<typeof ApplicationResponseSchema>;
 
-export const ListApplicationsResponseSchema = z.array(ApplicationResponseSchema);
+export const ListApplicationsResponseSchema = createPaginatedResponseSchema(ApplicationResponseSchema);
 export type ListApplicationsResponse = z.infer<typeof ListApplicationsResponseSchema>;
 
 // ─── ApplicationEvent ────────────────────────────────────────────────────────
@@ -65,7 +68,7 @@ export const ApplicationEventResponseSchema = z.object({
 });
 
 export type ApplicationEventResponse = z.infer<typeof ApplicationEventResponseSchema>;
-export type ListApplicationEventsResponse = ApplicationEventResponse[];
+export type ListApplicationEventsResponse = PaginatedResponse<ApplicationEventResponse>;
 
 // ─── Action ─────────────────────────────────────────────────────────────────
 
@@ -81,4 +84,4 @@ export const ApplicationActionResponseSchema = z.object({
 });
 
 export type ApplicationActionResponse = z.infer<typeof ApplicationActionResponseSchema>;
-export type ListApplicationActionsResponse = ApplicationActionResponse[];
+export type ListApplicationActionsResponse = PaginatedResponse<ApplicationActionResponse>;

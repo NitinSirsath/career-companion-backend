@@ -67,6 +67,25 @@ Run `npm run dev` to start the development server.
 
 The `src/contracts` directory contains Zod schemas and types that are shared with the frontend. The frontend repository pulls these files using its own sync script. Do not introduce breaking changes to these contracts without coordinating with the frontend.
 
+## Stabilization and verification
+
+See [STABILIZATION.md](STABILIZATION.md) for migration preflight, production configuration, recovery boundaries, and release verification. The stabilization API changes require the matching frontend release: Gmail sync returns `202 { accepted: true }`; application events and actions return paginated envelopes. All public lists default to and cap at 20 items.
+
+Tests require a **separate local test database**, never the development database. Create an empty database named `career_companion_test` (or `career_companion_*test`). In ignored `.env.test`, set `DATABASE_URL` and `TEST_DATABASE_URL` to the exact same explicit URL for that database, plus development authentication and fixture-only signing/encryption secrets. The guard rejects remote hosts, development database names, URL overrides, and missing/mismatched test URLs before tests touch data. The suite deletes fixture data, so do not put real user records in this database.
+
+To migrate the dedicated test database, explicitly export its URL as `TEST_DATABASE_URL`, then run:
+
+```bash
+DATABASE_URL="$TEST_DATABASE_URL" npx prisma migrate deploy
+npx prisma generate
+npm run typecheck
+npm run lint
+npm test
+npm run build
+```
+
+Vitest loads `.env.test` with override enabled; confirm it contains that same test URL. Do not use `db:reset` for verification. The frontend smoke script also enforces this database guard and requires both repositories to be built.
+
 ## Application API & Development Authentication (COM-13)
 
 For Sprint 1 local development, this repository uses a **Development-Only Authentication Boundary**. 

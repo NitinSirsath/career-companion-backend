@@ -113,7 +113,7 @@ router.get('/callback', async (req: Request, res: Response) => {
     });
 
     const payload = ticket.getPayload();
-    if (!payload || !payload.sub || !payload.email) {
+    if (!payload || !payload.sub || !payload.email || payload.email_verified !== true) {
       throw new Error('Google identity failed to return valid ID or email in claims');
     }
     
@@ -136,9 +136,11 @@ router.get('/callback', async (req: Request, res: Response) => {
       });
 
       if (user) {
+        if (user.googleId && user.googleId !== googleId) throw new Error('Identity already linked');
         // Link existing user to Google
         user = await prisma.user.update({
-          where: { id: user.id },
+          // Preserve the identity check if two verified grants race to link an account.
+          where: { id: user.id, OR: [{ googleId: null }, { googleId }] },
           data: {
             googleId,
             name: user.name || name,
@@ -164,17 +166,12 @@ router.get('/callback', async (req: Request, res: Response) => {
       }
     }
 
+    await new Promise<void>((resolve, reject) => req.session.regenerate(err => err ? reject(err) : resolve()));
     req.session.userId = user.id;
-
-    // Use save() to wait for session store to persist before redirect
-    req.session.save((err) => {
-      if (err) {
-        throw err;
-      }
-      return res.redirect(302, frontendDashboardUrl);
-    });
+    await new Promise<void>((resolve, reject) => req.session.save(err => err ? reject(err) : resolve()));
+    return res.redirect(302, frontendDashboardUrl);
   } catch (err) {
-    console.error('[Google Auth] Callback error:', (err as Error).message);
+    console.error(JSON.stringify({ event: 'google_login_failed', category: err instanceof Error ? err.name : 'UnknownError' }));
     return res.redirect(302, `${frontendLoginUrl}?error=server_error`);
   }
 });

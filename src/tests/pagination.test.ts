@@ -125,10 +125,8 @@ describe('System-Wide Pagination (COM-48)', () => {
         .get('/api/emails/unmatched?limit=-10&offset=invalid')
         .set('X-Development-User', userEmail);
         
-      // Limit clamped to 1 minimum, offset clamped to 0
-      expect(res.body.items.length).toBe(1);
-      expect(res.body.metadata.limit).toBe(1);
-      expect(res.body.metadata.offset).toBe(0);
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
     });
 
     it('11. prevention of unbounded requests & 12. contract shape', async () => {

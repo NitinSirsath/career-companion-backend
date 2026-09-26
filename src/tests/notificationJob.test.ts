@@ -36,6 +36,7 @@ describe('Notification Job', () => {
       }
     });
 
+    process.env.DISCORD_USER_ID = user.id;
     app = await prisma.application.create({
       data: {
         userId: user.id,
@@ -144,4 +145,37 @@ describe('Notification Job', () => {
     // Should not call send because it was already delivered
     expect(sendMock).not.toHaveBeenCalled();
   });
+  it('does not disclose another user action to the configured webhook', async () => {
+    const action = await prisma.action.create({ data: { applicationId: app.id, type: 'ACTION_REQUIRED' } });
+    const configured = process.env.DISCORD_USER_ID;
+    process.env.DISCORD_USER_ID = 'another-user';
+    const send = vi.fn(); DiscordProvider.prototype.send = send;
+    try { await startNotificationWorker(); await workHandler([{ data: { actionId: action.id } }]); }
+    finally { process.env.DISCORD_USER_ID = configured; }
+    expect(send).not.toHaveBeenCalled();
+  });
+  it('delivers once under concurrent duplicate execution', async () => {
+    const action = await prisma.action.create({ data: { applicationId: app.id, type: 'ACTION_REQUIRED' } });
+    let release!: () => void;
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const send = vi.fn(async () => { started(); await blocked; return { success: true, retryable: false }; });
+    DiscordProvider.prototype.send = send;
+    await startNotificationWorker();
+    const first = workHandler([{ data: { actionId: action.id } }]); await ready;
+    await workHandler([{ data: { actionId: action.id } }]);
+    release(); await first;
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+  it('does not resend after successful delivery followed by persistence failure', async () => {
+    const action = await prisma.action.create({ data: { applicationId: app.id, type: 'ACTION_REQUIRED' } });
+    const send = vi.fn().mockResolvedValue({ success: true, retryable: false }); DiscordProvider.prototype.send = send;
+    vi.spyOn(prisma.notificationDelivery, 'update').mockRejectedValueOnce(new Error('database unavailable'));
+    await startNotificationWorker();
+    await expect(workHandler([{ data: { actionId: action.id } }])).rejects.toThrow();
+    await workHandler([{ data: { actionId: action.id } }]);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
 });

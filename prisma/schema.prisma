@@ -75,6 +75,7 @@ enum EmailProcessingState {
 }
 
 model Email {
+  aiOperations       AIOperation[]
   aiProcessingResult AIProcessingResult?
   id                 String                   @id @default(uuid()) @db.Uuid
   userId             String                   @db.Uuid
@@ -120,17 +121,20 @@ enum GmailSyncStatus {
 }
 
 model GmailConnection {
-  id            String                @id @default(uuid()) @db.Uuid
-  userId        String                @unique @db.Uuid
-  gmailEmail    String
-  status        GmailConnectionStatus @default(NOT_CONNECTED)
-  syncStatus    GmailSyncStatus       @default(IDLE)
-  accessToken   String
-  refreshToken  String?
-  lastHistoryId String?
-  lastSyncedAt  DateTime?
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
+  id             String                @id @default(uuid()) @db.Uuid
+  userId         String                @unique @db.Uuid
+  gmailEmail     String
+  status         GmailConnectionStatus @default(NOT_CONNECTED)
+  syncStatus     GmailSyncStatus       @default(IDLE)
+  accessToken    String
+  refreshToken   String?
+  lastHistoryId  String?
+  lastSyncedAt   DateTime?
+  syncClaim      String?
+  syncLeaseUntil DateTime?
+  syncError      String?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -230,6 +234,7 @@ model ApplicationEvent {
   application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   email       Email?      @relation(fields: [emailId], references: [id], onDelete: SetNull)
 
+  @@unique([applicationId, emailId, type])
   @@index([applicationId])
   @@index([emailId])
   @@map("application_events")
@@ -252,6 +257,7 @@ model Action {
 
   notificationDeliveries NotificationDelivery[]
 
+  @@unique([applicationId, emailId, type])
   @@index([applicationId])
   @@index([emailId])
   @@map("actions")
@@ -275,6 +281,7 @@ model NotificationDelivery {
   status        NotificationStatus       @default(PENDING)
   attemptCount  Int                      @default(0)
   lastAttemptAt DateTime?
+  claimedAt     DateTime?
   errorDetails  String?
   createdAt     DateTime                 @default(now())
 
@@ -283,4 +290,45 @@ model NotificationDelivery {
   @@unique([actionId, provider])
   @@index([status])
   @@map("notification_deliveries")
+}
+
+enum AIOperationStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  RETRYABLE
+  FAILED
+  UNKNOWN
+}
+
+// A claim is committed BEFORE the external effect. A lost/uncertain response
+// is never automatically reclaimed: an operator must reconcile it first.
+model AIOperation {
+  id          String            @id @default(uuid()) @db.Uuid
+  emailId     String            @db.Uuid
+  operation   String
+  version     String
+  status      AIOperationStatus @default(PENDING)
+  attempts    Int               @default(0)
+  result      Json?
+  errorCode   String?
+  retryAfter  DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  email       Email             @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@unique([emailId, operation, version])
+  @@index([status, retryAfter])
+  @@map("ai_operations")
+}
+
+// One durable counter for each UTC day. Limits apply across users/workers.
+model AICallBudget {
+  day           String    @id
+  calls         Int       @default(0)
+  cooldownUntil DateTime?
+
+  @@map("ai_call_budgets")
 }

@@ -29,6 +29,7 @@ export class DiscordProvider implements NotificationProvider {
       const message = {
         content: `**Job Search Update**`,
         embeds: [embed],
+        allowed_mentions: { parse: [] },
       };
 
       const controller = new AbortController();
@@ -55,8 +56,8 @@ export class DiscordProvider implements NotificationProvider {
       // Handle specific HTTP errors
       const status = response.status;
       
-      // Retryable errors: Rate limits (429), Server errors (5xx)
-      const isRetryable = status === 429 || status >= 500;
+      // Retry only explicit rate-limit / temporary-unavailable rejections.
+      const isRetryable = status === 429 || status === 503;
       
       return { 
         success: false, 
@@ -66,7 +67,7 @@ export class DiscordProvider implements NotificationProvider {
       };
       
     } catch (error) {
-      // Network errors (e.g. timeout, DNS failure) are generally retryable
+      // An uncertain delivery may already have reached Discord; do not auto-resend.
       let errorCategory = 'NetworkError';
       if (error instanceof Error && error.name === 'AbortError') {
         errorCategory = 'TimeoutError';
@@ -74,10 +75,10 @@ export class DiscordProvider implements NotificationProvider {
 
       return {
         success: false,
-        retryable: true,
+        retryable: false,
         errorCategory,
         // Sanitized stable string to prevent leaking sensitive info from raw error messages
-        errorDetails: 'Request failed due to a network error or timeout.',
+        errorDetails: 'Delivery outcome unknown; review before resending.',
       };
     }
   }

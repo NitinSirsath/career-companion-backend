@@ -7,7 +7,7 @@ export async function developmentAuthMiddleware(
   next: NextFunction
 ) {
   try {
-    if (process.env.ENABLE_DEV_AUTH !== 'true') {
+    if (process.env.NODE_ENV === 'production' || process.env.ENABLE_DEV_AUTH !== 'true') {
       return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Development auth is not enabled in this environment' } });
     }
 
@@ -40,7 +40,7 @@ export async function developmentAuthMiddleware(
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
-    if (process.env.ENABLE_DEV_AUTH === 'true' && req.header('X-Development-User')) {
+    if (process.env.NODE_ENV !== 'production' && process.env.ENABLE_DEV_AUTH === 'true' && req.header('X-Development-User')) {
       return developmentAuthMiddleware(req, res, next);
     }
     

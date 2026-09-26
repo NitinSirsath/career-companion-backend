@@ -1,5 +1,6 @@
 import { getQueue } from '../services/queue';
 import { prisma } from '../db/prisma';
+import { TerminalAIError } from '../services/ai/errors';
 import { EmailAIPipeline } from '../services/ai/pipeline';
 
 export const EMAIL_PROCESSING_JOB = 'email-processing-job';
@@ -16,7 +17,10 @@ export async function enqueueEmailProcessingJob(userId: string, emailId: string)
   
   await queue.send(EMAIL_PROCESSING_JOB, { userId, emailId }, {
     singletonKey: jobId,
+    singletonSeconds: 300,
     retryLimit: 3,
+    retryDelay: 60,
+    expireInSeconds: 300,
     retryBackoff: true,
   });
 }
@@ -36,33 +40,10 @@ export async function startEmailProcessingWorker() {
       timestamp: new Date().toISOString()
     }));
     
-    // Update processing state
-    await prisma.email.updateMany({
-      where: { id: emailId, userId },
-      data: { processingState: 'PROCESSING' }
-    });
-
     try {
+      await prisma.email.updateMany({ where: { id: emailId, userId, processingState: { not: 'COMPLETED' } }, data: { processingState: 'PROCESSING' } });
       await EmailAIPipeline.processEmail(userId, emailId);
 
-      const aiResult = await prisma.aIProcessingResult.findUnique({
-        where: { emailId },
-        select: { relevanceDecision: true }
-      });
-
-      let mappedRelevanceState = undefined;
-      if (aiResult?.relevanceDecision === 'RELEVANT') mappedRelevanceState = 'RELEVANT';
-      else if (aiResult?.relevanceDecision === 'IRRELEVANT') mappedRelevanceState = 'IRRELEVANT';
-      else if (aiResult?.relevanceDecision === 'UNCERTAIN') mappedRelevanceState = 'RELEVANT';
-
-      await prisma.email.updateMany({
-        where: { id: emailId, userId },
-        data: { 
-          processingState: 'COMPLETED',
-          ...(mappedRelevanceState ? { relevanceState: mappedRelevanceState as import('@prisma/client').EmailRelevanceState } : {})
-        }
-      });
-      
       const durationMs = Date.now() - startTime;
       console.log(JSON.stringify({
         event: 'job_completed',
@@ -73,7 +54,7 @@ export async function startEmailProcessingWorker() {
       }));
     } catch (err) {
       await prisma.email.updateMany({
-        where: { id: emailId, userId },
+        where: { id: emailId, userId, processingState: { not: 'COMPLETED' } },
         data: { processingState: 'FAILED' }
       });
       
@@ -88,7 +69,7 @@ export async function startEmailProcessingWorker() {
         timestamp: new Date().toISOString()
       }));
       // Rethrow to let pg-boss handle retry/dead-letter
-      throw err;
+      if (!(err instanceof TerminalAIError)) throw err;
     }
   });
 }

@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { ActionService } from '../services/action';
@@ -15,7 +16,7 @@ router.use(requireAuth);
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.auth!.user.id;
-    const status = req.query.status as string | undefined;
+    const status = z.enum(['PENDING', 'COMPLETED', 'DISMISSED']).optional().parse(req.query.status);
     const { limit, offset } = getPaginationParams(req.query);
 
     const actions = await ActionService.getUserActions(userId, status, limit, offset);
@@ -32,7 +33,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.auth!.user.id;
-    const actionId = req.params.id as string;
+    const actionId = z.uuid().parse(req.params.id);
     const data = UpdateActionRequestSchema.parse(req.body);
 
     const updated = await ActionService.updateActionStatus(userId, actionId, data.status);

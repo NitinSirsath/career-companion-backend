@@ -5,8 +5,10 @@ import session from 'express-session';
 import pgSession from 'connect-pg-simple';
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
+import { validateProductionConfig } from './utils/config';
 
 dotenv.config();
+validateProductionConfig(process.env);
 
 // ── Startup configuration warnings ───────────────────────────────────────────
 // These surface missing required env vars at startup rather than at request time.
@@ -25,6 +27,8 @@ if (!process.env.FRONTEND_URL) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const app = express();
+// Explicit deployment setting; never trust arbitrary forwarded headers by default.
+if (process.env.TRUST_PROXY_HOPS) app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS));
 const port = process.env.PORT || 3000;
 
 // Default to the Vite dev server port so CORS works in local development
@@ -79,18 +83,20 @@ app.use('/api/actions', actionRouter);
 
 app.use(errorHandler);
 
+import { startGmailSyncWorker } from './jobs/gmailSyncJob';
 import { startEmailProcessingWorker } from './jobs/emailProcessingJob';
 import { startNotificationWorker } from './jobs/notificationJob';
 import { stopQueue } from './services/queue';
 import { prisma } from './db/prisma';
 
 if (process.env.NODE_ENV !== 'test') {
-  startEmailProcessingWorker().catch(err => {
-    console.error('Failed to start worker', err);
+  startGmailSyncWorker().catch(() => console.error(JSON.stringify({ event: 'gmail_worker_start_failed' })));
+  startEmailProcessingWorker().catch(() => {
+    console.error(JSON.stringify({ event: 'email_worker_start_failed' }));
   });
   
-  startNotificationWorker().catch(err => {
-    console.error('Failed to start notification worker', err);
+  startNotificationWorker().catch(() => {
+    console.error(JSON.stringify({ event: 'notification_worker_start_failed' }));
   });
   
   const server = app.listen(port, () => {

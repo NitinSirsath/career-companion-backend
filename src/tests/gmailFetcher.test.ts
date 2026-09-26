@@ -76,7 +76,7 @@ describe('Gmail Fetcher Service (COM-25)', () => {
     expect(body).toBe('Hello World !');
   });
 
-  it('handles 401 error and refreshes token', async () => {
+  it('marks an unrecoverable Google 401 as revoked', async () => {
     await prisma.gmailConnection.update({
       where: { userId: testUser.id },
       data: {
@@ -84,6 +84,7 @@ describe('Gmail Fetcher Service (COM-25)', () => {
       }
     });
 
-    await expect(GmailFetcherService.fetchMessageBody(testUser.id, 'msg-401')).rejects.toThrow('Failed to refresh Gmail token');
+    await expect(GmailFetcherService.fetchMessageBody(testUser.id, 'msg-401')).rejects.toThrow();
+    expect((await prisma.gmailConnection.findUniqueOrThrow({ where: { userId: testUser.id } })).status).toBe('REVOKED');
   });
 });
