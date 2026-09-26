@@ -24,22 +24,19 @@ export class ApplicationService {
     return this.mapToResponse(application, null, 0);
   }
 
-  static async listApplications(userId: string, limit: number = 50, offset: number = 0): Promise<ApplicationResponse[]> {
+  static async listApplications(userId: string, limit: number = 20, offset: number = 0): Promise<ApplicationResponse[]> {
     const applications = await prisma.application.findMany({
       where: { userId },
       take: limit + 1,
       skip: offset,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: {
         events: {
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           take: 1,
           select: { type: true, createdAt: true },
         },
-        actions: {
-          where: { status: 'PENDING' },
-          select: { id: true },
-        },
+        _count: { select: { actions: { where: { status: 'PENDING' } } } },
       },
     });
 
@@ -47,9 +44,17 @@ export class ApplicationService {
       this.mapToResponse(
         app,
         app.events[0] ?? null,
-        app.actions.length
+        app._count.actions
       )
     );
+  }
+
+  static async getApplication(userId: string, id: string): Promise<ApplicationResponse | null> {
+    const app = await prisma.application.findFirst({ where: { id, userId }, include: {
+      events: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: { type: true, createdAt: true } },
+      _count: { select: { actions: { where: { status: 'PENDING' } } } },
+    } });
+    return app ? this.mapToResponse(app, app.events[0] ?? null, app._count.actions) : null;
   }
 
   /**
@@ -59,7 +64,7 @@ export class ApplicationService {
    */
   static async getApplicationEvents(
     userId: string,
-    applicationId: string
+    applicationId: string, limit = 20, offset = 0
   ): Promise<ApplicationEventResponse[] | null> {
     // Verify ownership before returning any data
     const app = await prisma.application.findUnique({
@@ -72,7 +77,8 @@ export class ApplicationService {
 
     const events = await prisma.applicationEvent.findMany({
       where: { applicationId },
-      orderBy: { createdAt: 'asc' }, // deterministic chronological order
+      take: limit + 1, skip: offset,
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], // deterministic chronological order
       select: {
         id: true,
         applicationId: true,
@@ -106,7 +112,7 @@ export class ApplicationService {
    */
   static async getApplicationActions(
     userId: string,
-    applicationId: string
+    applicationId: string, limit = 20, offset = 0
   ): Promise<ApplicationActionResponse[] | null> {
     // Verify ownership
     const app = await prisma.application.findUnique({
@@ -119,10 +125,12 @@ export class ApplicationService {
 
     const actions = await prisma.action.findMany({
       where: { applicationId },
+      take: limit + 1, skip: offset,
       orderBy: [
-        { status: 'asc' }, // PENDING sorts before others alphabetically
+        { status: 'desc' }, // PENDING before DISMISSED and COMPLETED
         { deadline: 'asc' },
         { createdAt: 'asc' },
+        { id: 'asc' },
       ],
       select: {
         id: true,

@@ -2,7 +2,7 @@ import { prisma } from '../db/prisma';
 import { ActionWithContextResponse } from '../contracts';
 
 export class ActionService {
-  static async getUserActions(userId: string, status?: string, limit: number = 50, offset: number = 0): Promise<ActionWithContextResponse[]> {
+  static async getUserActions(userId: string, status?: string, limit: number = 20, offset: number = 0): Promise<ActionWithContextResponse[]> {
     const actions = await prisma.action.findMany({
       where: {
         application: {
@@ -13,9 +13,10 @@ export class ActionService {
       take: limit + 1,
       skip: offset,
       orderBy: [
-        { status: 'asc' },
+        { status: 'desc' }, // Pending work comes before resolved actions.
         { deadline: 'asc' },
-        { createdAt: 'asc' }
+        { createdAt: 'asc' },
+        { id: 'asc' }
       ],
       include: {
         application: {

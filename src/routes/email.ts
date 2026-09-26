@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { MatcherService } from '../services/matcher';
@@ -78,7 +79,7 @@ router.get('/unmatched', async (req: Request, res: Response, next: NextFunction)
 router.post('/:id/resolve', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.auth!.user.id;
-    const emailId = req.params.id as string;
+    const emailId = z.uuid().parse(req.params.id);
     const data = ResolveAmbiguityRequestSchema.parse(req.body);
 
     try {

@@ -216,8 +216,8 @@ describe('Application API (COM-13)', () => {
         .set('X-Development-User', 'user-a@test.local');
 
       expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-      expect(res.body.length).toBe(2);
+      expect(Array.isArray(res.body.items)).toBe(true);
+      expect(res.body.items.length).toBe(2);
     });
 
     it('events are returned in chronological order (createdAt ASC)', async () => {
@@ -226,7 +226,7 @@ describe('Application API (COM-13)', () => {
         .set('X-Development-User', 'user-a@test.local');
 
       expect(res.status).toBe(200);
-      const events = res.body;
+      const events = res.body.items;
       expect(events[0].description).toBe('First event');
       expect(events[1].description).toBe('Second event');
 
@@ -241,7 +241,7 @@ describe('Application API (COM-13)', () => {
         .get(`/api/applications/${appWithEvents.id}/events`)
         .set('X-Development-User', 'user-a@test.local');
 
-      const event = res.body[0];
+      const event = res.body.items[0];
       expect(event).toHaveProperty('id');
       expect(event).toHaveProperty('applicationId');
       expect(event).toHaveProperty('type');
@@ -315,8 +315,9 @@ describe('Application API (COM-13)', () => {
         .set('X-Development-User', 'user-a@test.local');
 
       expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-      expect(res.body.length).toBe(2);
+      expect(Array.isArray(res.body.items)).toBe(true);
+      expect(res.body.items.length).toBe(2);
+      expect(res.body.items.map((action: { status: string }) => action.status)).toEqual(['PENDING', 'COMPLETED']);
     });
 
     it('actions contain expected fields', async () => {
@@ -324,7 +325,7 @@ describe('Application API (COM-13)', () => {
         .get(`/api/applications/${appWithActions.id}/actions`)
         .set('X-Development-User', 'user-a@test.local');
 
-      const action = res.body[0];
+      const action = res.body.items[0];
       expect(action).toHaveProperty('id');
       expect(action).toHaveProperty('type');
       expect(action).toHaveProperty('status');
