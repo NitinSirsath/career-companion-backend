@@ -15,7 +15,9 @@ export async function enqueueNotificationJob(actionId: string) {
   
   await queue.send(NOTIFICATION_JOB, { actionId }, {
     singletonKey: jobId,
+    singletonSeconds: 300,
     retryLimit: 3,
+    retryDelay: 60,
     retryBackoff: true,
   });
 }
@@ -40,6 +42,12 @@ export async function startNotificationWorker() {
       console.warn(JSON.stringify({ event: 'notification_failed', reason: 'action_not_found', actionId }));
       return; // Nothing to do
     }
+
+    if (!process.env.DISCORD_USER_ID || action.application.userId !== process.env.DISCORD_USER_ID) {
+      console.warn(JSON.stringify({ event: 'notification_skipped', reason: 'recipient_not_configured_for_owner', actionId }));
+      return;
+    }
+    if (action.status !== 'PENDING') return;
 
     // Check idempotency: Did we already deliver it?
     const existingDelivery = await prisma.notificationDelivery.findUnique({
@@ -75,32 +83,22 @@ export async function startNotificationWorker() {
       deadline: action.deadline ? action.deadline.toISOString() : null,
     };
 
-    // 2. Perform Delivery
+    // Commit a claim before delivery. A crash after sending leaves it claimed;
+    // webhook delivery has no provider idempotency key, so do not auto-resend.
+    await prisma.notificationDelivery.createMany({ data: [{ actionId, provider: 'DISCORD' }], skipDuplicates: true });
+    const claimed = await prisma.notificationDelivery.updateMany({ where: {
+      actionId, provider: 'DISCORD', status: { in: ['PENDING', 'FAILED_RETRYABLE'] }, claimedAt: null, attemptCount: { lt: 4 },
+    }, data: { claimedAt: new Date(), lastAttemptAt: new Date(), attemptCount: { increment: 1 } } });
+    if (!claimed.count) {
+      console.log(JSON.stringify({ event: 'notification_skipped', reason: 'claimed_or_terminal', actionId }));
+      return;
+    }
     const result = await discordProvider.send(payload);
-
-    // 3. Persist Outcome
-    await prisma.notificationDelivery.upsert({
-      where: {
-        actionId_provider: {
-          actionId,
-          provider: 'DISCORD'
-        }
-      },
-      update: {
-        status: result.success ? 'DELIVERED' : (result.retryable ? 'FAILED_RETRYABLE' : 'FAILED_PERMANENT'),
-        attemptCount: { increment: 1 },
-        lastAttemptAt: new Date(),
-        errorDetails: result.errorDetails || null,
-      },
-      create: {
-        actionId,
-        provider: 'DISCORD',
-        status: result.success ? 'DELIVERED' : (result.retryable ? 'FAILED_RETRYABLE' : 'FAILED_PERMANENT'),
-        attemptCount: 1,
-        lastAttemptAt: new Date(),
-        errorDetails: result.errorDetails || null,
-      }
-    });
+    await prisma.notificationDelivery.update({ where: { actionId_provider: { actionId, provider: 'DISCORD' } }, data: {
+      status: result.success ? 'DELIVERED' : result.retryable ? 'FAILED_RETRYABLE' : 'FAILED_PERMANENT',
+      claimedAt: result.retryable ? null : undefined,
+      errorDetails: result.errorDetails || null,
+    } });
 
     if (!result.success) {
       const logData = {

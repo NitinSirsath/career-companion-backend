@@ -1,12 +1,9 @@
-import { google } from 'googleapis';
-import { GaxiosError } from 'gaxios';
+import { randomUUID } from 'crypto';
+import { gmail_v1 } from 'googleapis';
 import { prisma } from '../db/prisma';
-import { decryptToken, encryptToken } from '../utils/gmailTokenEncryption';
+import { withGmail, googleStatus, googleAuthFailure } from './gmailClient';
+import { enqueueEmailProcessingJob } from '../jobs/emailProcessingJob';
 
-/**
- * Typed error thrown when Google returns a 401/403 auth failure during sync.
- * Allows the route layer to return a safe 503 instead of a generic 500.
- */
 export class SyncInProgressError extends Error {
   readonly code = 'SYNC_IN_PROGRESS';
   constructor(message: string) {
@@ -14,7 +11,6 @@ export class SyncInProgressError extends Error {
     this.name = 'SyncInProgressError';
   }
 }
-
 export class GmailAuthError extends Error {
   readonly code = 'GMAIL_AUTH_FAILED';
   constructor(message: string) {
@@ -22,18 +18,12 @@ export class GmailAuthError extends Error {
     this.name = 'GmailAuthError';
   }
 }
+const LEASE_MS = 5 * 60_000;
+export const syncLease = () => new Date(Date.now() + LEASE_MS);
 
-interface SyncResult {
-  synced: boolean;
-  messagesIngested: number;
-  messagesSkipped: number;
-  lastSyncedAt: Date;
-}
-
-/**
- * Extracts specific headers from the Gmail payload.headers array.
- */
-export function extractHeaders(headers: { name?: string | null; value?: string | null }[] | undefined) {
+export function extractHeaders(
+  headers: { name?: string | null; value?: string | null }[] | undefined,
+) {
   let subject: string | null = null;
   let sender: string | null = null;
   let dateHeader: string | null = null;
@@ -64,201 +54,193 @@ export function extractHeaders(headers: { name?: string | null; value?: string |
 }
 
 export class GmailSyncService {
-  /**
-   * Syncs the user's Gmail Inbox synchronously.
-   *
-   * SPRINT-2-NOTE: Sync runs synchronously in the API handler.
-   * The POST /api/gmail/sync API shape is stable and will not change.
-   *
-   * TOKEN REFRESH: Both access_token and refresh_token (if stored) are passed
-   * to the OAuth2 client so google-auth-library can automatically refresh an
-   * expired access_token. Any refreshed credentials returned by the library are
-   * re-encrypted and persisted so subsequent syncs do not require another refresh.
-   */
-  static async syncUser(userId: string): Promise<SyncResult> {
-    const connection = await prisma.gmailConnection.findUnique({
-      where: { userId }
+  static async syncUser(userId: string, queuedClaim?: string) {
+    const connection = await prisma.gmailConnection.findUnique({ where: { userId } });
+    if (!connection || connection.status !== 'CONNECTED')
+      throw new GmailAuthError('Gmail is not connected');
+    const claim = randomUUID();
+    const acquired = await prisma.gmailConnection.updateMany({
+      where: {
+        id: connection.id,
+        status: 'CONNECTED',
+        ...(queuedClaim
+          ? { syncClaim: queuedClaim }
+          : {
+              OR: [
+                { syncStatus: { not: 'SYNCING' } },
+                { syncLeaseUntil: { lt: new Date() } },
+                { syncLeaseUntil: null },
+              ],
+            }),
+      },
+      data: {
+        syncStatus: 'SYNCING',
+        syncClaim: claim,
+        syncLeaseUntil: syncLease(),
+        syncError: null,
+      },
     });
-
-    if (!connection) {
-      throw new Error('Gmail connection not found for user');
-    }
-
-    if (connection.status !== 'CONNECTED') {
-      throw new Error('Gmail connection is not active');
-    }
-
-    // Set status to syncing atomically
-    const updateResult = await prisma.gmailConnection.updateMany({
-      where: { userId, syncStatus: { not: 'SYNCING' } },
-      data: { syncStatus: 'SYNCING' }
-    });
-    
-    if (updateResult.count === 0) {
-      throw new SyncInProgressError('A sync is already in progress');
-    }
-
+    if (!acquired.count) throw new SyncInProgressError('A sync is already in progress');
     let messagesIngested = 0;
     let messagesSkipped = 0;
-    const now = new Date();
-    let firstPageHistoryId: string | null = null;
-
-    try {
-      const decryptedAccessToken = decryptToken(connection.accessToken);
-      // Decrypt refresh token only if present — older connections may not have it.
-      // SECURITY: Never log these values.
-      const decryptedRefreshToken = connection.refreshToken
-        ? decryptToken(connection.refreshToken)
-        : null;
-
-      const oauth2Client = new google.auth.OAuth2(
-        process.env.GMAIL_CLIENT_ID,
-        process.env.GMAIL_CLIENT_SECRET,
-        process.env.GMAIL_REDIRECT_URI
-      );
-
-      // IMPORTANT: Pass refresh_token so google-auth-library can silently refresh
-      // an expired access_token. Without this, every sync fails with 401 once the
-      // initial token expires (~1 hour after the OAuth grant).
-      oauth2Client.setCredentials({
-        access_token: decryptedAccessToken,
-        ...(decryptedRefreshToken ? { refresh_token: decryptedRefreshToken } : {}),
+    const started = Date.now();
+    const heartbeat = async () => {
+      if (Date.now() - started > 4 * 60_000)
+        throw new Error('Sync time budget reached; resume on next sync');
+      const alive = await prisma.gmailConnection.updateMany({
+        where: { id: connection.id, syncClaim: claim, status: 'CONNECTED' },
+        data: { syncLeaseUntil: syncLease() },
       });
-
-      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-
-      let pageToken: string | undefined = undefined;
-      try {
-        do {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const listRes: any = await gmail.users.messages.list({
-            userId: 'me',
-            labelIds: ['INBOX'],
-            q: 'newer_than:90d',
-            maxResults: 100,
-            pageToken
-          });
-
-          const messages = listRes.data.messages || [];
-
-          // Batch check existing emails to prevent sequential DB query overhead
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const msgIds = messages.map((m: any) => m.id).filter(Boolean);
-          const existingEmails = msgIds.length > 0 ? await prisma.email.findMany({
-            where: {
-              userId,
-              gmailMessageId: { in: msgIds }
-            },
-            select: { gmailMessageId: true }
-          }) : [];
-          const existingSet = new Set(existingEmails.map(e => e.gmailMessageId));
-
-          for (const msg of messages) {
-            if (!msg.id) continue;
-
-            if (existingSet.has(msg.id)) {
+      if (!alive.count) throw new Error('Sync superseded or disconnected');
+    };
+    try {
+      const historyId = await withGmail(userId, async (gmail) => {
+        const ingest = async (ids: string[]) => {
+          for (const id of new Set(ids)) {
+            await heartbeat();
+            const existing = await prisma.email.findUnique({
+              where: { userId_gmailMessageId: { userId, gmailMessageId: id } },
+            });
+            if (existing) {
+              if (existing.processingState === 'PENDING')
+                await enqueueEmailProcessingJob(userId, existing.id);
               messagesSkipped++;
               continue;
             }
-
-            // Fetch metadata only
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const getRes: any = await gmail.users.messages.get({
-              userId: 'me',
-              id: msg.id,
-              format: 'metadata',
-              metadataHeaders: ['Subject', 'From', 'Date']
-            });
-
-            const { threadId, historyId, payload } = getRes.data;
-
-            if (!firstPageHistoryId && historyId) {
-              firstPageHistoryId = historyId;
+            let message: gmail_v1.Schema$Message;
+            try {
+              message = (
+                await gmail.users.messages.get(
+                  {
+                    userId: 'me',
+                    id,
+                    format: 'metadata',
+                    metadataHeaders: ['Subject', 'From', 'Date'],
+                  },
+                  { timeout: 15_000 },
+                )
+              ).data;
+            } catch (err) {
+              if (googleStatus(err) === 404) continue;
+              throw err;
             }
-
-            const { subject, sender, receivedAt } = extractHeaders(payload?.headers);
-
-            const emailRecord = await prisma.email.upsert({
-              where: {
-                userId_gmailMessageId: {
-                  userId,
-                  gmailMessageId: msg.id
-                }
-              },
+            if (!message.labelIds?.includes('INBOX')) continue;
+            const receivedAt = message.internalDate ? new Date(Number(message.internalDate)) : null;
+            if (receivedAt && receivedAt.getTime() < Date.now() - 90 * 86400_000) continue;
+            await heartbeat();
+            const record = await prisma.email.upsert({
+              where: { userId_gmailMessageId: { userId, gmailMessageId: id } },
               create: {
                 userId,
-                gmailMessageId: msg.id,
-                threadId: threadId || null,
-                subject,
-                sender,
-                receivedAt,
-                relevanceState: 'UNPROCESSED',
-                matchState: 'UNMATCHED',
-                processingState: 'PENDING'
+                gmailMessageId: id,
+                threadId: message.threadId,
+                ...extractHeaders(message.payload?.headers),
+                ...(receivedAt && !isNaN(receivedAt.getTime()) ? { receivedAt } : {}),
               },
-              update: {} // No-op update if it conflicts during a race
+              update: {},
             });
-
-            // Enqueue for processing
-            const { enqueueEmailProcessingJob } = await import('../jobs/emailProcessingJob');
-            await enqueueEmailProcessingJob(userId, emailRecord.id);
-
+            if (record.processingState === 'PENDING')
+              await enqueueEmailProcessingJob(userId, record.id);
             messagesIngested++;
           }
-
-          pageToken = listRes.data.nextPageToken || undefined;
+        };
+        const fullSync = async () => {
+          // Capture checkpoint BEFORE scanning so mail arriving during the scan remains discoverable.
+          const profile = await gmail.users.getProfile({ userId: 'me' }, { timeout: 15_000 });
+          const baseline = profile.data.historyId;
+          if (!baseline) throw new Error('Missing Gmail history checkpoint');
+          let pageToken: string | undefined;
+          do {
+            await heartbeat();
+            const page = await gmail.users.messages.list(
+              {
+                userId: 'me',
+                labelIds: ['INBOX'],
+                q: 'newer_than:90d',
+                maxResults: 100,
+                pageToken,
+              },
+              { timeout: 15_000 },
+            );
+            await ingest((page.data.messages ?? []).flatMap((m) => (m.id ? [m.id] : [])));
+            pageToken = page.data.nextPageToken ?? undefined;
+          } while (pageToken);
+          return baseline;
+        };
+        if (!connection.lastHistoryId) return fullSync();
+        let pageToken: string | undefined;
+        let latest = connection.lastHistoryId;
+        do {
+          await heartbeat();
+          let page;
+          try {
+            page = await gmail.users.history.list(
+              {
+                userId: 'me',
+                startHistoryId: connection.lastHistoryId,
+                historyTypes: ['messageAdded', 'labelAdded'],
+                pageToken,
+                maxResults: 100,
+              },
+              { timeout: 15_000 },
+            );
+          } catch (err) {
+            if (googleStatus(err) === 404) return fullSync();
+            throw err;
+          }
+          const ids = (page.data.history ?? []).flatMap((h) => [
+            ...(h.messagesAdded ?? []).flatMap((m) => (m.message?.id ? [m.message.id] : [])),
+            ...(h.labelsAdded ?? []).flatMap((m) =>
+              m.labelIds?.includes('INBOX') && m.message?.id ? [m.message.id] : [],
+            ),
+          ]);
+          await ingest(ids);
+          latest = page.data.historyId ?? latest;
+          pageToken = page.data.nextPageToken ?? undefined;
         } while (pageToken);
-      } catch (apiError) {
-        // Re-classify Google 401/403 auth failures so the route layer can return
-        // a safe, descriptive 503 instead of an opaque generic 500.
-        if (
-          apiError instanceof GaxiosError &&
-          (apiError.status === 401 || apiError.status === 403)
-        ) {
-          throw new GmailAuthError(
-            'Gmail credentials are invalid or expired. Please reconnect Gmail.'
-          );
-        }
-        throw apiError;
-      }
-
-      // ── Persist any auto-refreshed access token ───────────────────────────
-      // google-auth-library updates oauth2Client.credentials.access_token when it
-      // silently refreshes using the stored refresh_token. Persist the new value
-      // so subsequent syncs skip the extra refresh round-trip.
-      // SECURITY: The token is re-encrypted before storage; never logged.
-      const refreshedAccessToken = oauth2Client.credentials?.access_token;
-      const encryptedAccessTokenUpdate =
-        refreshedAccessToken && refreshedAccessToken !== decryptedAccessToken
-          ? encryptToken(refreshedAccessToken)
-          : undefined;
-
-      // On completion, set syncStatus to IDLE
-      await prisma.gmailConnection.update({
-        where: { userId },
+        return latest;
+      });
+      // Recover the DB-insert / queue-send gap even when the history no longer returns that email.
+      const pending = await prisma.email.findMany({
+        where: { userId, processingState: 'PENDING' },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: 100,
+      });
+      for (const email of pending) await enqueueEmailProcessingJob(userId, email.id);
+      const lastSyncedAt = new Date();
+      await prisma.gmailConnection.updateMany({
+        where: { id: connection.id, syncClaim: claim, status: 'CONNECTED' },
         data: {
           syncStatus: 'IDLE',
-          lastSyncedAt: now,
-          ...(firstPageHistoryId ? { lastHistoryId: firstPageHistoryId } : {}),
-          ...(encryptedAccessTokenUpdate ? { accessToken: encryptedAccessTokenUpdate } : {}),
-        }
+          syncClaim: null,
+          syncLeaseUntil: null,
+          lastHistoryId: historyId,
+          lastSyncedAt,
+        },
       });
-
-      return {
-        synced: true,
-        messagesIngested,
-        messagesSkipped,
-        lastSyncedAt: now
-      };
-
+      console.log(
+        JSON.stringify({
+          event: 'gmail_sync_completed',
+          userId,
+          messagesIngested,
+          messagesSkipped,
+          durationMs: Date.now() - started,
+        }),
+      );
+      return { synced: true, messagesIngested, messagesSkipped, lastSyncedAt };
     } catch (error) {
-      // Revert status to FAILED on error
-      await prisma.gmailConnection.update({
-        where: { userId },
-        data: { syncStatus: 'FAILED' }
+      const auth = googleAuthFailure(error);
+      await prisma.gmailConnection.updateMany({
+        where: { id: connection.id, syncClaim: claim },
+        data: {
+          syncStatus: 'FAILED',
+          syncClaim: queuedClaim ?? null,
+          syncLeaseUntil: null,
+          syncError: auth ? 'GMAIL_AUTH_FAILED' : 'SYNC_FAILED',
+        },
       });
+      if (auth) throw new GmailAuthError('Gmail authorization expired; reconnect Gmail');
       throw error;
     }
   }
 }
-

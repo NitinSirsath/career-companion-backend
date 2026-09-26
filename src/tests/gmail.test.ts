@@ -1,3 +1,4 @@
+import { GmailSyncService } from '../services/gmailSync';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Integration tests for Gmail OAuth routes (COM-19).
@@ -38,7 +39,7 @@ vi.mock('googleapis', () => {
   });
 
   const mockGetProfile = vi.fn().mockResolvedValue({
-    data: { emailAddress: 'testuser@gmail.com' },
+    data: { emailAddress: 'testuser@gmail.com', historyId: '1000' },
   });
 
   const mockRevokeToken = vi.fn().mockResolvedValue({});
@@ -73,6 +74,7 @@ vi.mock('googleapis', () => {
         id: args.id,
         threadId: `thread-${args.id}`,
         historyId: '1000',
+        labelIds: ['INBOX'],
         payload: {
           headers: [
             { name: 'Subject', value: `Subject for ${args.id}` },
@@ -90,6 +92,7 @@ vi.mock('googleapis', () => {
       gmail: vi.fn().mockReturnValue({
         users: {
           getProfile: mockGetProfile,
+          history: { list: vi.fn().mockResolvedValue({ data: { historyId: '1001', history: [] } }) },
           messages: {
             list: mockMessagesList,
             get: mockMessagesGet,
@@ -418,6 +421,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
           gmailEmail: 'testuser@gmail.com',
           status: 'CONNECTED',
           syncStatus: 'SYNCING',
+          syncLeaseUntil: new Date(Date.now() + 300000),
           accessToken: encryptToken('real_access_token'),
         },
       });
@@ -446,10 +450,13 @@ describe('Gmail OAuth Routes (COM-19)', () => {
         .post('/api/gmail/sync')
         .set('X-Development-User', testUser.email);
         
-      expect(res.status).toBe(200);
-      expect(res.body.synced).toBe(true);
-      expect(res.body.messagesIngested).toBe(2);
-      expect(res.body.messagesSkipped).toBe(0);
+      expect(res.status).toBe(202);
+      expect(res.body.accepted).toBe(true);
+      const queued = await prisma.gmailConnection.findUniqueOrThrow({ where: { userId: testUser.id } });
+      const result = await GmailSyncService.syncUser(testUser.id, queued.syncClaim!);
+      expect(result.synced).toBe(true);
+      expect(result.messagesIngested).toBe(2);
+      expect(result.messagesSkipped).toBe(0);
 
       // Verify DB updates
       const emails = await prisma.email.findMany({ where: { userId: testUser.id } });
@@ -477,19 +484,18 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       });
 
       // First sync
-      await request(app).post('/api/gmail/sync').set('X-Development-User', testUser.email);
+      await GmailSyncService.syncUser(testUser.id);
 
       // Second sync
-      const res2 = await request(app).post('/api/gmail/sync').set('X-Development-User', testUser.email);
-      expect(res2.status).toBe(200);
-      expect(res2.body.messagesIngested).toBe(0);
-      expect(res2.body.messagesSkipped).toBe(2);
+      const res2 = await GmailSyncService.syncUser(testUser.id);
+      expect(res2.messagesIngested).toBe(0);
+      expect(res2.messagesSkipped).toBe(0);
 
       const count = await prisma.email.count({ where: { userId: testUser.id } });
       expect(count).toBe(2);
     });
 
-    it('returns 503 GMAIL_AUTH_FAILED when Gmail API returns 401 (root cause fix)', async () => {
+    it('records an auth failure when the Gmail background operation is rejected', async () => {
       // Simulate expired/invalid access token by making messages.list reject with
       // a GaxiosError status 401 — the exact failure observed in backend.log.
       const { GaxiosError } = await import('gaxios');
@@ -500,7 +506,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
 
       mockGmail.mockReturnValueOnce({
         users: {
-          getProfile: vi.fn(),
+          getProfile: vi.fn().mockResolvedValue({ data: { historyId: '1000' } }),
           messages: {
             list: vi.fn().mockRejectedValueOnce(
               new GaxiosError('Request had invalid authentication credentials', { headers: new Headers(), url: new URL('https://test.com') }, {
@@ -534,12 +540,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
         },
       });
 
-      const res = await request(app)
-        .post('/api/gmail/sync')
-        .set('X-Development-User', testUser.email);
-
-      expect(res.status).toBe(503);
-      expect(res.body.error.code).toBe('GMAIL_AUTH_FAILED');
+      await expect(GmailSyncService.syncUser(testUser.id)).rejects.toThrow('Gmail authorization expired');
 
       // Connection should be marked FAILED
       const connection = await prisma.gmailConnection.findUnique({ where: { userId: testUser.id } });
@@ -590,6 +591,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
         'gmailMessageId',
         'id',
         'matchState',
+        'processingState',
         'receivedAt',
         'relevanceState',
         'sender',

@@ -19,6 +19,8 @@ export class MatcherService {
 
     const { aiProcessingResult, userId, matchConfirmedBy, applicationId } = email;
 
+    if (matchConfirmedBy === MatchConfirmationSource.USER_CONFIRMED && !applicationId) return;
+
     if (matchConfirmedBy === MatchConfirmationSource.USER_CONFIRMED && applicationId) {
       // Re-apply the match using the existing user-confirmed application to allow 
       // new AI data (e.g. actions/state) to be recorded, but PRESERVE the user's decision.
@@ -36,7 +38,7 @@ export class MatcherService {
           applicationId: { not: null },
           id: { not: email.id }
         },
-        orderBy: { receivedAt: 'desc' }
+        orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }]
       });
 
       if (threadMatch && threadMatch.applicationId) {
@@ -80,8 +82,8 @@ export class MatcherService {
       await this.applyMatch(email.id, candidates[0].id, aiProcessingResult, MatchConfirmationSource.AI_AUTO);
     } else if (candidates.length > 1) {
       // Ambiguous
-      await prisma.email.update({
-        where: { id: email.id },
+      await prisma.email.updateMany({
+        where: { id: email.id, OR: [{ matchConfirmedBy: null }, { matchConfirmedBy: { not: MatchConfirmationSource.USER_CONFIRMED } }] },
         data: { matchState: EmailMatchState.AMBIGUOUS }
       });
     }
@@ -100,103 +102,49 @@ export class MatcherService {
     aiResult: AIProcessingResult,
     source: MatchConfirmationSource
   ) {
-    // 1. Mark Email as matched
-    const email = await prisma.email.update({
-      where: { id: emailId },
-      data: {
-        applicationId,
-        matchState: EmailMatchState.MATCHED,
-        matchConfirmedBy: source
-      }
+    const actionId = await prisma.$transaction(async tx => {
+      // Serialize domain effects for this email and application, inside the DB transaction.
+      await tx.$queryRaw`SELECT id FROM emails WHERE id = ${emailId}::uuid FOR UPDATE`;
+      const email = await tx.email.findUnique({ where: { id: emailId } });
+      if (!email || aiResult.emailId !== emailId) throw new Error('EMAIL_NOT_FOUND');
+      if (source === MatchConfirmationSource.AI_AUTO && email.matchConfirmedBy === MatchConfirmationSource.USER_CONFIRMED) return null;
+      await tx.$queryRaw`SELECT id FROM applications WHERE id = ${applicationId}::uuid AND "userId" = ${email.userId}::uuid FOR UPDATE`;
+      const app = await tx.application.findFirst({ where: { id: applicationId, userId: email.userId } });
+      if (!app) throw new Error('APPLICATION_NOT_FOUND');
+      // A concurrent manual resolution wins once; do not move already created domain effects.
+      if (source === MatchConfirmationSource.USER_CONFIRMED && email.matchConfirmedBy === source && email.applicationId !== applicationId) throw new Error('INVALID_MATCH_STATE');
+      await tx.email.update({ where: { id: emailId }, data: {
+        applicationId, matchState: EmailMatchState.MATCHED, matchConfirmedBy: source,
+      } });
+      const newState = this.inferState(aiResult);
+      const finalState = newState && this.canTransition(app.aiStatus, newState) ? newState : app.aiStatus;
+      if (finalState !== app.aiStatus) await tx.application.update({ where: { id: applicationId }, data: { aiStatus: finalState } });
+      const existingEvent = await tx.applicationEvent.findFirst({ where: { applicationId, emailId, type: 'EMAIL_PROCESSED' } });
+      if (!existingEvent) await tx.applicationEvent.create({ data: {
+        applicationId, emailId, type: 'EMAIL_PROCESSED', oldState: app.aiStatus, newState: finalState,
+        description: newState ? `Received relevant email suggesting state ${newState}` : 'Received relevant email',
+        provenance: aiResult.provenance,
+      } });
+      if (!aiResult.actionRequired && !aiResult.followUpRequired) return null;
+      const existingAction = await tx.action.findFirst({ where: { applicationId, emailId } });
+      if (existingAction) return existingAction.id;
+      const deadlineText = aiResult.actionRequired ? aiResult.actionDeadline : aiResult.followUpDate;
+      const deadline = deadlineText ? new Date(deadlineText) : null;
+      const action = await tx.action.create({ data: {
+        applicationId, emailId,
+        type: aiResult.actionRequired ? 'ACTION_REQUIRED' : 'FOLLOW_UP_REQUIRED',
+        description: aiResult.actionRequired ? aiResult.requestedAction || 'Action required' : 'Follow up required',
+        deadline: deadline && !isNaN(deadline.getTime()) ? deadline : null,
+      } });
+      return action.id;
     });
-
-    const app = await prisma.application.findUnique({
-      where: { id: applicationId }
-    });
-    if (!app) return;
-
-    // 2. Infer State
-    const newState = this.inferState(aiResult);
-    let finalState = app.aiStatus;
-
-    if (newState) {
-      if (this.canTransition(app.aiStatus, newState)) {
-        finalState = newState;
-        await prisma.application.update({
-          where: { id: applicationId },
-          data: { aiStatus: finalState }
-        });
-      }
-    }
-
-    // 3. Create Event (Idempotent: check if event from this email exists)
-    const existingEvent = await prisma.applicationEvent.findFirst({
-      where: { applicationId, emailId: email.id }
-    });
-
-    if (!existingEvent) {
-      let description = "Received relevant email";
-      if (newState) {
-        description += ` suggesting state ${newState}`;
-      }
-      
-      await prisma.applicationEvent.create({
-        data: {
-          applicationId,
-          emailId: email.id,
-          type: 'EMAIL_PROCESSED',
-          oldState: app.aiStatus,
-          newState: finalState,
-          description,
-          provenance: aiResult.provenance
-        }
-      });
-    }
-
-    // 4. Create Action (Idempotent)
-    if (aiResult.actionRequired || aiResult.followUpRequired) {
-      const existingAction = await prisma.action.findFirst({
-        where: { applicationId, emailId: email.id }
-      });
-
-      if (!existingAction) {
-        let type = '';
-        let desc = '';
-        let deadline = null;
-
-        if (aiResult.actionRequired) {
-          type = 'ACTION_REQUIRED';
-          desc = aiResult.requestedAction || 'Action required';
-          deadline = aiResult.actionDeadline ? new Date(aiResult.actionDeadline) : null;
-        } else if (aiResult.followUpRequired) {
-          type = 'FOLLOW_UP_REQUIRED';
-          desc = 'Follow up required';
-          deadline = aiResult.followUpDate ? new Date(aiResult.followUpDate) : null;
-        }
-
-        // Only create if we have a valid deadline or if we don't care about NaN.
-        // Let's just create it.
-        const createdAction = await prisma.action.create({
-          data: {
-            applicationId,
-            emailId: email.id,
-            type,
-            description: desc,
-            deadline: deadline && !isNaN(deadline.getTime()) ? deadline : null
-          }
-        });
-        
-        try {
-          // Fire-and-forget enqueue to avoid failing the transaction/process
-          await enqueueNotificationJob(createdAction.id);
-        } catch (jobErr) {
-          console.error('[Matcher] Failed to enqueue notification job', jobErr);
-        }
-      }
+    if (actionId) {
+      try { await enqueueNotificationJob(actionId); }
+      catch { console.error(JSON.stringify({ event: 'notification_enqueue_failed', actionId })); }
     }
   }
 
-  public static async getAmbiguousMatches(userId: string, limit: number = 50, offset: number = 0) {
+  public static async getAmbiguousMatches(userId: string, limit: number = 20, offset: number = 0) {
     return prisma.email.findMany({
       where: {
         userId,
@@ -207,9 +155,7 @@ export class MatcherService {
       include: {
         aiProcessingResult: true
       },
-      orderBy: {
-        receivedAt: 'desc'
-      }
+      orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }]
     });
   }
 
@@ -217,7 +163,7 @@ export class MatcherService {
    * Get relevant emails that had zero candidate applications during matching.
    * These need user-driven resolution to link them to an existing application.
    */
-  public static async getUnmatchedEmails(userId: string, limit: number = 50, offset: number = 0) {
+  public static async getUnmatchedEmails(userId: string, limit: number = 20, offset: number = 0) {
     return prisma.email.findMany({
       where: {
         userId,
@@ -229,9 +175,7 @@ export class MatcherService {
       include: {
         aiProcessingResult: true,
       },
-      orderBy: {
-        receivedAt: 'desc',
-      },
+      orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
     });
   }
 
@@ -264,13 +208,14 @@ export class MatcherService {
 
     if (!applicationId) {
       // No match — only valid for AMBIGUOUS emails
-      await prisma.email.update({
-        where: { id: emailId },
+      const ignored = await prisma.email.updateMany({
+        where: { id: emailId, userId, matchState: 'AMBIGUOUS' },
         data: {
           matchState: EmailMatchState.IGNORED,
           matchConfirmedBy: MatchConfirmationSource.USER_CONFIRMED
         }
       });
+      if (!ignored.count) throw new Error('INVALID_MATCH_STATE');
       return;
     }
 
