@@ -1,4 +1,5 @@
 export class AIProviderError extends Error {
+  public operationStage?: string;
   constructor(
     message: string,
     public readonly isRetryable: boolean,

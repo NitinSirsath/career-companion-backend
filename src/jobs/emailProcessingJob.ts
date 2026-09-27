@@ -66,25 +66,45 @@ export async function startEmailProcessingWorker() {
           }),
         );
       } catch (err) {
-        await prisma.email.updateMany({
-          where: { id: emailId, userId, processingState: { not: 'COMPLETED' } },
-          data: { processingState: 'FAILED' },
-        });
-
         const durationMs = Date.now() - startTime;
         const errorCategory = err instanceof Error ? err.name : 'UnknownError';
+        const errorDetails = err instanceof Error ? err.message : String(err);
+        let errorStage = null;
+        let isRetryable = !(err instanceof TerminalAIError);
+
+        // Assuming AIProviderError might have operationStage. Need to cast to any since AIProviderError isn't imported here, 
+        // or we can just access it if it exists.
+        if (err && typeof err === 'object' && 'operationStage' in err) {
+          errorStage = (err as any).operationStage;
+        }
+
+        const isTerminal = err instanceof TerminalAIError;
+
+        await prisma.email.updateMany({
+          where: { id: emailId, userId, processingState: { not: 'COMPLETED' } },
+          data: {
+            processingState: isTerminal ? 'FAILED' : 'PROCESSING',
+            processingErrorCategory: errorCategory,
+            processingErrorDetails: errorDetails,
+            processingErrorStage: errorStage,
+            processingRetryable: isRetryable,
+            processingFailedAt: new Date(),
+          },
+        });
+
         console.error(
           JSON.stringify({
             event: 'job_failed',
             jobId: job.id,
             emailId,
             errorCategory,
+            errorStage,
             durationMs,
             timestamp: new Date().toISOString(),
           }),
         );
         // Rethrow to let pg-boss handle retry/dead-letter
-        if (!(err instanceof TerminalAIError)) throw err;
+        if (!isTerminal) throw err;
       }
     },
   );

@@ -129,4 +129,57 @@ router.post('/:id/resolve', async (req: Request, res: Response, next: NextFuncti
   }
 });
 
+/**
+ * POST /api/emails/:id/retry
+ * Manually retries AI processing for a failed or stuck email.
+ */
+router.post('/:id/retry', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.auth!.user.id;
+    const emailId = z.uuid().parse(req.params.id);
+
+    const { prisma } = await import('../db/prisma');
+    const { getQueue } = await import('../services/queue');
+
+    const email = await prisma.email.findUnique({ where: { id: emailId } });
+    if (!email || email.userId !== userId) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Email not found.' } });
+      return;
+    }
+
+    if (email.processingState === 'COMPLETED') {
+      res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'Email is already completed.' } });
+      return;
+    }
+
+    // Reset AIOperations so they are attempted again from scratch
+    await prisma.aIOperation.deleteMany({
+      where: { emailId }
+    });
+
+    // Reset email state
+    await prisma.email.update({
+      where: { id: emailId },
+      data: {
+        processingState: 'PENDING',
+        processingErrorCategory: null,
+        processingErrorDetails: null,
+        processingErrorStage: null,
+        processingRetryable: null,
+        processingFailedAt: null,
+        relevanceState: 'UNPROCESSED',
+        matchState: 'UNMATCHED',
+      }
+    });
+
+    // Re-enqueue job
+    const boss = await getQueue();
+    await boss.send('email-processing-job', { emailId, userId });
+
+    res.status(200).json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export const emailRouter = router;

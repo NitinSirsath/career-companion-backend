@@ -57,6 +57,11 @@ export const EmailMessageSchema = z.object({
   relevanceState: EmailRelevanceStateSchema,
   matchState: EmailMatchStateSchema,
   processingState: z.enum(['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED']).optional(),
+  processingErrorCategory: z.string().nullable().optional(),
+  processingErrorDetails: z.string().nullable().optional(),
+  processingErrorStage: z.string().nullable().optional(),
+  processingRetryable: z.boolean().nullable().optional(),
+  processingFailedAt: z.union([z.string(), z.date()]).nullable().optional(),
 });
 export type EmailMessage = z.infer<typeof EmailMessageSchema>;
 

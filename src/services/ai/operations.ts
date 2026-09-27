@@ -85,7 +85,23 @@ export async function runOperation<T>(
           reason: 'budget_or_cooldown',
         }),
       );
-      throw new RetryableAIError('AI daily budget or provider cooldown reached');
+      const budget = await tx.aICallBudget.findUnique({ where: { day } });
+      let errMsg = 'AI daily budget or provider cooldown reached';
+      if (budget && budget.calls >= limit) {
+        const tomorrow = new Date(now);
+        tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+        tomorrow.setUTCHours(0, 0, 0, 0);
+        
+        const resetStr = tomorrow.toLocaleString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+        errMsg = `AI daily budget exhausted. Resets at ${resetStr}`;
+      } else if (budget && budget.cooldownUntil && budget.cooldownUntil > now) {
+        const resetStr = budget.cooldownUntil.toLocaleString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+        errMsg = `Provider cooldown active until ${resetStr}`;
+      }
+      
+      const err = new RetryableAIError(errMsg);
+      err.operationStage = operation;
+      throw err;
     }
   });
   console.log(
@@ -99,24 +115,31 @@ export async function runOperation<T>(
   );
   let result: T;
   try {
-    result = schema.parse(await call());
-  } catch (err) {
-    const retryable = err instanceof AIProviderError && err.isRetryable;
-    const retryAfter = retryable ? new Date(Date.now() + 60_000 * 2 ** existing.attempts) : null;
-    // Network timeouts may have incurred a charge. Only an explicit rejection
-    // classified as retryable by the adapter can release the claim for retry.
-    await prisma.$transaction(async (tx) => {
-      await tx.aIOperation.update({
-        where: { id: existing.id },
-        data: {
-          status: retryable ? 'RETRYABLE' : err instanceof TerminalAIError ? 'FAILED' : 'UNKNOWN',
-          errorCode: err instanceof AIProviderError ? err.name : 'OutcomeUnknown',
-          retryAfter,
-        },
+    try {
+      result = schema.parse(await call());
+    } catch (err) {
+      const retryable = err instanceof AIProviderError && err.isRetryable;
+      const retryAfter = retryable ? new Date(Date.now() + 60_000 * 2 ** existing.attempts) : null;
+      // Network timeouts may have incurred a charge. Only an explicit rejection
+      // classified as retryable by the adapter can release the claim for retry.
+      await prisma.$transaction(async (tx) => {
+        await tx.aIOperation.update({
+          where: { id: existing.id },
+          data: {
+            status: retryable ? 'RETRYABLE' : err instanceof TerminalAIError ? 'FAILED' : 'UNKNOWN',
+            errorCode: err instanceof AIProviderError ? err.name : 'OutcomeUnknown',
+            retryAfter,
+          },
+        });
+        if (retryAfter)
+          await tx.aICallBudget.update({ where: { day }, data: { cooldownUntil: retryAfter } });
       });
-      if (retryAfter)
-        await tx.aICallBudget.update({ where: { day }, data: { cooldownUntil: retryAfter } });
-    });
+      throw err;
+    }
+  } catch (err) {
+    if (err instanceof AIProviderError) {
+      err.operationStage = operation;
+    }
     throw err;
   }
   // Deliberately outside the catch: persistence failure leaves PROCESSING.

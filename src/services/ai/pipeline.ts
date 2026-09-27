@@ -102,6 +102,11 @@ export class EmailAIPipeline {
       data: {
         processingState: 'COMPLETED',
         relevanceState: decision === 'IRRELEVANT' ? 'IRRELEVANT' : 'RELEVANT',
+        processingErrorCategory: null,
+        processingErrorDetails: null,
+        processingErrorStage: null,
+        processingRetryable: null,
+        processingFailedAt: null,
       },
     });
   }

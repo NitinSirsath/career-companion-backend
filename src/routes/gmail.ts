@@ -438,6 +438,11 @@ router.get('/messages', async (req: Request, res: Response, next: NextFunction) 
         relevanceState: true,
         matchState: true,
         processingState: true,
+        processingErrorCategory: true,
+        processingErrorDetails: true,
+        processingErrorStage: true,
+        processingRetryable: true,
+        processingFailedAt: true,
       },
     });
 
