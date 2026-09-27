@@ -1,11 +1,20 @@
-import { NotificationProvider, NotificationPayload, NotificationResult } from './NotificationProvider';
+import {
+  NotificationProvider,
+  NotificationPayload,
+  NotificationResult,
+} from './NotificationProvider';
 
 export class DiscordProvider implements NotificationProvider {
   async send(payload: NotificationPayload): Promise<NotificationResult> {
     const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
     if (!webhookUrl) {
       // Configuration missing is not a retryable error. It's a permanent misconfiguration.
-      return { success: false, retryable: false, errorCategory: 'MissingConfig', errorDetails: 'DISCORD_WEBHOOK_URL not configured.' };
+      return {
+        success: false,
+        retryable: false,
+        errorCategory: 'MissingConfig',
+        errorDetails: 'DISCORD_WEBHOOK_URL not configured.',
+      };
     }
 
     try {
@@ -55,17 +64,16 @@ export class DiscordProvider implements NotificationProvider {
 
       // Handle specific HTTP errors
       const status = response.status;
-      
+
       // Retry only explicit rate-limit / temporary-unavailable rejections.
       const isRetryable = status === 429 || status === 503;
-      
-      return { 
-        success: false, 
-        retryable: isRetryable, 
-        errorCategory: `HTTP_${status}`, 
-        errorDetails: `Discord responded with status ${status}.` // Don't log full response text to avoid leaking secrets/pii
+
+      return {
+        success: false,
+        retryable: isRetryable,
+        errorCategory: `HTTP_${status}`,
+        errorDetails: `Discord responded with status ${status}.`, // Don't log full response text to avoid leaking secrets/pii
       };
-      
     } catch (error) {
       // An uncertain delivery may already have reached Discord; do not auto-resend.
       let errorCategory = 'NetworkError';

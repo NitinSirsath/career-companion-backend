@@ -7,12 +7,14 @@ export const AmbiguousMatchResponseSchema = z.object({
   threadId: z.string().nullable().optional(),
   gmailMessageId: z.string().optional(),
   receivedAt: z.string().nullable(), // ISO string or Date, we'll format as ISO
-  aiProcessingResult: z.object({
-    companyName: z.string().nullable(),
-    jobTitle: z.string().nullable(),
-    confidence: z.number().nullable(),
-    category: z.string().nullable(),
-  }).nullable(),
+  aiProcessingResult: z
+    .object({
+      companyName: z.string().nullable(),
+      jobTitle: z.string().nullable(),
+      confidence: z.number().nullable(),
+      category: z.string().nullable(),
+    })
+    .nullable(),
 });
 
 export type AmbiguousMatchResponse = z.infer<typeof AmbiguousMatchResponseSchema>;

@@ -6,12 +6,14 @@ export const ActionWithContextResponseSchema = ApplicationActionResponseSchema.e
     companyName: z.string(),
     jobTitle: z.string().nullable(),
   }),
-  email: z.object({
-    subject: z.string().nullable(),
-    sender: z.string().nullable(),
-    threadId: z.string().nullable().optional(),
-    gmailMessageId: z.string().optional(),
-  }).nullable(),
+  email: z
+    .object({
+      subject: z.string().nullable(),
+      sender: z.string().nullable(),
+      threadId: z.string().nullable().optional(),
+      gmailMessageId: z.string().optional(),
+    })
+    .nullable(),
 });
 
 export type ActionWithContextResponse = z.infer<typeof ActionWithContextResponseSchema>;

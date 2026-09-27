@@ -96,7 +96,15 @@ describe('Gmail ingestion checkpoints and recovery', () => {
     expect(enqueueEmailProcessingJob).toHaveBeenCalled();
   });
   it('falls back on expired history and traverses every provider page', async () => {
-    await prisma.gmailConnection.update({ where: { userId }, data: { lastHistoryId: '1' } });
+    await prisma.gmailConnection.update({
+      where: { userId },
+      data: {
+        lastHistoryId: '1',
+        lastSyncedAt: new Date(),
+        lastSyncedLookbackDays: 1,
+        syncLookbackDays: 1,
+      },
+    });
     mocks.history.mockRejectedValueOnce({ status: 404 });
     mocks.list
       .mockResolvedValueOnce({ data: { messages: [{ id: 'message-a' }], nextPageToken: 'page-2' } })
@@ -110,7 +118,15 @@ describe('Gmail ingestion checkpoints and recovery', () => {
     );
   });
   it('does not advance the checkpoint when a later history page fails', async () => {
-    await prisma.gmailConnection.update({ where: { userId }, data: { lastHistoryId: '100' } });
+    await prisma.gmailConnection.update({
+      where: { userId },
+      data: {
+        lastHistoryId: '100',
+        lastSyncedAt: new Date(),
+        lastSyncedLookbackDays: 1,
+        syncLookbackDays: 1,
+      },
+    });
     mocks.history
       .mockResolvedValueOnce({
         data: {

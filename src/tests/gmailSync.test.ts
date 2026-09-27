@@ -14,7 +14,7 @@ describe('GmailSyncService Helpers', () => {
         { name: 'Return-Path', value: '<foo@bar.com>' },
         { name: 'From', value: 'Recruiter <recruiter@company.com>' },
         { name: 'Subject', value: 'Interview Invitation' },
-        { name: 'Date', value: 'Wed, 12 Sep 2026 10:00:00 +0000' }
+        { name: 'Date', value: 'Wed, 12 Sep 2026 10:00:00 +0000' },
       ];
 
       const { subject, sender, receivedAt } = extractHeaders(headers);
@@ -29,7 +29,7 @@ describe('GmailSyncService Helpers', () => {
       const headers = [
         { name: 'from', value: 'recruiter@company.com' },
         { name: 'SUBJECT', value: 'Offer' },
-        { name: 'DaTe', value: 'Wed, 12 Sep 2026 10:00:00 +0000' }
+        { name: 'DaTe', value: 'Wed, 12 Sep 2026 10:00:00 +0000' },
       ];
 
       const { subject, sender } = extractHeaders(headers);
@@ -80,16 +80,20 @@ describe('GmailSyncService Helpers', () => {
   describe('GaxiosError 401/403 detection', () => {
     it('GaxiosError with status 401 is detectable for reclassification', () => {
       // Simulate the detection logic used in syncUser's inner catch
-      const err = new GaxiosError('Unauthorized', { headers: new Headers(), url: new URL('https://test.com') }, {
-        status: 401,
-        statusText: 'Unauthorized',
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        data: {} as any,
-        headers: {} as any,
-        config: {} as any,
-        request: {} as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
+      const err = new GaxiosError(
+        'Unauthorized',
+        { headers: new Headers(), url: new URL('https://test.com') },
+        {
+          status: 401,
+          statusText: 'Unauthorized',
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          data: {} as any,
+          headers: {} as any,
+          config: {} as any,
+          request: {} as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+      );
 
       const isGmailAuthFailure =
         err instanceof GaxiosError && (err.status === 401 || err.status === 403);
@@ -97,16 +101,20 @@ describe('GmailSyncService Helpers', () => {
     });
 
     it('GaxiosError with status 429 is NOT reclassified as auth failure', () => {
-      const err = new GaxiosError('Too Many Requests', { headers: new Headers(), url: new URL('https://test.com') }, {
-        status: 429,
-        statusText: 'Too Many Requests',
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        data: {} as any,
-        headers: {} as any,
-        config: {} as any,
-        request: {} as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
+      const err = new GaxiosError(
+        'Too Many Requests',
+        { headers: new Headers(), url: new URL('https://test.com') },
+        {
+          status: 429,
+          statusText: 'Too Many Requests',
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          data: {} as any,
+          headers: {} as any,
+          config: {} as any,
+          request: {} as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+      );
 
       const isGmailAuthFailure =
         err instanceof GaxiosError && (err.status === 401 || err.status === 403);
@@ -114,4 +122,3 @@ describe('GmailSyncService Helpers', () => {
     });
   });
 });
-

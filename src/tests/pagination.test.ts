@@ -14,7 +14,7 @@ describe('System-Wide Pagination (COM-48)', () => {
       data: {
         email: userEmail,
         name: 'Pagination Test User',
-      }
+      },
     });
     userId = user.id;
   });
@@ -50,7 +50,7 @@ describe('System-Wide Pagination (COM-48)', () => {
       const res = await request(app)
         .get('/api/emails/unmatched')
         .set('X-Development-User', userEmail);
-      
+
       expect(res.status).toBe(200);
       expect(res.body.items.length).toBe(20);
       expect(res.body.metadata.limit).toBe(20);
@@ -63,7 +63,7 @@ describe('System-Wide Pagination (COM-48)', () => {
       const res = await request(app)
         .get('/api/emails/unmatched?limit=5')
         .set('X-Development-User', userEmail);
-      
+
       expect(res.body.items.length).toBe(5);
       expect(res.body.metadata.limit).toBe(5);
       expect(res.body.metadata.nextOffset).toBe(5);
@@ -74,7 +74,7 @@ describe('System-Wide Pagination (COM-48)', () => {
       const res = await request(app)
         .get('/api/emails/unmatched?limit=200') // Requesting beyond max
         .set('X-Development-User', userEmail);
-      
+
       expect(res.body.items.length).toBe(20); // Should clamp to max
       expect(res.body.metadata.limit).toBe(20);
       expect(res.body.metadata.nextOffset).toBe(20);
@@ -82,30 +82,32 @@ describe('System-Wide Pagination (COM-48)', () => {
 
     it('4. first page, 5. middle page, 6. final page, 8. deterministic ordering, 9. multiple pages', async () => {
       await createEmails(25);
-      
+
       // Page 1
       const res1 = await request(app)
         .get('/api/emails/unmatched?limit=10&offset=0')
         .set('X-Development-User', userEmail);
-      
+
       expect(res1.body.items.length).toBe(10);
       expect(res1.body.metadata.nextOffset).toBe(10);
       // Deterministic order: msg-0 to msg-9
-      expect(new Date(res1.body.items[0].receivedAt).getTime()).toBeGreaterThan(new Date(res1.body.items[1].receivedAt).getTime());
+      expect(new Date(res1.body.items[0].receivedAt).getTime()).toBeGreaterThan(
+        new Date(res1.body.items[1].receivedAt).getTime(),
+      );
 
       // Page 2 (middle)
       const res2 = await request(app)
         .get('/api/emails/unmatched?limit=10&offset=10')
         .set('X-Development-User', userEmail);
-        
+
       expect(res2.body.items.length).toBe(10);
       expect(res2.body.metadata.nextOffset).toBe(20);
-      
+
       // Page 3 (final)
       const res3 = await request(app)
         .get('/api/emails/unmatched?limit=10&offset=20')
         .set('X-Development-User', userEmail);
-        
+
       expect(res3.body.items.length).toBe(5);
       expect(res3.body.metadata.nextOffset).toBeNull();
     });
@@ -114,7 +116,7 @@ describe('System-Wide Pagination (COM-48)', () => {
       const res = await request(app)
         .get('/api/emails/unmatched')
         .set('X-Development-User', userEmail);
-        
+
       expect(res.body.items.length).toBe(0);
       expect(res.body.metadata.nextOffset).toBeNull();
     });
@@ -124,7 +126,7 @@ describe('System-Wide Pagination (COM-48)', () => {
       const res = await request(app)
         .get('/api/emails/unmatched?limit=-10&offset=invalid')
         .set('X-Development-User', userEmail);
-        
+
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
     });
@@ -134,7 +136,7 @@ describe('System-Wide Pagination (COM-48)', () => {
       const res = await request(app)
         .get('/api/emails/unmatched?limit=9999999999999')
         .set('X-Development-User', userEmail);
-        
+
       expect(res.body.items.length).toBe(20);
       expect(res.body.metadata).toBeDefined();
       expect(res.body.metadata.limit).toBe(20);

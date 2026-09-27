@@ -15,17 +15,17 @@ vi.mock('googleapis', () => {
         payload: {
           mimeType: 'text/html',
           body: {
-            data: Buffer.from('<script>alert("hi")</script>Hello <b>World</b>!').toString('base64')
-          }
-        }
-      }
+            data: Buffer.from('<script>alert("hi")</script>Hello <b>World</b>!').toString('base64'),
+          },
+        },
+      },
     });
   });
 
   const mockRefreshAccessToken = vi.fn().mockResolvedValue({
     credentials: {
-      access_token: 'new_access_token'
-    }
+      access_token: 'new_access_token',
+    },
   });
 
   function MockOAuth2(this: unknown) {
@@ -42,10 +42,10 @@ vi.mock('googleapis', () => {
         users: {
           messages: {
             get: mockMessagesGet,
-          }
-        }
-      })
-    }
+          },
+        },
+      }),
+    },
   };
 });
 
@@ -68,8 +68,8 @@ describe('Gmail Fetcher Service (COM-25)', () => {
         userId: testUser.id,
         gmailEmail: 'fetcher@test.local',
         status: 'CONNECTED',
-        accessToken: encryptToken('test-access-token')
-      }
+        accessToken: encryptToken('test-access-token'),
+      },
     });
 
     const body = await GmailFetcherService.fetchMessageBody(testUser.id, 'msg-123');
@@ -80,11 +80,13 @@ describe('Gmail Fetcher Service (COM-25)', () => {
     await prisma.gmailConnection.update({
       where: { userId: testUser.id },
       data: {
-        refreshToken: encryptToken('test-refresh-token')
-      }
+        refreshToken: encryptToken('test-refresh-token'),
+      },
     });
 
     await expect(GmailFetcherService.fetchMessageBody(testUser.id, 'msg-401')).rejects.toThrow();
-    expect((await prisma.gmailConnection.findUniqueOrThrow({ where: { userId: testUser.id } })).status).toBe('REVOKED');
+    expect(
+      (await prisma.gmailConnection.findUniqueOrThrow({ where: { userId: testUser.id } })).status,
+    ).toBe('REVOKED');
   });
 });

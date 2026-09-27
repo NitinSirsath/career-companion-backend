@@ -12,21 +12,25 @@ export interface NotificationJobData {
 export async function enqueueNotificationJob(actionId: string) {
   const queue = await getQueue();
   const jobId = `notify-discord-${actionId}`; // idempotency key
-  
-  await queue.send(NOTIFICATION_JOB, { actionId }, {
-    singletonKey: jobId,
-    singletonSeconds: 300,
-    retryLimit: 3,
-    retryDelay: 60,
-    retryBackoff: true,
-  });
+
+  await queue.send(
+    NOTIFICATION_JOB,
+    { actionId },
+    {
+      singletonKey: jobId,
+      singletonSeconds: 300,
+      retryLimit: 3,
+      retryDelay: 60,
+      retryBackoff: true,
+    },
+  );
 }
 
 export async function startNotificationWorker() {
   const queue = await getQueue();
   const discordProvider = new DiscordProvider();
 
-  await queue.work(NOTIFICATION_JOB, async (jobs: { id: string, data: NotificationJobData }[]) => {
+  await queue.work(NOTIFICATION_JOB, async (jobs: { id: string; data: NotificationJobData }[]) => {
     const job = jobs[0];
     const { actionId } = job.data;
 
@@ -35,16 +39,24 @@ export async function startNotificationWorker() {
       where: { id: actionId },
       include: {
         application: true,
-      }
+      },
     });
 
     if (!action) {
-      console.warn(JSON.stringify({ event: 'notification_failed', reason: 'action_not_found', actionId }));
+      console.warn(
+        JSON.stringify({ event: 'notification_failed', reason: 'action_not_found', actionId }),
+      );
       return; // Nothing to do
     }
 
     if (!process.env.DISCORD_USER_ID || action.application.userId !== process.env.DISCORD_USER_ID) {
-      console.warn(JSON.stringify({ event: 'notification_skipped', reason: 'recipient_not_configured_for_owner', actionId }));
+      console.warn(
+        JSON.stringify({
+          event: 'notification_skipped',
+          reason: 'recipient_not_configured_for_owner',
+          actionId,
+        }),
+      );
       return;
     }
     if (action.status !== 'PENDING') return;
@@ -54,13 +66,15 @@ export async function startNotificationWorker() {
       where: {
         actionId_provider: {
           actionId,
-          provider: 'DISCORD'
-        }
-      }
+          provider: 'DISCORD',
+        },
+      },
     });
 
     if (existingDelivery && existingDelivery.status === 'DELIVERED') {
-      console.log(JSON.stringify({ event: 'notification_skipped', reason: 'already_delivered', actionId }));
+      console.log(
+        JSON.stringify({ event: 'notification_skipped', reason: 'already_delivered', actionId }),
+      );
       return;
     }
 
@@ -68,10 +82,17 @@ export async function startNotificationWorker() {
     // Rules from prompt: Important interview-related action, Assessment requiring user action, Offer-related event, Important recruiter/interview follow-up, Action approaching or reaching its deadline.
     // For MVP: We will notify on ACTION_REQUIRED and FOLLOW_UP_REQUIRED
     const isEligible = action.type === 'ACTION_REQUIRED' || action.type === 'FOLLOW_UP_REQUIRED';
-    
+
     if (!isEligible) {
-       console.log(JSON.stringify({ event: 'notification_skipped', reason: 'ineligible_action_type', actionId, type: action.type }));
-       return;
+      console.log(
+        JSON.stringify({
+          event: 'notification_skipped',
+          reason: 'ineligible_action_type',
+          actionId,
+          type: action.type,
+        }),
+      );
+      return;
     }
 
     const payload: NotificationPayload = {
@@ -85,29 +106,48 @@ export async function startNotificationWorker() {
 
     // Commit a claim before delivery. A crash after sending leaves it claimed;
     // webhook delivery has no provider idempotency key, so do not auto-resend.
-    await prisma.notificationDelivery.createMany({ data: [{ actionId, provider: 'DISCORD' }], skipDuplicates: true });
-    const claimed = await prisma.notificationDelivery.updateMany({ where: {
-      actionId, provider: 'DISCORD', status: { in: ['PENDING', 'FAILED_RETRYABLE'] }, claimedAt: null, attemptCount: { lt: 4 },
-    }, data: { claimedAt: new Date(), lastAttemptAt: new Date(), attemptCount: { increment: 1 } } });
+    await prisma.notificationDelivery.createMany({
+      data: [{ actionId, provider: 'DISCORD' }],
+      skipDuplicates: true,
+    });
+    const claimed = await prisma.notificationDelivery.updateMany({
+      where: {
+        actionId,
+        provider: 'DISCORD',
+        status: { in: ['PENDING', 'FAILED_RETRYABLE'] },
+        claimedAt: null,
+        attemptCount: { lt: 4 },
+      },
+      data: { claimedAt: new Date(), lastAttemptAt: new Date(), attemptCount: { increment: 1 } },
+    });
     if (!claimed.count) {
-      console.log(JSON.stringify({ event: 'notification_skipped', reason: 'claimed_or_terminal', actionId }));
+      console.log(
+        JSON.stringify({ event: 'notification_skipped', reason: 'claimed_or_terminal', actionId }),
+      );
       return;
     }
     const result = await discordProvider.send(payload);
-    await prisma.notificationDelivery.update({ where: { actionId_provider: { actionId, provider: 'DISCORD' } }, data: {
-      status: result.success ? 'DELIVERED' : result.retryable ? 'FAILED_RETRYABLE' : 'FAILED_PERMANENT',
-      claimedAt: result.retryable ? null : undefined,
-      errorDetails: result.errorDetails || null,
-    } });
+    await prisma.notificationDelivery.update({
+      where: { actionId_provider: { actionId, provider: 'DISCORD' } },
+      data: {
+        status: result.success
+          ? 'DELIVERED'
+          : result.retryable
+            ? 'FAILED_RETRYABLE'
+            : 'FAILED_PERMANENT',
+        claimedAt: result.retryable ? null : undefined,
+        errorDetails: result.errorDetails || null,
+      },
+    });
 
     if (!result.success) {
       const logData = {
         event: 'notification_error',
         actionId,
         errorCategory: result.errorCategory,
-        retryable: result.retryable
+        retryable: result.retryable,
       };
-      
+
       if (result.retryable) {
         console.warn(JSON.stringify(logData));
         throw new Error(`Notification failed: ${result.errorCategory}. Will retry.`);
@@ -116,7 +156,7 @@ export async function startNotificationWorker() {
         // Don't throw for permanent failures so pg-boss marks the job as completed/won't retry
       }
     } else {
-       console.log(JSON.stringify({ event: 'notification_delivered', actionId }));
+      console.log(JSON.stringify({ event: 'notification_delivered', actionId }));
     }
   });
 }

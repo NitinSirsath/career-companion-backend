@@ -1,20 +1,20 @@
 import { GoogleGenAI, Type, Schema } from '@google/genai';
 import { z } from 'zod';
-import { 
-  RelevanceClassifier, 
+import {
+  RelevanceClassifier,
   EmailAnalyzer,
   RelevanceClassifierInput,
-  EmailRelevanceSchema, 
+  EmailRelevanceSchema,
   EmailRelevanceResult,
   JobExtractionSchema,
   JobExtractionResult,
-  AI_CONTRACT_VERSIONS
+  AI_CONTRACT_VERSIONS,
 } from '../contracts';
-import { 
+import {
   AIProviderError,
-  RetryableAIError, 
-  TerminalAIError, 
-  SchemaValidationFailure 
+  RetryableAIError,
+  TerminalAIError,
+  SchemaValidationFailure,
 } from '../errors';
 
 const PROMPTS = {
@@ -33,9 +33,8 @@ Extract all requested fields. If information is missing, use null.
 Do not invent or assume information.
 Provide an extractionConfidence score (0 to 1).
 Return your findings as a structured JSON object according to the schema.
-  `.trim()
+  `.trim(),
 };
-
 
 const nativeEmailRelevanceSchema: Schema = {
   type: Type.OBJECT,
@@ -43,55 +42,151 @@ const nativeEmailRelevanceSchema: Schema = {
     decision: {
       type: Type.STRING,
       description: 'Classification of the email relevance for job searching.',
-      enum: ['RELEVANT', 'IRRELEVANT', 'UNCERTAIN']
+      enum: ['RELEVANT', 'IRRELEVANT', 'UNCERTAIN'],
     },
     category: {
       type: Type.STRING,
       description: 'The category of the email if it is relevant.',
-      enum: ['RECRUITER', 'INTERVIEW', 'ASSESSMENT', 'OFFER', 'REJECTION', 'FOLLOW_UP', 'NEWSLETTER', 'SPAM']
+      enum: [
+        'RECRUITER',
+        'INTERVIEW',
+        'ASSESSMENT',
+        'OFFER',
+        'REJECTION',
+        'FOLLOW_UP',
+        'NEWSLETTER',
+        'SPAM',
+      ],
     },
     confidence: {
       type: Type.NUMBER,
-      description: 'Confidence score between 0 and 1 for this classification.'
+      description: 'Confidence score between 0 and 1 for this classification.',
     },
     reasoning: {
       type: Type.STRING,
-      description: 'A brief explanation of why the email was classified as relevant or not relevant.'
-    }
+      description:
+        'A brief explanation of why the email was classified as relevant or not relevant.',
+    },
   },
-  required: ['decision', 'confidence', 'reasoning']
+  required: ['decision', 'confidence', 'reasoning'],
 };
-
 
 const nativeJobExtractionSchema: Schema = {
   type: Type.OBJECT,
   properties: {
-    companyName: { type: Type.STRING, nullable: true, description: 'The name of the company the application is for.' },
-    jobTitle: { type: Type.STRING, nullable: true, description: 'The job title applied for, if found.' },
-    recruiterName: { type: Type.STRING, nullable: true, description: 'Recruiter or contact name if explicitly present.' },
-    recruiterEmail: { type: Type.STRING, nullable: true, description: 'Recruiter or contact email if explicitly present.' },
-    interviewStage: { type: Type.STRING, nullable: true, description: 'Interview stage, e.g., First Round, Onsite, Final.' },
-    interviewType: { type: Type.STRING, nullable: true, description: 'Interview type, e.g., Phone, Video, In-person.' },
-    interviewDate: { type: Type.STRING, nullable: true, description: 'Interview date if available.' },
-    interviewTime: { type: Type.STRING, nullable: true, description: 'Interview time if available.' },
-    assessmentInfo: { type: Type.STRING, nullable: true, description: 'Information about any required assessment or take-home assignment.' },
-    assessmentDeadline: { type: Type.STRING, nullable: true, description: 'Deadline for the assessment if specified.' },
-    offerInfo: { type: Type.STRING, nullable: true, description: 'Information regarding a job offer.' },
-    rejectionInfo: { type: Type.STRING, nullable: true, description: 'Information regarding a rejection.' },
-    actionRequired: { type: Type.BOOLEAN, nullable: true, description: 'Whether user action is required based on the email.' },
-    requestedAction: { type: Type.STRING, nullable: true, description: 'The specific action requested from the user.' },
-    actionDeadline: { type: Type.STRING, nullable: true, description: 'The deadline for the requested action.' },
-    followUpRequired: { type: Type.BOOLEAN, nullable: true, description: 'Whether a follow-up is required or suggested.' },
+    companyName: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'The name of the company the application is for.',
+    },
+    jobTitle: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'The job title applied for, if found.',
+    },
+    recruiterName: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'Recruiter or contact name if explicitly present.',
+    },
+    recruiterEmail: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'Recruiter or contact email if explicitly present.',
+    },
+    interviewStage: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'Interview stage, e.g., First Round, Onsite, Final.',
+    },
+    interviewType: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'Interview type, e.g., Phone, Video, In-person.',
+    },
+    interviewDate: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'Interview date if available.',
+    },
+    interviewTime: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'Interview time if available.',
+    },
+    assessmentInfo: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'Information about any required assessment or take-home assignment.',
+    },
+    assessmentDeadline: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'Deadline for the assessment if specified.',
+    },
+    offerInfo: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'Information regarding a job offer.',
+    },
+    rejectionInfo: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'Information regarding a rejection.',
+    },
+    actionRequired: {
+      type: Type.BOOLEAN,
+      nullable: true,
+      description: 'Whether user action is required based on the email.',
+    },
+    requestedAction: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'The specific action requested from the user.',
+    },
+    actionDeadline: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'The deadline for the requested action.',
+    },
+    followUpRequired: {
+      type: Type.BOOLEAN,
+      nullable: true,
+      description: 'Whether a follow-up is required or suggested.',
+    },
     followUpDate: { type: Type.STRING, nullable: true, description: 'Suggested follow-up date.' },
-    extractionConfidence: { type: Type.NUMBER, nullable: true, description: 'Confidence score between 0 and 1 for the extraction.' },
-    provenance: { type: Type.STRING, nullable: true, description: 'Source indication or reasoning for extracted fields.' }
+    extractionConfidence: {
+      type: Type.NUMBER,
+      nullable: true,
+      description: 'Confidence score between 0 and 1 for the extraction.',
+    },
+    provenance: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'Source indication or reasoning for extracted fields.',
+    },
   },
   required: [
-    'companyName', 'jobTitle', 'recruiterName', 'recruiterEmail', 'interviewStage', 
-    'interviewType', 'interviewDate', 'interviewTime', 'assessmentInfo', 'assessmentDeadline', 
-    'offerInfo', 'rejectionInfo', 'actionRequired', 'requestedAction', 'actionDeadline', 
-    'followUpRequired', 'followUpDate', 'extractionConfidence', 'provenance'
-  ]
+    'companyName',
+    'jobTitle',
+    'recruiterName',
+    'recruiterEmail',
+    'interviewStage',
+    'interviewType',
+    'interviewDate',
+    'interviewTime',
+    'assessmentInfo',
+    'assessmentDeadline',
+    'offerInfo',
+    'rejectionInfo',
+    'actionRequired',
+    'requestedAction',
+    'actionDeadline',
+    'followUpRequired',
+    'followUpDate',
+    'extractionConfidence',
+    'provenance',
+  ],
 };
 
 export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
@@ -106,11 +201,14 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
       throw new TerminalAIError('GEMINI_API_KEY is not configured');
     }
 
-    this.client = new GoogleGenAI({ apiKey, httpOptions: { timeout: 30_000, retryOptions: { attempts: 1 } } });
+    this.client = new GoogleGenAI({
+      apiKey,
+      httpOptions: { timeout: 30_000, retryOptions: { attempts: 1 } },
+    });
     this.relevanceModel = process.env.GEMINI_RELEVANCE_MODEL || 'gemini-2.5-flash-lite';
     this.extractionModel = process.env.GEMINI_EXTRACTION_MODEL || 'gemini-2.5-flash';
   }
-  
+
   static getInstance(): GeminiProvider {
     if (!this.instance) {
       this.instance = new GeminiProvider();
@@ -123,22 +221,23 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
       throw err;
     }
 
-    const status = typeof err === 'object' && err !== null && 'status' in err ? Number(err.status) : undefined;
-    if (status === 429 || status === 503) throw new RetryableAIError('AI provider rejected request; retry after cooldown');
-    if (status && status >= 400 && status < 500) throw new TerminalAIError('AI provider rejected request');
+    const status =
+      typeof err === 'object' && err !== null && 'status' in err ? Number(err.status) : undefined;
+    if (status === 429 || status === 503)
+      throw new RetryableAIError('AI provider rejected request; retry after cooldown');
+    if (status && status >= 400 && status < 500)
+      throw new TerminalAIError('AI provider rejected request');
     throw new AIProviderError('AI provider outcome unknown; reconciliation required', false);
   }
 
   private async generateStructuredOutput<T>(
-    model: string, 
-    systemInstruction: string, 
-    input: string, 
+    model: string,
+    systemInstruction: string,
+    input: string,
     schema: z.ZodSchema<T>,
-    nativeSchema: Schema
+    nativeSchema: Schema,
   ): Promise<T> {
     try {
-
-
       const response = await this.client.models.generateContent({
         model,
         contents: input,
@@ -149,13 +248,17 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
           temperature: 0.1,
           maxOutputTokens: 2048,
           thinkingConfig: { thinkingBudget: 0 },
-        }
+        },
       });
 
-      console.log(JSON.stringify({ event: 'ai_usage', model,
-        inputTokens: response.usageMetadata?.promptTokenCount,
-        outputTokens: response.usageMetadata?.candidatesTokenCount,
-      }));
+      console.log(
+        JSON.stringify({
+          event: 'ai_usage',
+          model,
+          inputTokens: response.usageMetadata?.promptTokenCount,
+          outputTokens: response.usageMetadata?.candidatesTokenCount,
+        }),
+      );
       const text = response.text;
       if (!text) {
         throw new TerminalAIError('AI provider returned empty response');
@@ -172,7 +275,7 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
       if (!validationResult.success) {
         throw new SchemaValidationFailure(
           'AI provider returned malformed structured data',
-          'Structured response failed validation'
+          'Structured response failed validation',
         );
       }
 
@@ -182,7 +285,9 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
     }
   }
 
-  async classifyRelevance(input: RelevanceClassifierInput): Promise<{ version: string; data: EmailRelevanceResult }> {
+  async classifyRelevance(
+    input: RelevanceClassifierInput,
+  ): Promise<{ version: string; data: EmailRelevanceResult }> {
     const version = AI_CONTRACT_VERSIONS.CLASSIFICATION;
     const content = JSON.stringify(input);
     const data = await this.generateStructuredOutput(
@@ -190,7 +295,7 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
       PROMPTS[version],
       content,
       EmailRelevanceSchema,
-      nativeEmailRelevanceSchema
+      nativeEmailRelevanceSchema,
     );
 
     return { version, data };
@@ -203,20 +308,20 @@ export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
       PROMPTS[version],
       emailBody,
       JobExtractionSchema,
-      nativeJobExtractionSchema
+      nativeJobExtractionSchema,
     );
 
     return { version, data };
   }
-  
+
   getProviderName(): string {
     return 'gemini';
   }
-  
+
   getRelevanceModel(): string {
     return this.relevanceModel;
   }
-  
+
   getExtractionModel(): string {
     return this.extractionModel;
   }

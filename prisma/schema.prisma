@@ -133,6 +133,8 @@ model GmailConnection {
   syncClaim      String?
   syncLeaseUntil DateTime?
   syncError      String?
+  syncLookbackDays       Int                   @default(1)
+  lastSyncedLookbackDays Int?
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
 

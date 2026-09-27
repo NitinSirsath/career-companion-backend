@@ -24,18 +24,18 @@ vi.mock('google-auth-library', () => {
     }),
   });
 
-  const mockGenerateAuthUrl = vi.fn().mockReturnValue(
-    'https://accounts.google.com/o/oauth2/v2/auth?mock=1&state=teststate'
-  );
+  const mockGenerateAuthUrl = vi
+    .fn()
+    .mockReturnValue('https://accounts.google.com/o/oauth2/v2/auth?mock=1&state=teststate');
 
   return {
-    OAuth2Client: vi.fn().mockImplementation(function() {
+    OAuth2Client: vi.fn().mockImplementation(function () {
       return {
         generateAuthUrl: mockGenerateAuthUrl,
         getToken: mockGetToken,
         verifyIdToken: mockVerifyIdToken,
       };
-    })
+    }),
   };
 });
 
@@ -76,7 +76,7 @@ describe('Google OAuth Sign-In (COM-24)', () => {
     // 1. First get the state from connect
     const connectRes = await request(app).get('/api/auth/connect');
     const cookies = connectRes.headers['set-cookie'] as unknown as string[];
-    const stateCookie = cookies.find(c => c.startsWith('google_login_state='))!.split(';')[0];
+    const stateCookie = cookies.find((c) => c.startsWith('google_login_state='))!.split(';')[0];
 
     const stateMatch = /s%3A([^.]+)/.exec(stateCookie);
     const rawState = stateMatch ? stateMatch[1] : '';
@@ -89,8 +89,9 @@ describe('Google OAuth Sign-In (COM-24)', () => {
     expect(callbackRes.status).toBe(302);
     expect(callbackRes.headers.location).toContain('/');
 
-    const ccSessionCookie = (callbackRes.headers['set-cookie'] as unknown as string[])
-      .find(c => c.startsWith('cc_session='))!;
+    const ccSessionCookie = (callbackRes.headers['set-cookie'] as unknown as string[]).find((c) =>
+      c.startsWith('cc_session='),
+    )!;
 
     // 3. User should be created
     testUser = (await prisma.user.findUnique({ where: { googleId: 'mock_google_id_123' } }))!;
@@ -98,9 +99,7 @@ describe('Google OAuth Sign-In (COM-24)', () => {
     expect(testUser.email).toBe('auth_test_user@gmail.com');
 
     // 4. Test /api/auth/me
-    const meRes = await request(app)
-      .get('/api/auth/me')
-      .set('Cookie', ccSessionCookie);
+    const meRes = await request(app).get('/api/auth/me').set('Cookie', ccSessionCookie);
 
     expect(meRes.status).toBe(200);
     expect(meRes.body.email).toBe('auth_test_user@gmail.com');
@@ -109,24 +108,43 @@ describe('Google OAuth Sign-In (COM-24)', () => {
   it('rejects unverified email claims before linking an existing user', async () => {
     testUser = await prisma.user.create({ data: { email: 'auth_test_user@gmail.com' } });
     vi.mocked(new OAuth2Client().verifyIdToken).mockResolvedValueOnce({
-      getPayload: () => ({ iss: 'https://accounts.google.com', sub: 'unverified-id', email: testUser.email, email_verified: false }),
+      getPayload: () => ({
+        iss: 'https://accounts.google.com',
+        sub: 'unverified-id',
+        email: testUser.email,
+        email_verified: false,
+      }),
     } as never);
     const connected = await request(app).get('/api/auth/connect');
-    const cookie = (connected.headers['set-cookie'] as unknown as string[]).find(c => c.startsWith('google_login_state='))!.split(';')[0];
+    const cookie = (connected.headers['set-cookie'] as unknown as string[])
+      .find((c) => c.startsWith('google_login_state='))!
+      .split(';')[0];
     const state = /s%3A([^.]+)/.exec(cookie)![1];
-    const response = await request(app).get(`/api/auth/callback?code=mock&state=${state}`).set('Cookie', cookie);
+    const response = await request(app)
+      .get(`/api/auth/callback?code=mock&state=${state}`)
+      .set('Cookie', cookie);
     expect(response.headers.location).toContain('error=server_error');
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: testUser.id } })).googleId).toBeNull();
+    expect(
+      (await prisma.user.findUniqueOrThrow({ where: { id: testUser.id } })).googleId,
+    ).toBeNull();
   });
 
   it('does not replace a different existing Google identity', async () => {
-    testUser = await prisma.user.create({ data: { email: 'auth_test_user@gmail.com', googleId: 'existing-google-id' } });
+    testUser = await prisma.user.create({
+      data: { email: 'auth_test_user@gmail.com', googleId: 'existing-google-id' },
+    });
     const connected = await request(app).get('/api/auth/connect');
-    const cookie = (connected.headers['set-cookie'] as unknown as string[]).find(c => c.startsWith('google_login_state='))!.split(';')[0];
+    const cookie = (connected.headers['set-cookie'] as unknown as string[])
+      .find((c) => c.startsWith('google_login_state='))!
+      .split(';')[0];
     const state = /s%3A([^.]+)/.exec(cookie)![1];
-    const response = await request(app).get(`/api/auth/callback?code=mock&state=${state}`).set('Cookie', cookie);
+    const response = await request(app)
+      .get(`/api/auth/callback?code=mock&state=${state}`)
+      .set('Cookie', cookie);
     expect(response.headers.location).toContain('error=server_error');
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: testUser.id } })).googleId).toBe('existing-google-id');
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: testUser.id } })).googleId).toBe(
+      'existing-google-id',
+    );
   });
 
   it('returns 401 for protected endpoints without session', async () => {
@@ -139,7 +157,7 @@ describe('Google OAuth Sign-In (COM-24)', () => {
     // 1. Get connect state
     const connectRes = await request(app).get('/api/auth/connect');
     const cookies = connectRes.headers['set-cookie'] as unknown as string[];
-    const stateCookie = cookies.find(c => c.startsWith('google_login_state='))!.split(';')[0];
+    const stateCookie = cookies.find((c) => c.startsWith('google_login_state='))!.split(';')[0];
     const rawState = /s%3A([^.]+)/.exec(stateCookie)![1];
 
     // 2. Login
@@ -148,7 +166,8 @@ describe('Google OAuth Sign-In (COM-24)', () => {
       .set('Cookie', stateCookie);
 
     const sessionCookie = (callbackRes.headers['set-cookie'] as unknown as string[])
-      .find(c => c.startsWith('cc_session='))!.split(';')[0];
+      .find((c) => c.startsWith('cc_session='))!
+      .split(';')[0];
 
     // 3. Verify logged in
     let meRes = await request(app).get('/api/auth/me').set('Cookie', sessionCookie);
@@ -169,13 +188,13 @@ describe('Google OAuth Sign-In (COM-24)', () => {
       data: {
         googleId: 'mock_google_id_123',
         email: 'auth_test_user@gmail.com',
-        name: null
-      }
+        name: null,
+      },
     });
 
     const connectRes = await request(app).get('/api/auth/connect');
     const cookies = connectRes.headers['set-cookie'] as unknown as string[];
-    const stateCookie = cookies.find(c => c.startsWith('google_login_state='))!.split(';')[0];
+    const stateCookie = cookies.find((c) => c.startsWith('google_login_state='))!.split(';')[0];
     const rawState = /s%3A([^.]+)/.exec(stateCookie)![1];
 
     await request(app)
@@ -193,8 +212,8 @@ describe('Google OAuth Sign-In (COM-24)', () => {
       devUser = await prisma.user.create({
         data: {
           email: `auth-dev-${randomUUID()}@audit.test`,
-          name: 'Dev User'
-        }
+          name: 'Dev User',
+        },
       });
     });
 
@@ -206,20 +225,16 @@ describe('Google OAuth Sign-In (COM-24)', () => {
 
     it('returns 200 for /api/auth/me when development auth is enabled and header is present', async () => {
       process.env.ENABLE_DEV_AUTH = 'true';
-      const res = await request(app)
-        .get('/api/auth/me')
-        .set('X-Development-User', devUser.email);
-      
+      const res = await request(app).get('/api/auth/me').set('X-Development-User', devUser.email);
+
       expect(res.status).toBe(200);
       expect(res.body.email).toBe(devUser.email);
     });
 
     it('returns 401 for /api/auth/me when development auth is disabled', async () => {
       process.env.ENABLE_DEV_AUTH = 'false';
-      const res = await request(app)
-        .get('/api/auth/me')
-        .set('X-Development-User', devUser.email);
-      
+      const res = await request(app).get('/api/auth/me').set('X-Development-User', devUser.email);
+
       expect(res.status).toBe(401);
     });
 

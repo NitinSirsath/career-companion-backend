@@ -95,10 +95,18 @@ router.get('/:id/actions', async (req: Request, res: Response, next: NextFunctio
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const application = await ApplicationService.getApplication(req.auth!.user.id, z.uuid().parse(req.params.id));
-    if (!application) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Application not found' } });
+    const application = await ApplicationService.getApplication(
+      req.auth!.user.id,
+      z.uuid().parse(req.params.id),
+    );
+    if (!application)
+      return res
+        .status(404)
+        .json({ error: { code: 'NOT_FOUND', message: 'Application not found' } });
     return res.json(application);
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 });
 
 export const applicationRouter = router;

@@ -50,7 +50,8 @@ export const ApplicationResponseSchema = z.object({
 
 export type ApplicationResponse = z.infer<typeof ApplicationResponseSchema>;
 
-export const ListApplicationsResponseSchema = createPaginatedResponseSchema(ApplicationResponseSchema);
+export const ListApplicationsResponseSchema =
+  createPaginatedResponseSchema(ApplicationResponseSchema);
 export type ListApplicationsResponse = z.infer<typeof ListApplicationsResponseSchema>;
 
 // ─── ApplicationEvent ────────────────────────────────────────────────────────

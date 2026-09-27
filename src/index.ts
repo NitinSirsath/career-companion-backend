@@ -15,13 +15,13 @@ validateProductionConfig(process.env);
 if (!process.env.SESSION_SECRET) {
   console.warn(
     '[Config] SESSION_SECRET is not set — using an insecure dev default. ' +
-      'Set SESSION_SECRET in .env before running in any shared or production environment.'
+      'Set SESSION_SECRET in .env before running in any shared or production environment.',
   );
 }
 if (!process.env.FRONTEND_URL) {
   console.warn(
     '[Config] FRONTEND_URL is not set — defaulting to http://localhost:5173 (Vite dev server). ' +
-      'Set FRONTEND_URL in .env for production.'
+      'Set FRONTEND_URL in .env for production.',
   );
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -42,14 +42,14 @@ app.use(cookieParser(process.env.OAUTH_STATE_COOKIE_SECRET ?? 'dev-cookie-secret
 // --- Session Setup ---
 const PgStore = pgSession(session);
 const dbPool = new Pool({
-  connectionString: process.env.DATABASE_URL
+  connectionString: process.env.DATABASE_URL,
 });
 
 app.use(
   session({
     store: new PgStore({
       pool: dbPool,
-      tableName: 'session'
+      tableName: 'session',
     }),
     secret: process.env.SESSION_SECRET || 'dev-session-secret-change-in-prod',
     resave: false,
@@ -59,9 +59,9 @@ app.use(
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
-    }
-  })
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    },
+  }),
 );
 
 import { authRouter } from './routes/auth';
@@ -90,15 +90,17 @@ import { stopQueue } from './services/queue';
 import { prisma } from './db/prisma';
 
 if (process.env.NODE_ENV !== 'test') {
-  startGmailSyncWorker().catch(() => console.error(JSON.stringify({ event: 'gmail_worker_start_failed' })));
+  startGmailSyncWorker().catch(() =>
+    console.error(JSON.stringify({ event: 'gmail_worker_start_failed' })),
+  );
   startEmailProcessingWorker().catch(() => {
     console.error(JSON.stringify({ event: 'email_worker_start_failed' }));
   });
-  
+
   startNotificationWorker().catch(() => {
     console.error(JSON.stringify({ event: 'notification_worker_start_failed' }));
   });
-  
+
   const server = app.listen(port, () => {
     console.log(`Backend server is running on port ${port}`);
   });

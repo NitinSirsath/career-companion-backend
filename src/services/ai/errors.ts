@@ -1,5 +1,9 @@
 export class AIProviderError extends Error {
-  constructor(message: string, public readonly isRetryable: boolean, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly isRetryable: boolean,
+    public readonly cause?: unknown,
+  ) {
     super(message);
     this.name = 'AIProviderError';
   }
@@ -20,7 +24,10 @@ export class TerminalAIError extends AIProviderError {
 }
 
 export class SchemaValidationFailure extends TerminalAIError {
-  constructor(message: string, public readonly validationErrors: unknown) {
+  constructor(
+    message: string,
+    public readonly validationErrors: unknown,
+  ) {
     super(message);
     this.name = 'SchemaValidationFailure';
   }

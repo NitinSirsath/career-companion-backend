@@ -146,11 +146,9 @@ describe('Durable AI external-effect boundary', () => {
     const extraction = JobExtractionSchema.parse(
       Object.fromEntries(Object.keys(JobExtractionSchema.shape).map((key) => [key, null])),
     );
-    const classifyRelevance = vi
-      .fn()
-      .mockResolvedValue({
-        data: { decision: 'IRRELEVANT', confidence: 0.2, reasoning: 'uncertain' },
-      });
+    const classifyRelevance = vi.fn().mockResolvedValue({
+      data: { decision: 'IRRELEVANT', confidence: 0.2, reasoning: 'uncertain' },
+    });
     const extractJobData = vi.fn().mockResolvedValue({ data: extraction });
     vi.spyOn(GeminiProvider, 'getInstance').mockReturnValue({
       classifyRelevance,
@@ -159,7 +157,10 @@ describe('Durable AI external-effect boundary', () => {
       getRelevanceModel: () => 'test',
       getExtractionModel: () => 'test',
     } as unknown as GeminiProvider);
-    vi.mocked(GmailFetcherService.fetchMessageMetadata).mockResolvedValue({ labelIds: ['INBOX'], snippet: null });
+    vi.mocked(GmailFetcherService.fetchMessageMetadata).mockResolvedValue({
+      labelIds: ['INBOX'],
+      snippet: null,
+    });
     vi.mocked(GmailFetcherService.fetchMessageBody).mockResolvedValue('x'.repeat(9000));
     vi.spyOn(MatcherService, 'matchEmailToApplication').mockResolvedValue(undefined);
     await EmailAIPipeline.processEmail(userId, emailId);
@@ -175,12 +176,10 @@ describe('Durable AI external-effect boundary', () => {
     const extraction = JobExtractionSchema.parse(
       Object.fromEntries(Object.keys(JobExtractionSchema.shape).map((key) => [key, null])),
     );
-    const classifyRelevance = vi
-      .fn()
-      .mockResolvedValue({
-        version: 'v1',
-        data: { decision: 'RELEVANT', confidence: 0.9, reasoning: 'job' },
-      });
+    const classifyRelevance = vi.fn().mockResolvedValue({
+      version: 'v1',
+      data: { decision: 'RELEVANT', confidence: 0.9, reasoning: 'job' },
+    });
     const extractJobData = vi.fn().mockResolvedValue({ version: 'v1', data: extraction });
     vi.spyOn(GeminiProvider, 'getInstance').mockReturnValue({
       classifyRelevance,

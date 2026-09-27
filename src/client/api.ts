@@ -1,4 +1,8 @@
-import { CreateApplicationRequest, ApplicationResponse, ListApplicationsResponse } from '../contracts';
+import {
+  CreateApplicationRequest,
+  ApplicationResponse,
+  ListApplicationsResponse,
+} from '../contracts';
 
 export class ApiClient {
   private baseUrl: string;

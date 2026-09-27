@@ -19,17 +19,17 @@ describe('Email API (COM-32)', () => {
     await prisma.user.deleteMany({});
 
     userA = await prisma.user.create({
-      data: { email: 'user-a-email@test.local' }
+      data: { email: 'user-a-email@test.local' },
     });
     userB = await prisma.user.create({
-      data: { email: 'user-b-email@test.local' }
+      data: { email: 'user-b-email@test.local' },
     });
 
     appA = await prisma.application.create({
-      data: { companyName: 'MatchCo', userId: userA.id }
+      data: { companyName: 'MatchCo', userId: userA.id },
     });
     appB = await prisma.application.create({
-      data: { companyName: 'MatchCo', userId: userB.id }
+      data: { companyName: 'MatchCo', userId: userB.id },
     });
 
     ambiguousEmail = await prisma.email.create({
@@ -46,9 +46,9 @@ describe('Email API (COM-32)', () => {
             contractVersion: '1.0',
             companyName: 'MatchCo',
             confidence: 0.5,
-          }
-        }
-      }
+          },
+        },
+      },
     });
 
     unmatchedEmail = await prisma.email.create({
@@ -66,15 +66,19 @@ describe('Email API (COM-32)', () => {
             contractVersion: '1.0',
             companyName: 'Startup',
             confidence: 0.9,
-          }
-        }
-      }
+          },
+        },
+      },
     });
   });
 
   afterAll(async () => {
-    await prisma.aIProcessingResult.deleteMany({ where: { emailId: { in: [ambiguousEmail.id, unmatchedEmail.id] } } });
-    await prisma.email.deleteMany({ where: { id: { in: [ambiguousEmail.id, unmatchedEmail.id] } } });
+    await prisma.aIProcessingResult.deleteMany({
+      where: { emailId: { in: [ambiguousEmail.id, unmatchedEmail.id] } },
+    });
+    await prisma.email.deleteMany({
+      where: { id: { in: [ambiguousEmail.id, unmatchedEmail.id] } },
+    });
     await prisma.application.deleteMany({ where: { userId: { in: [userA.id, userB.id] } } });
     await prisma.user.deleteMany({ where: { id: { in: [userA.id, userB.id] } } });
   });
@@ -138,11 +142,13 @@ describe('Email API (COM-32)', () => {
 
   describe('POST /api/emails/:id/resolve', () => {
     it('returns 401 without auth', async () => {
-      const res = await request(app).post(`/api/emails/${ambiguousEmail.id}/resolve`).send({ applicationId: appA.id });
+      const res = await request(app)
+        .post(`/api/emails/${ambiguousEmail.id}/resolve`)
+        .send({ applicationId: appA.id });
       expect(res.status).toBe(401);
     });
 
-    it('returns 403 if trying to resolve to another user\'s application', async () => {
+    it("returns 403 if trying to resolve to another user's application", async () => {
       const res = await request(app)
         .post(`/api/emails/${ambiguousEmail.id}/resolve`)
         .set('X-Development-User', 'user-a-email@test.local')
@@ -178,10 +184,10 @@ describe('Email API (COM-32)', () => {
             create: {
               provider: 'test',
               model: 'test',
-              contractVersion: '1.0'
-            }
-          }
-        }
+              contractVersion: '1.0',
+            },
+          },
+        },
       });
 
       const res = await request(app)
@@ -224,10 +230,10 @@ describe('Email API (COM-32)', () => {
             create: {
               provider: 'test',
               model: 'test',
-              contractVersion: '1.0'
-            }
-          }
-        }
+              contractVersion: '1.0',
+            },
+          },
+        },
       });
 
       const res = await request(app)

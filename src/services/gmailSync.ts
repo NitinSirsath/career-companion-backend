@@ -58,6 +58,18 @@ export class GmailSyncService {
     const connection = await prisma.gmailConnection.findUnique({ where: { userId } });
     if (!connection || connection.status !== 'CONNECTED')
       throw new GmailAuthError('Gmail is not connected');
+
+    const syncLookbackDays = connection.syncLookbackDays || 1;
+    const lastSyncedLookbackDays = connection.lastSyncedLookbackDays;
+    const daysSinceLastSync = connection.lastSyncedAt
+      ? (Date.now() - connection.lastSyncedAt.getTime()) / 86400000
+      : Infinity;
+    const shouldFullSync =
+      !connection.lastHistoryId ||
+      !connection.lastSyncedAt ||
+      daysSinceLastSync > syncLookbackDays ||
+      (lastSyncedLookbackDays !== null && syncLookbackDays > lastSyncedLookbackDays);
+
     const claim = randomUUID();
     const acquired = await prisma.gmailConnection.updateMany({
       where: {
@@ -126,7 +138,8 @@ export class GmailSyncService {
             }
             if (!message.labelIds?.includes('INBOX')) continue;
             const receivedAt = message.internalDate ? new Date(Number(message.internalDate)) : null;
-            if (receivedAt && receivedAt.getTime() < Date.now() - 90 * 86400_000) continue;
+            if (receivedAt && receivedAt.getTime() < Date.now() - syncLookbackDays * 86400_000)
+              continue;
             await heartbeat();
             const record = await prisma.email.upsert({
               where: { userId_gmailMessageId: { userId, gmailMessageId: id } },
@@ -156,7 +169,7 @@ export class GmailSyncService {
               {
                 userId: 'me',
                 labelIds: ['INBOX'],
-                q: 'newer_than:90d',
+                q: `newer_than:${syncLookbackDays}d`,
                 maxResults: 100,
                 pageToken,
               },
@@ -167,7 +180,7 @@ export class GmailSyncService {
           } while (pageToken);
           return baseline;
         };
-        if (!connection.lastHistoryId) return fullSync();
+        if (shouldFullSync) return fullSync();
         let pageToken: string | undefined;
         let latest = connection.lastHistoryId;
         do {
@@ -177,7 +190,7 @@ export class GmailSyncService {
             page = await gmail.users.history.list(
               {
                 userId: 'me',
-                startHistoryId: connection.lastHistoryId,
+                startHistoryId: connection.lastHistoryId!,
                 historyTypes: ['messageAdded', 'labelAdded'],
                 pageToken,
                 maxResults: 100,
@@ -216,6 +229,7 @@ export class GmailSyncService {
           syncLeaseUntil: null,
           lastHistoryId: historyId,
           lastSyncedAt,
+          lastSyncedLookbackDays: syncLookbackDays,
         },
       });
       console.log(

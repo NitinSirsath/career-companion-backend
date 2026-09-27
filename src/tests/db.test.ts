@@ -45,20 +45,20 @@ describe('Database Persistence Foundation', () => {
 
   it('required companyName constraint works (fails without it)', async () => {
     const user = await prisma.user.findUnique({ where: { email: 'test-user@example.com' } });
-    
+
     await expect(
       prisma.application.create({
         data: {
           userId: user!.id,
           jobTitle: 'No Company',
         } as unknown as import('@prisma/client').Prisma.ApplicationCreateInput,
-      })
+      }),
     ).rejects.toThrow();
   });
 
   it('duplicate (userId, companyName, jobTitle) values are allowed', async () => {
     const user = await prisma.user.findUnique({ where: { email: 'test-user@example.com' } });
-    
+
     // Create first
     await prisma.application.create({
       data: {
@@ -82,7 +82,7 @@ describe('Database Persistence Foundation', () => {
 
   it('deterministic seed behavior does not create duplicate development users', async () => {
     const devEmail = 'dev@career-companion.local';
-    
+
     // First run (simulate seed)
     await prisma.user.upsert({
       where: { email: devEmail },

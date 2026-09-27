@@ -19,21 +19,23 @@ router.get('/ambiguous', async (req: Request, res: Response, next: NextFunction)
     const userId = req.auth!.user.id;
     const { limit, offset } = getPaginationParams(req.query);
     const emails = await MatcherService.getAmbiguousMatches(userId, limit, offset);
-    
+
     // Map to response schema to omit any PII/raw bodies if they existed, though Prisma already doesn't load bodies
-    const response = emails.map(email => ({
+    const response = emails.map((email) => ({
       id: email.id,
       subject: email.subject,
       sender: email.sender,
       threadId: email.threadId,
       gmailMessageId: email.gmailMessageId,
       receivedAt: email.receivedAt ? email.receivedAt.toISOString() : null,
-      aiProcessingResult: email.aiProcessingResult ? {
-        companyName: email.aiProcessingResult.companyName,
-        jobTitle: email.aiProcessingResult.jobTitle,
-        confidence: email.aiProcessingResult.confidence,
-        category: email.aiProcessingResult.category,
-      } : null,
+      aiProcessingResult: email.aiProcessingResult
+        ? {
+            companyName: email.aiProcessingResult.companyName,
+            jobTitle: email.aiProcessingResult.jobTitle,
+            confidence: email.aiProcessingResult.confidence,
+            category: email.aiProcessingResult.category,
+          }
+        : null,
     }));
 
     res.status(200).json(createPaginatedResponse(response, limit, offset));
@@ -53,19 +55,21 @@ router.get('/unmatched', async (req: Request, res: Response, next: NextFunction)
     const { limit, offset } = getPaginationParams(req.query);
     const emails = await MatcherService.getUnmatchedEmails(userId, limit, offset);
 
-    const response = emails.map(email => ({
+    const response = emails.map((email) => ({
       id: email.id,
       subject: email.subject,
       sender: email.sender,
       threadId: email.threadId,
       gmailMessageId: email.gmailMessageId,
       receivedAt: email.receivedAt ? email.receivedAt.toISOString() : null,
-      aiProcessingResult: email.aiProcessingResult ? {
-        companyName: email.aiProcessingResult.companyName,
-        jobTitle: email.aiProcessingResult.jobTitle,
-        confidence: email.aiProcessingResult.confidence,
-        category: email.aiProcessingResult.category,
-      } : null,
+      aiProcessingResult: email.aiProcessingResult
+        ? {
+            companyName: email.aiProcessingResult.companyName,
+            jobTitle: email.aiProcessingResult.jobTitle,
+            confidence: email.aiProcessingResult.confidence,
+            category: email.aiProcessingResult.category,
+          }
+        : null,
     }));
 
     res.status(200).json(createPaginatedResponse(response, limit, offset));
@@ -94,13 +98,28 @@ router.post('/:id/resolve', async (req: Request, res: Response, next: NextFuncti
       if (err.message === 'EMAIL_NOT_FOUND') {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Email not found.' } });
       } else if (err.message === 'INVALID_MATCH_STATE') {
-        res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'Email is not in a resolvable state.' } });
+        res
+          .status(400)
+          .json({ error: { code: 'BAD_REQUEST', message: 'Email is not in a resolvable state.' } });
       } else if (err.message === 'APPLICATION_REQUIRED_FOR_UNMATCHED') {
-        res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'An application must be selected for unmatched emails.' } });
+        res
+          .status(400)
+          .json({
+            error: {
+              code: 'BAD_REQUEST',
+              message: 'An application must be selected for unmatched emails.',
+            },
+          });
       } else if (err.message === 'APPLICATION_NOT_FOUND') {
-        res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Application not found or access denied.' } });
+        res
+          .status(403)
+          .json({
+            error: { code: 'FORBIDDEN', message: 'Application not found or access denied.' },
+          });
       } else if (err.message === 'NO_AI_RESULT') {
-        res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'Email has no AI processing result.' } });
+        res
+          .status(400)
+          .json({ error: { code: 'BAD_REQUEST', message: 'Email has no AI processing result.' } });
       } else {
         throw e;
       }

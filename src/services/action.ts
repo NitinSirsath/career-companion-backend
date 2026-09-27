@@ -2,13 +2,18 @@ import { prisma } from '../db/prisma';
 import { ActionWithContextResponse } from '../contracts';
 
 export class ActionService {
-  static async getUserActions(userId: string, status?: string, limit: number = 20, offset: number = 0): Promise<ActionWithContextResponse[]> {
+  static async getUserActions(
+    userId: string,
+    status?: string,
+    limit: number = 20,
+    offset: number = 0,
+  ): Promise<ActionWithContextResponse[]> {
     const actions = await prisma.action.findMany({
       where: {
         application: {
-          userId
+          userId,
         },
-        ...(status ? { status } : {})
+        ...(status ? { status } : {}),
       },
       take: limit + 1,
       skip: offset,
@@ -16,27 +21,27 @@ export class ActionService {
         { status: 'desc' }, // Pending work comes before resolved actions.
         { deadline: 'asc' },
         { createdAt: 'asc' },
-        { id: 'asc' }
+        { id: 'asc' },
       ],
       include: {
         application: {
           select: {
             companyName: true,
-            jobTitle: true
-          }
+            jobTitle: true,
+          },
         },
         email: {
           select: {
             subject: true,
             sender: true,
             threadId: true,
-            gmailMessageId: true
-          }
-        }
-      }
+            gmailMessageId: true,
+          },
+        },
+      },
     });
 
-    return actions.map(action => ({
+    return actions.map((action) => ({
       id: action.id,
       applicationId: action.applicationId,
       emailId: action.emailId,
@@ -47,26 +52,32 @@ export class ActionService {
       createdAt: action.createdAt.toISOString(),
       application: {
         companyName: action.application.companyName,
-        jobTitle: action.application.jobTitle
+        jobTitle: action.application.jobTitle,
       },
-      email: action.email ? {
-        subject: action.email.subject,
-        sender: action.email.sender,
-        threadId: action.email.threadId,
-        gmailMessageId: action.email.gmailMessageId
-      } : null
+      email: action.email
+        ? {
+            subject: action.email.subject,
+            sender: action.email.sender,
+            threadId: action.email.threadId,
+            gmailMessageId: action.email.gmailMessageId,
+          }
+        : null,
     }));
   }
 
-  static async updateActionStatus(userId: string, actionId: string, status: string): Promise<ActionWithContextResponse | null> {
+  static async updateActionStatus(
+    userId: string,
+    actionId: string,
+    status: string,
+  ): Promise<ActionWithContextResponse | null> {
     // 1. Verify ownership (cannot mutate another user's action)
     const existingAction = await prisma.action.findFirst({
-      where: { 
+      where: {
         id: actionId,
         application: {
-          userId
-        }
-      }
+          userId,
+        },
+      },
     });
 
     if (!existingAction) {
@@ -80,7 +91,7 @@ export class ActionService {
     } else {
       await prisma.action.update({
         where: { id: actionId },
-        data: { status }
+        data: { status },
       });
     }
 
@@ -91,18 +102,18 @@ export class ActionService {
         application: {
           select: {
             companyName: true,
-            jobTitle: true
-          }
+            jobTitle: true,
+          },
         },
         email: {
           select: {
             subject: true,
             sender: true,
             threadId: true,
-            gmailMessageId: true
-          }
-        }
-      }
+            gmailMessageId: true,
+          },
+        },
+      },
     });
 
     if (!updatedAction) return null;
@@ -118,14 +129,16 @@ export class ActionService {
       createdAt: updatedAction.createdAt.toISOString(),
       application: {
         companyName: updatedAction.application.companyName,
-        jobTitle: updatedAction.application.jobTitle
+        jobTitle: updatedAction.application.jobTitle,
       },
-      email: updatedAction.email ? {
-        subject: updatedAction.email.subject,
-        sender: updatedAction.email.sender,
-        threadId: updatedAction.email.threadId,
-        gmailMessageId: updatedAction.email.gmailMessageId
-      } : null
+      email: updatedAction.email
+        ? {
+            subject: updatedAction.email.subject,
+            sender: updatedAction.email.sender,
+            threadId: updatedAction.email.threadId,
+            gmailMessageId: updatedAction.email.gmailMessageId,
+          }
+        : null,
     };
   }
 }

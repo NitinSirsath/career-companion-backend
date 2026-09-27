@@ -113,7 +113,9 @@ describe('GmailTokenEncryption', () => {
     });
 
     it('decryptToken throws on invalid format (no pipe)', () => {
-      expect(() => decryptToken('no_pipe_separator_here')).toThrow('Invalid encrypted token format');
+      expect(() => decryptToken('no_pipe_separator_here')).toThrow(
+        'Invalid encrypted token format',
+      );
     });
   });
 

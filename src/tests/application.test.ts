@@ -6,7 +6,7 @@ import { prisma } from '../db/prisma';
 describe('Application API (COM-13)', () => {
   let userA: import('@prisma/client').User;
   let userB: import('@prisma/client').User;
-  
+
   beforeAll(async () => {
     // Ensure ENABLE_DEV_AUTH is true
     process.env.ENABLE_DEV_AUTH = 'true';
@@ -17,11 +17,11 @@ describe('Application API (COM-13)', () => {
 
     // Setup two users for isolation testing
     userA = await prisma.user.create({
-      data: { email: 'user-a@test.local' }
+      data: { email: 'user-a@test.local' },
     });
 
     userB = await prisma.user.create({
-      data: { email: 'user-b@test.local' }
+      data: { email: 'user-b@test.local' },
     });
   });
 
@@ -37,8 +37,8 @@ describe('Application API (COM-13)', () => {
       expect(res.body).toEqual({
         error: {
           code: 'UNAUTHORIZED',
-          message: 'Not authenticated'
-        }
+          message: 'Not authenticated',
+        },
       });
     });
 
@@ -66,7 +66,7 @@ describe('Application API (COM-13)', () => {
         .post('/api/applications')
         .set('X-Development-User', 'user-a@test.local')
         .send({ jobTitle: 'Engineer' });
-      
+
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
       expect(res.body.error.details).toBeDefined();
@@ -77,7 +77,7 @@ describe('Application API (COM-13)', () => {
         .post('/api/applications')
         .set('X-Development-User', 'user-a@test.local')
         .send({ companyName: 123 }); // should be string
-      
+
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
     });
@@ -89,13 +89,13 @@ describe('Application API (COM-13)', () => {
         .post('/api/applications')
         .set('X-Development-User', 'user-a@test.local')
         .send({ companyName: 'Company A' });
-      
+
       expect(res.status).toBe(201);
       expect(res.body.companyName).toBe('Company A');
       expect(res.body.id).toBeDefined();
 
       const dbApp = await prisma.application.findUnique({
-        where: { id: res.body.id }
+        where: { id: res.body.id },
       });
       expect(dbApp?.userId).toBe(userA.id);
     });
@@ -105,11 +105,11 @@ describe('Application API (COM-13)', () => {
         .post('/api/applications')
         .set('X-Development-User', 'user-a@test.local')
         .send({ companyName: 'Company A2', userId: userB.id });
-      
+
       expect(res.status).toBe(201);
-      
+
       const dbApp = await prisma.application.findUnique({
-        where: { id: res.body.id }
+        where: { id: res.body.id },
       });
       expect(dbApp?.userId).toBe(userA.id); // Must remain user A
       expect(dbApp?.userId).not.toBe(userB.id);
@@ -119,7 +119,7 @@ describe('Application API (COM-13)', () => {
       const res = await request(app)
         .get('/api/applications')
         .set('X-Development-User', 'user-a@test.local');
-      
+
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body.items)).toBe(true);
       for (const app of res.body.items) {
@@ -136,8 +136,8 @@ describe('Application API (COM-13)', () => {
       await prisma.application.create({
         data: {
           companyName: 'Company B',
-          userId: userB.id
-        }
+          userId: userB.id,
+        },
       });
     });
 
@@ -145,10 +145,10 @@ describe('Application API (COM-13)', () => {
       const res = await request(app)
         .get('/api/applications')
         .set('X-Development-User', 'user-a@test.local');
-      
+
       expect(res.status).toBe(200);
       expect(res.body.items.length).toBeGreaterThanOrEqual(1);
-      
+
       // returned applications belong only to authenticated user
       for (const application of res.body.items) {
         const dbApp = await prisma.application.findUnique({ where: { id: application.id } });
@@ -160,8 +160,10 @@ describe('Application API (COM-13)', () => {
       const res = await request(app)
         .get('/api/applications')
         .set('X-Development-User', 'user-a@test.local');
-      
-      const appNames = res.body.items.map((a: import('../contracts').ApplicationResponse) => a.companyName);
+
+      const appNames = res.body.items.map(
+        (a: import('../contracts').ApplicationResponse) => a.companyName,
+      );
       expect(appNames).toContain('Company A');
       expect(appNames).not.toContain('Company B');
     });
@@ -174,7 +176,7 @@ describe('Application API (COM-13)', () => {
 
     beforeAll(async () => {
       appWithEvents = await prisma.application.create({
-        data: { companyName: 'EventCo', userId: userA.id }
+        data: { companyName: 'EventCo', userId: userA.id },
       });
 
       // Create events with explicit createdAt to test deterministic ordering
@@ -186,7 +188,7 @@ describe('Application API (COM-13)', () => {
           description: 'Second event',
           newState: 'RECRUITER_CONTACT',
           createdAt: new Date('2026-01-02T10:00:00Z'),
-        }
+        },
       });
       await prisma.applicationEvent.create({
         data: {
@@ -195,7 +197,7 @@ describe('Application API (COM-13)', () => {
           description: 'First event',
           newState: 'APPLIED',
           createdAt: new Date('2026-01-01T10:00:00Z'),
-        }
+        },
       });
     });
 
@@ -205,8 +207,7 @@ describe('Application API (COM-13)', () => {
     });
 
     it('returns 401 without authentication', async () => {
-      const res = await request(app)
-        .get(`/api/applications/${appWithEvents.id}/events`);
+      const res = await request(app).get(`/api/applications/${appWithEvents.id}/events`);
       expect(res.status).toBe(401);
     });
 
@@ -251,7 +252,7 @@ describe('Application API (COM-13)', () => {
       expect(Object.prototype.hasOwnProperty.call(event, 'provenance')).toBe(true);
     });
 
-    it('user cannot retrieve another user\'s application events (returns 403)', async () => {
+    it("user cannot retrieve another user's application events (returns 403)", async () => {
       const res = await request(app)
         .get(`/api/applications/${appWithEvents.id}/events`)
         .set('X-Development-User', 'user-b@test.local');
@@ -277,7 +278,7 @@ describe('Application API (COM-13)', () => {
 
     beforeAll(async () => {
       appWithActions = await prisma.application.create({
-        data: { companyName: 'ActionCo', userId: userA.id }
+        data: { companyName: 'ActionCo', userId: userA.id },
       });
 
       await prisma.action.create({
@@ -286,7 +287,7 @@ describe('Application API (COM-13)', () => {
           type: 'ACTION_REQUIRED',
           description: 'Submit portfolio',
           status: 'PENDING',
-        }
+        },
       });
       await prisma.action.create({
         data: {
@@ -294,7 +295,7 @@ describe('Application API (COM-13)', () => {
           type: 'FOLLOW_UP_REQUIRED',
           description: 'Send thank-you email',
           status: 'COMPLETED',
-        }
+        },
       });
     });
 
@@ -304,8 +305,7 @@ describe('Application API (COM-13)', () => {
     });
 
     it('returns 401 without authentication', async () => {
-      const res = await request(app)
-        .get(`/api/applications/${appWithActions.id}/actions`);
+      const res = await request(app).get(`/api/applications/${appWithActions.id}/actions`);
       expect(res.status).toBe(401);
     });
 
@@ -317,7 +317,10 @@ describe('Application API (COM-13)', () => {
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body.items)).toBe(true);
       expect(res.body.items.length).toBe(2);
-      expect(res.body.items.map((action: { status: string }) => action.status)).toEqual(['PENDING', 'COMPLETED']);
+      expect(res.body.items.map((action: { status: string }) => action.status)).toEqual([
+        'PENDING',
+        'COMPLETED',
+      ]);
     });
 
     it('actions contain expected fields', async () => {
@@ -333,7 +336,7 @@ describe('Application API (COM-13)', () => {
       expect(Object.prototype.hasOwnProperty.call(action, 'deadline')).toBe(true);
     });
 
-    it('user cannot retrieve another user\'s application actions (returns 403)', async () => {
+    it("user cannot retrieve another user's application actions (returns 403)", async () => {
       const res = await request(app)
         .get(`/api/applications/${appWithActions.id}/actions`)
         .set('X-Development-User', 'user-b@test.local');

@@ -4,14 +4,14 @@ import { ApplicationStatus, EmailMatchState, MatchConfirmationSource } from '@pr
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 
 describe('MatcherService', () => {
-  let user: { id: string, email: string, googleId: string | null };
+  let user: { id: string; email: string; googleId: string | null };
 
   beforeAll(async () => {
     user = await prisma.user.create({
       data: {
         email: 'test-matcher@example.com',
-        googleId: 'matcher-123'
-      }
+        googleId: 'matcher-123',
+      },
     });
   });
 
@@ -28,9 +28,9 @@ describe('MatcherService', () => {
 
   it('Tier 1: Exact Gmail thread match', async () => {
     const app = await prisma.application.create({
-      data: { userId: user.id, companyName: 'Google', jobTitle: 'SWE' }
+      data: { userId: user.id, companyName: 'Google', jobTitle: 'SWE' },
     });
-    
+
     // Existing matched email in the same thread
     await prisma.email.create({
       data: {
@@ -38,8 +38,8 @@ describe('MatcherService', () => {
         gmailMessageId: 'msg1',
         threadId: 'threadA',
         matchState: EmailMatchState.MATCHED,
-        applicationId: app.id
-      }
+        applicationId: app.id,
+      },
     });
 
     // New email to process
@@ -53,10 +53,10 @@ describe('MatcherService', () => {
             provider: 'test',
             model: 'test',
             contractVersion: '1',
-            companyName: 'SomeOtherCompany' // Shouldn't matter for thread match
-          }
-        }
-      }
+            companyName: 'SomeOtherCompany', // Shouldn't matter for thread match
+          },
+        },
+      },
     });
 
     await MatcherService.matchEmailToApplication(newEmail.id);
@@ -69,7 +69,7 @@ describe('MatcherService', () => {
 
   it('Tier 2: Company + Role match', async () => {
     const app = await prisma.application.create({
-      data: { userId: user.id, companyName: 'Microsoft', jobTitle: 'Backend Engineer' }
+      data: { userId: user.id, companyName: 'Microsoft', jobTitle: 'Backend Engineer' },
     });
 
     const newEmail = await prisma.email.create({
@@ -82,10 +82,10 @@ describe('MatcherService', () => {
             model: 'test',
             contractVersion: '1',
             companyName: 'Microsoft ',
-            jobTitle: ' Backend  Engineer ' // Testing normalization
-          }
-        }
-      }
+            jobTitle: ' Backend  Engineer ', // Testing normalization
+          },
+        },
+      },
     });
 
     await MatcherService.matchEmailToApplication(newEmail.id);
@@ -97,10 +97,10 @@ describe('MatcherService', () => {
 
   it('Multiple candidates -> AMBIGUOUS', async () => {
     await prisma.application.create({
-      data: { userId: user.id, companyName: 'Apple', jobTitle: 'Engineer' }
+      data: { userId: user.id, companyName: 'Apple', jobTitle: 'Engineer' },
     });
     await prisma.application.create({
-      data: { userId: user.id, companyName: 'Apple', jobTitle: 'Engineer' } // duplicate
+      data: { userId: user.id, companyName: 'Apple', jobTitle: 'Engineer' }, // duplicate
     });
 
     const newEmail = await prisma.email.create({
@@ -113,10 +113,10 @@ describe('MatcherService', () => {
             model: 'test',
             contractVersion: '1',
             companyName: 'Apple',
-            jobTitle: 'Engineer'
-          }
-        }
-      }
+            jobTitle: 'Engineer',
+          },
+        },
+      },
     });
 
     await MatcherService.matchEmailToApplication(newEmail.id);
@@ -128,7 +128,7 @@ describe('MatcherService', () => {
 
   it('State Inference: Offer -> ApplicationStatus.OFFER', async () => {
     const app = await prisma.application.create({
-      data: { userId: user.id, companyName: 'Netflix', aiStatus: ApplicationStatus.INTERVIEW }
+      data: { userId: user.id, companyName: 'Netflix', aiStatus: ApplicationStatus.INTERVIEW },
     });
 
     const newEmail = await prisma.email.create({
@@ -142,10 +142,10 @@ describe('MatcherService', () => {
             contractVersion: '1',
             companyName: 'Netflix',
             offerInfo: 'Offer details here',
-            category: 'OFFER'
-          }
-        }
-      }
+            category: 'OFFER',
+          },
+        },
+      },
     });
 
     await MatcherService.matchEmailToApplication(newEmail.id);
@@ -162,7 +162,7 @@ describe('MatcherService', () => {
 
   it('Does not regress application state', async () => {
     const app = await prisma.application.create({
-      data: { userId: user.id, companyName: 'Amazon', aiStatus: ApplicationStatus.OFFER }
+      data: { userId: user.id, companyName: 'Amazon', aiStatus: ApplicationStatus.OFFER },
     });
 
     // Email suggests INTERVIEW, but current state is OFFER
@@ -176,10 +176,10 @@ describe('MatcherService', () => {
             model: 'test',
             contractVersion: '1',
             companyName: 'Amazon',
-            interviewStage: 'Onsite'
-          }
-        }
-      }
+            interviewStage: 'Onsite',
+          },
+        },
+      },
     });
 
     await MatcherService.matchEmailToApplication(newEmail.id);
@@ -196,7 +196,7 @@ describe('MatcherService', () => {
 
   it('Idempotency: Reprocessing creates no duplicate events', async () => {
     const app = await prisma.application.create({
-      data: { userId: user.id, companyName: 'Meta' }
+      data: { userId: user.id, companyName: 'Meta' },
     });
 
     const newEmail = await prisma.email.create({
@@ -210,10 +210,10 @@ describe('MatcherService', () => {
             contractVersion: '1',
             companyName: 'Meta',
             actionRequired: true,
-            requestedAction: 'Sign docs'
-          }
-        }
-      }
+            requestedAction: 'Sign docs',
+          },
+        },
+      },
     });
 
     await MatcherService.matchEmailToApplication(newEmail.id);
@@ -225,18 +225,18 @@ describe('MatcherService', () => {
     const actions = await prisma.action.findMany({ where: { applicationId: app.id } });
     expect(actions.length).toBe(1); // Only 1 action
   });
-  
+
   it('User isolation: Cannot match another user application', async () => {
     const user2 = await prisma.user.create({
       data: {
         email: 'user2@example.com',
-        googleId: 'u2'
-      }
+        googleId: 'u2',
+      },
     });
-    
+
     // user2 has an application
     await prisma.application.create({
-      data: { userId: user2.id, companyName: 'Stripe' }
+      data: { userId: user2.id, companyName: 'Stripe' },
     });
 
     // user1 receives email about Stripe
@@ -250,9 +250,9 @@ describe('MatcherService', () => {
             model: 'test',
             contractVersion: '1',
             companyName: 'Stripe',
-          }
-        }
-      }
+          },
+        },
+      },
     });
 
     await MatcherService.matchEmailToApplication(newEmail.id);
@@ -260,17 +260,17 @@ describe('MatcherService', () => {
     const updatedEmail = await prisma.email.findUnique({ where: { id: newEmail.id } });
     expect(updatedEmail?.applicationId).toBeNull(); // Should not match user2's app
     expect(updatedEmail?.matchState).toBe(EmailMatchState.UNMATCHED);
-    
+
     await prisma.user.delete({ where: { id: user2.id } });
   });
 
   it('USER_CONFIRMED matches are preserved upon AI reprocessing', async () => {
     const appA = await prisma.application.create({
-      data: { userId: user.id, companyName: 'Company A' }
+      data: { userId: user.id, companyName: 'Company A' },
     });
-    
+
     const appB = await prisma.application.create({
-      data: { userId: user.id, companyName: 'Company B' }
+      data: { userId: user.id, companyName: 'Company B' },
     });
 
     // Email already matched by user to appA
@@ -288,16 +288,16 @@ describe('MatcherService', () => {
             contractVersion: '1',
             companyName: 'Company B', // AI wrongly thinks it's Company B now
             actionRequired: true,
-            requestedAction: 'Reply'
-          }
-        }
-      }
+            requestedAction: 'Reply',
+          },
+        },
+      },
     });
 
     await MatcherService.matchEmailToApplication(newEmail.id);
 
     const updatedEmail = await prisma.email.findUnique({ where: { id: newEmail.id } });
-    
+
     // Core assertions for preservation
     expect(updatedEmail?.applicationId).toBe(appA.id); // Stayed appA!
     expect(updatedEmail?.matchState).toBe(EmailMatchState.MATCHED);
@@ -306,7 +306,7 @@ describe('MatcherService', () => {
     // Ensure downstream events applied correctly to appA, NOT appB
     const actionsA = await prisma.action.findMany({ where: { applicationId: appA.id } });
     expect(actionsA.length).toBe(1); // Action applied to appA
-    
+
     const actionsB = await prisma.action.findMany({ where: { applicationId: appB.id } });
     expect(actionsB.length).toBe(0); // No action on appB
   });

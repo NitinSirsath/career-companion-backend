@@ -7,7 +7,7 @@ global.fetch = fetchMock;
 
 describe('DiscordProvider', () => {
   let provider: DiscordProvider;
-  
+
   beforeEach(() => {
     vi.resetAllMocks();
     process.env.DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/123/abc';
@@ -20,7 +20,7 @@ describe('DiscordProvider', () => {
     jobTitle: 'Software Engineer',
     actionRequested: 'Send thank you note',
     actionType: 'ACTION_REQUIRED',
-    deadline: '2023-10-15T12:00:00.000Z'
+    deadline: '2023-10-15T12:00:00.000Z',
   };
 
   it('handles missing configuration without retry', async () => {
@@ -35,7 +35,7 @@ describe('DiscordProvider', () => {
   it('delivers notification successfully', async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
-      status: 204
+      status: 204,
     });
 
     const result = await provider.send(validPayload);
@@ -47,17 +47,27 @@ describe('DiscordProvider', () => {
     const [url, requestInit] = fetchMock.mock.calls[0];
     expect(url).toBe('https://discord.com/api/webhooks/123/abc');
     expect(requestInit.method).toBe('POST');
-    
+
     const body = JSON.parse(requestInit.body as string);
     expect(body.embeds[0].title).toBe('Action Required: Acme Corp');
-    expect(body.embeds[0].fields).toContainEqual({ name: 'Role', value: 'Software Engineer', inline: true });
-    expect(body.embeds[0].fields).toContainEqual({ name: 'Action', value: 'Send thank you note', inline: true });
-    
+    expect(body.embeds[0].fields).toContainEqual({
+      name: 'Role',
+      value: 'Software Engineer',
+      inline: true,
+    });
+    expect(body.embeds[0].fields).toContainEqual({
+      name: 'Action',
+      value: 'Send thank you note',
+      inline: true,
+    });
+
     // Webhook secret is never logged (we just check the provider doesn't output it)
   });
 
   it('handles network failure as unknown and sanitizes error details', async () => {
-    fetchMock.mockRejectedValueOnce(new Error('Sensitive detailed fetch failure internal url https://xyz'));
+    fetchMock.mockRejectedValueOnce(
+      new Error('Sensitive detailed fetch failure internal url https://xyz'),
+    );
 
     const result = await provider.send(validPayload);
     expect(result.success).toBe(false);
@@ -82,14 +92,14 @@ describe('DiscordProvider', () => {
     fetchMock.mockResolvedValueOnce({
       ok: false,
       status: 429,
-      text: vi.fn().mockResolvedValue('Rate limited')
+      text: vi.fn().mockResolvedValue('Rate limited'),
     });
 
     const result = await provider.send(validPayload);
     expect(result.success).toBe(false);
     expect(result.retryable).toBe(true);
     expect(result.errorCategory).toBe('HTTP_429');
-    
+
     // Ensure errorDetails doesn't leak secrets
     expect(result.errorDetails).toBe('Discord responded with status 429.');
   });
@@ -98,7 +108,7 @@ describe('DiscordProvider', () => {
     fetchMock.mockResolvedValueOnce({
       ok: false,
       status: 502,
-      text: vi.fn().mockResolvedValue('Bad Gateway')
+      text: vi.fn().mockResolvedValue('Bad Gateway'),
     });
 
     const result = await provider.send(validPayload);
@@ -111,7 +121,7 @@ describe('DiscordProvider', () => {
     fetchMock.mockResolvedValueOnce({
       ok: false,
       status: 400,
-      text: vi.fn().mockResolvedValue('Bad Request')
+      text: vi.fn().mockResolvedValue('Bad Request'),
     });
 
     const result = await provider.send(validPayload);

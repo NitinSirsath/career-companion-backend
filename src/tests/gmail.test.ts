@@ -44,9 +44,9 @@ vi.mock('googleapis', () => {
 
   const mockRevokeToken = vi.fn().mockResolvedValue({});
 
-  const mockGenerateAuthUrl = vi.fn().mockReturnValue(
-    'https://accounts.google.com/o/oauth2/auth?mock=1&state=teststate'
-  );
+  const mockGenerateAuthUrl = vi
+    .fn()
+    .mockReturnValue('https://accounts.google.com/o/oauth2/auth?mock=1&state=teststate');
 
   const mockSetCredentials = vi.fn();
 
@@ -64,7 +64,7 @@ vi.mock('googleapis', () => {
     data: {
       messages: [{ id: 'msg-1' }, { id: 'msg-2' }],
       nextPageToken: undefined,
-    }
+    },
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -79,10 +79,10 @@ vi.mock('googleapis', () => {
           headers: [
             { name: 'Subject', value: `Subject for ${args.id}` },
             { name: 'From', value: 'sender@example.com' },
-            { name: 'Date', value: 'Wed, 12 Sep 2026 10:00:00 +0000' }
-          ]
-        }
-      }
+            { name: 'Date', value: 'Wed, 12 Sep 2026 10:00:00 +0000' },
+          ],
+        },
+      },
     });
   });
 
@@ -92,11 +92,13 @@ vi.mock('googleapis', () => {
       gmail: vi.fn().mockReturnValue({
         users: {
           getProfile: mockGetProfile,
-          history: { list: vi.fn().mockResolvedValue({ data: { historyId: '1001', history: [] } }) },
+          history: {
+            list: vi.fn().mockResolvedValue({ data: { historyId: '1001', history: [] } }),
+          },
           messages: {
             list: mockMessagesList,
             get: mockMessagesGet,
-          }
+          },
         },
       }),
     },
@@ -366,9 +368,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
         },
       });
 
-      await request(app)
-        .post('/api/gmail/disconnect')
-        .set('X-Development-User', testUser.email);
+      await request(app).post('/api/gmail/disconnect').set('X-Development-User', testUser.email);
 
       const statusRes = await request(app)
         .get('/api/gmail/status')
@@ -403,13 +403,13 @@ describe('Gmail OAuth Routes (COM-19)', () => {
     });
   });
   // ─── POST /api/gmail/sync ──────────────────────────────────────────────────
-  
+
   describe('POST /api/gmail/sync (COM-20)', () => {
     it('returns 400 when user is not connected', async () => {
       const res = await request(app)
         .post('/api/gmail/sync')
         .set('X-Development-User', testUser.email);
-        
+
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('GMAIL_NOT_CONNECTED');
     });
@@ -429,7 +429,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       const res = await request(app)
         .post('/api/gmail/sync')
         .set('X-Development-User', testUser.email);
-        
+
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('SYNC_IN_PROGRESS');
     });
@@ -449,10 +449,12 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       const res = await request(app)
         .post('/api/gmail/sync')
         .set('X-Development-User', testUser.email);
-        
+
       expect(res.status).toBe(202);
       expect(res.body.accepted).toBe(true);
-      const queued = await prisma.gmailConnection.findUniqueOrThrow({ where: { userId: testUser.id } });
+      const queued = await prisma.gmailConnection.findUniqueOrThrow({
+        where: { userId: testUser.id },
+      });
       const result = await GmailSyncService.syncUser(testUser.id, queued.syncClaim!);
       expect(result.synced).toBe(true);
       expect(result.messagesIngested).toBe(2);
@@ -461,13 +463,15 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       // Verify DB updates
       const emails = await prisma.email.findMany({ where: { userId: testUser.id } });
       expect(emails).toHaveLength(2);
-      
-      const email1 = emails.find(e => e.gmailMessageId === 'msg-1');
+
+      const email1 = emails.find((e) => e.gmailMessageId === 'msg-1');
       expect(email1?.subject).toBe('Subject for msg-1');
       expect(email1?.relevanceState).toBe('UNPROCESSED');
       expect(email1?.matchState).toBe('UNMATCHED');
 
-      const connection = await prisma.gmailConnection.findUnique({ where: { userId: testUser.id } });
+      const connection = await prisma.gmailConnection.findUnique({
+        where: { userId: testUser.id },
+      });
       expect(connection?.syncStatus).toBe('IDLE');
       expect(connection?.lastHistoryId).toBe('1000');
     });
@@ -509,24 +513,28 @@ describe('Gmail OAuth Routes (COM-19)', () => {
           getProfile: vi.fn().mockResolvedValue({ data: { historyId: '1000' } }),
           messages: {
             list: vi.fn().mockRejectedValueOnce(
-              new GaxiosError('Request had invalid authentication credentials', { headers: new Headers(), url: new URL('https://test.com') }, {
-                status: 401,
-                statusText: 'Unauthorized',
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                data: { error: { code: 401, message: 'Invalid Credentials' } } as any,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                headers: {} as any,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                config: {} as any,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                request: {} as any,
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              } as any)
+              new GaxiosError(
+                'Request had invalid authentication credentials',
+                { headers: new Headers(), url: new URL('https://test.com') },
+                {
+                  status: 401,
+                  statusText: 'Unauthorized',
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  data: { error: { code: 401, message: 'Invalid Credentials' } } as any,
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  headers: {} as any,
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  config: {} as any,
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  request: {} as any,
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                } as any,
+              ),
             ),
             get: vi.fn(),
           },
         },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any);
 
       await prisma.gmailConnection.create({
@@ -540,17 +548,20 @@ describe('Gmail OAuth Routes (COM-19)', () => {
         },
       });
 
-      await expect(GmailSyncService.syncUser(testUser.id)).rejects.toThrow('Gmail authorization expired');
+      await expect(GmailSyncService.syncUser(testUser.id)).rejects.toThrow(
+        'Gmail authorization expired',
+      );
 
       // Connection should be marked FAILED
-      const connection = await prisma.gmailConnection.findUnique({ where: { userId: testUser.id } });
+      const connection = await prisma.gmailConnection.findUnique({
+        where: { userId: testUser.id },
+      });
       expect(connection?.syncStatus).toBe('FAILED');
 
       // Restore original mock for subsequent tests
       if (original) mockGmail.mockImplementation(original);
     });
   });
-
 
   // ─── GET /api/gmail/messages ───────────────────────────────────────────────
 
@@ -559,7 +570,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       const res = await request(app)
         .get('/api/gmail/messages')
         .set('X-Development-User', testUser.email);
-        
+
       expect(res.status).toBe(200);
       expect(res.body.items.length).toBe(0);
       expect(res.body.items).toEqual([]);
@@ -574,16 +585,16 @@ describe('Gmail OAuth Routes (COM-19)', () => {
           sender: 'test@contract.com',
           relevanceState: 'UNPROCESSED',
           matchState: 'UNMATCHED',
-        }
+        },
       });
 
       const res = await request(app)
         .get('/api/gmail/messages')
         .set('X-Development-User', testUser.email);
-        
+
       expect(res.status).toBe(200);
       expect(res.body.items.length).toBe(1);
-      
+
       const msg = res.body.items[0];
       const keys = Object.keys(msg).sort();
       // Should strictly match EmailMessageSchema
@@ -596,7 +607,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
         'relevanceState',
         'sender',
         'subject',
-        'threadId'
+        'threadId',
       ]);
       expect(keys).not.toContain('createdAt');
       expect(keys).not.toContain('updatedAt');
@@ -620,17 +631,17 @@ describe('Gmail OAuth Routes (COM-19)', () => {
           sender: 'foo@bar.com',
           relevanceState: 'UNPROCESSED',
           matchState: 'UNMATCHED',
-        }
+        },
       });
 
       const res = await request(app)
         .get('/api/gmail/messages')
         .set('X-Development-User', testUser.email);
-        
+
       expect(res.status).toBe(200);
       expect(res.body.items.length).toBe(0);
       expect(res.body.items).toEqual([]); // Should not see otherUser's emails
-      
+
       // cleanup
       await prisma.email.deleteMany();
       await prisma.user.delete({ where: { id: otherUser.id } });

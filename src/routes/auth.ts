@@ -15,12 +15,16 @@ const FRONTEND_DASHBOARD_PATH = '/';
  * rather than producing an opaque 500. In ENABLE_DEV_AUTH mode the warning
  * is expected and safe to ignore.
  */
-const OAUTH_REQUIRED_VARS = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REDIRECT_URI'] as const;
+const OAUTH_REQUIRED_VARS = [
+  'GOOGLE_CLIENT_ID',
+  'GOOGLE_CLIENT_SECRET',
+  'GOOGLE_REDIRECT_URI',
+] as const;
 const missingOAuthVars = OAUTH_REQUIRED_VARS.filter((v) => !process.env[v]);
 if (missingOAuthVars.length > 0) {
   console.warn(
     `[Auth] Google OAuth is not configured — missing env vars: ${missingOAuthVars.join(', ')}. ` +
-      'Google login will return 500. Set ENABLE_DEV_AUTH=true for local dev bypass.'
+      'Google login will return 500. Set ENABLE_DEV_AUTH=true for local dev bypass.',
   );
 }
 
@@ -32,7 +36,7 @@ function createOAuth2Client() {
 
   if (!clientId || !clientSecret) {
     throw new Error(
-      `Google Auth is not configured: ${missingOAuthVars.join(', ')} must all be set`
+      `Google Auth is not configured: ${missingOAuthVars.join(', ')} must all be set`,
     );
   }
 
@@ -101,7 +105,7 @@ router.get('/callback', async (req: Request, res: Response) => {
 
     const oauth2Client = createOAuth2Client();
     const { tokens } = await oauth2Client.getToken(code);
-    
+
     if (!tokens.id_token) {
       throw new Error('Google identity failed to return id_token');
     }
@@ -116,7 +120,7 @@ router.get('/callback', async (req: Request, res: Response) => {
     if (!payload || !payload.sub || !payload.email || payload.email_verified !== true) {
       throw new Error('Google identity failed to return valid ID or email in claims');
     }
-    
+
     // Check issuer to be completely strict
     if (payload.iss !== 'https://accounts.google.com' && payload.iss !== 'accounts.google.com') {
       throw new Error('Invalid issuer');
@@ -127,12 +131,12 @@ router.get('/callback', async (req: Request, res: Response) => {
     const name = payload.name || null;
 
     let user = await prisma.user.findUnique({
-      where: { googleId }
+      where: { googleId },
     });
 
     if (!user) {
       user = await prisma.user.findUnique({
-        where: { email }
+        where: { email },
       });
 
       if (user) {
@@ -144,7 +148,7 @@ router.get('/callback', async (req: Request, res: Response) => {
           data: {
             googleId,
             name: user.name || name,
-          }
+          },
         });
       } else {
         // Create new user
@@ -153,7 +157,7 @@ router.get('/callback', async (req: Request, res: Response) => {
             googleId,
             email,
             name,
-          }
+          },
         });
       }
     } else {
@@ -161,17 +165,26 @@ router.get('/callback', async (req: Request, res: Response) => {
       if (!user.name && name) {
         user = await prisma.user.update({
           where: { id: user.id },
-          data: { name }
+          data: { name },
         });
       }
     }
 
-    await new Promise<void>((resolve, reject) => req.session.regenerate(err => err ? reject(err) : resolve()));
+    await new Promise<void>((resolve, reject) =>
+      req.session.regenerate((err) => (err ? reject(err) : resolve())),
+    );
     req.session.userId = user.id;
-    await new Promise<void>((resolve, reject) => req.session.save(err => err ? reject(err) : resolve()));
+    await new Promise<void>((resolve, reject) =>
+      req.session.save((err) => (err ? reject(err) : resolve())),
+    );
     return res.redirect(302, frontendDashboardUrl);
   } catch (err) {
-    console.error(JSON.stringify({ event: 'google_login_failed', category: err instanceof Error ? err.name : 'UnknownError' }));
+    console.error(
+      JSON.stringify({
+        event: 'google_login_failed',
+        category: err instanceof Error ? err.name : 'UnknownError',
+      }),
+    );
     return res.redirect(302, `${frontendLoginUrl}?error=server_error`);
   }
 });
@@ -181,7 +194,9 @@ import { requireAuth } from '../middleware/auth';
 router.get('/me', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.auth?.user) {
-      return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } });
+      return res
+        .status(401)
+        .json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } });
     }
 
     const user = await prisma.user.findUnique({
@@ -190,7 +205,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response, next: NextFun
         id: true,
         email: true,
         name: true,
-      }
+      },
     });
 
     if (!user) {

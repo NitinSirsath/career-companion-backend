@@ -6,9 +6,15 @@ export function errorHandler(
   req: Request,
   res: Response,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _next: NextFunction
+  _next: NextFunction,
 ) {
-  console.error(JSON.stringify({ event: 'request_failed', method: req.method, category: err instanceof Error ? err.name : 'UnknownError' }));
+  console.error(
+    JSON.stringify({
+      event: 'request_failed',
+      method: req.method,
+      category: err instanceof Error ? err.name : 'UnknownError',
+    }),
+  );
 
   if (err instanceof ZodError) {
     return res.status(400).json({

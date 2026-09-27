@@ -43,7 +43,7 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => 
         error: {
           code: 'FORBIDDEN',
           message: 'Action not found or access denied',
-        }
+        },
       });
     }
 

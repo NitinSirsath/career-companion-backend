@@ -44,7 +44,7 @@ function createOAuth2Client() {
 
   if (!clientId || !clientSecret || !redirectUri) {
     throw new Error(
-      'Gmail OAuth is not configured: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, and GMAIL_REDIRECT_URI must all be set'
+      'Gmail OAuth is not configured: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, and GMAIL_REDIRECT_URI must all be set',
     );
   }
 
@@ -78,6 +78,7 @@ router.get('/status', async (req: Request, res: Response, next: NextFunction) =>
         lastSyncedAt: true,
         syncLeaseUntil: true,
         syncError: true,
+        syncLookbackDays: true,
         // accessToken and refreshToken are deliberately NOT selected.
       },
     });
@@ -89,6 +90,7 @@ router.get('/status', async (req: Request, res: Response, next: NextFunction) =>
         status: null,
         syncStatus: null,
         lastSyncedAt: null,
+        syncLookbackDays: 1,
       });
     }
 
@@ -96,9 +98,14 @@ router.get('/status', async (req: Request, res: Response, next: NextFunction) =>
       connected: connection.status === 'CONNECTED',
       gmailEmail: connection.gmailEmail,
       status: connection.status,
-      syncStatus: connection.syncStatus === 'SYNCING' && (!connection.syncLeaseUntil || connection.syncLeaseUntil < new Date()) ? 'FAILED' : connection.syncStatus,
+      syncStatus:
+        connection.syncStatus === 'SYNCING' &&
+        (!connection.syncLeaseUntil || connection.syncLeaseUntil < new Date())
+          ? 'FAILED'
+          : connection.syncStatus,
       syncError: connection.syncError,
       lastSyncedAt: connection.lastSyncedAt,
+      syncLookbackDays: connection.syncLookbackDays,
     });
   } catch (err) {
     next(err);
@@ -239,7 +246,9 @@ router.get('/callback', async (req: Request, res: Response) => {
         status: 'CONNECTED',
         syncStatus: 'IDLE',
         accessToken: encryptedAccessToken,
-        syncClaim: null, syncLeaseUntil: null, syncError: null,
+        syncClaim: null,
+        syncLeaseUntil: null,
+        syncError: null,
         // Only update refreshToken if Google returned a new one.
         // Google only returns a refresh_token when prompt=consent is used.
         ...(encryptedRefreshToken ? { refreshToken: encryptedRefreshToken } : {}),
@@ -249,7 +258,12 @@ router.get('/callback', async (req: Request, res: Response) => {
     return res.redirect(302, frontendGmailUrl);
   } catch (err) {
     // Do not expose error details to the browser — redirect with a generic error.
-    console.error(JSON.stringify({ event: 'gmail_oauth_failed', category: err instanceof Error ? err.name : 'UnknownError' }));
+    console.error(
+      JSON.stringify({
+        event: 'gmail_oauth_failed',
+        category: err instanceof Error ? err.name : 'UnknownError',
+      }),
+    );
     return res.redirect(302, `${frontendGmailUrl}?gmailError=server_error`);
   }
 });
@@ -282,7 +296,12 @@ router.post('/disconnect', async (req: Request, res: Response, next: NextFunctio
       await oauth2Client.revokeToken(decryptedAccessToken);
     } catch (revokeErr) {
       // Log that revocation failed, but do NOT log the token value.
-      console.warn(JSON.stringify({ event: 'gmail_revocation_failed', category: revokeErr instanceof Error ? revokeErr.name : 'UnknownError' }));
+      console.warn(
+        JSON.stringify({
+          event: 'gmail_revocation_failed',
+          category: revokeErr instanceof Error ? revokeErr.name : 'UnknownError',
+        }),
+      );
     }
 
     // ── Clear tokens and mark NOT_CONNECTED ───────────────────────────────
@@ -309,6 +328,42 @@ router.post('/disconnect', async (req: Request, res: Response, next: NextFunctio
   }
 });
 
+// ─── PATCH /api/gmail/settings ───────────────────────────────────────────────
+
+router.patch('/settings', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.auth!.user.id;
+    const { syncLookbackDays } = req.body;
+
+    if (typeof syncLookbackDays !== 'number' || ![1, 7, 14, 30].includes(syncLookbackDays)) {
+      return res
+        .status(400)
+        .json({
+          error: { code: 'INVALID_LOOKBACK', message: 'syncLookbackDays must be 1, 7, 14, or 30' },
+        });
+    }
+
+    const connection = await prisma.gmailConnection.update({
+      where: { userId },
+      data: { syncLookbackDays },
+    });
+
+    return res.status(200).json({ success: true, syncLookbackDays: connection.syncLookbackDays });
+  } catch (err: unknown) {
+    if (
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err as { code: string }).code === 'P2025'
+    ) {
+      return res
+        .status(404)
+        .json({ error: { code: 'NOT_CONNECTED', message: 'Gmail connection not found' } });
+    }
+    next(err);
+  }
+});
+
 export const gmailRouter = router;
 
 // ─── POST /api/gmail/sync ────────────────────────────────────────────────────
@@ -318,17 +373,25 @@ import { GmailAuthError, SyncInProgressError } from '../services/gmailSync';
 router.post('/sync', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.auth!.user.id;
-    
+
     const connection = await prisma.gmailConnection.findUnique({
-      where: { userId }
+      where: { userId },
     });
 
     if (!connection || connection.status !== 'CONNECTED') {
-      return res.status(400).json({ error: { code: 'GMAIL_NOT_CONNECTED', message: 'Gmail is not connected' } });
+      return res
+        .status(400)
+        .json({ error: { code: 'GMAIL_NOT_CONNECTED', message: 'Gmail is not connected' } });
     }
 
-    if (connection.syncStatus === 'SYNCING' && connection.syncLeaseUntil && connection.syncLeaseUntil > new Date()) {
-      return res.status(409).json({ error: { code: 'SYNC_IN_PROGRESS', message: 'A sync is already in progress' } });
+    if (
+      connection.syncStatus === 'SYNCING' &&
+      connection.syncLeaseUntil &&
+      connection.syncLeaseUntil > new Date()
+    ) {
+      return res
+        .status(409)
+        .json({ error: { code: 'SYNC_IN_PROGRESS', message: 'A sync is already in progress' } });
     }
 
     const result = await requestGmailSync(userId);
@@ -353,7 +416,6 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
   }
 });
 
-
 // ─── GET /api/gmail/messages ─────────────────────────────────────────────────
 
 router.get('/messages', async (req: Request, res: Response, next: NextFunction) => {
@@ -376,7 +438,7 @@ router.get('/messages', async (req: Request, res: Response, next: NextFunction) 
         relevanceState: true,
         matchState: true,
         processingState: true,
-      }
+      },
     });
 
     return res.status(200).json(createPaginatedResponse(messages, limit, offset));
