@@ -9,6 +9,8 @@ export const ActionWithContextResponseSchema = ApplicationActionResponseSchema.e
   email: z.object({
     subject: z.string().nullable(),
     sender: z.string().nullable(),
+    threadId: z.string().nullable().optional(),
+    gmailMessageId: z.string().optional(),
   }).nullable(),
 });
 

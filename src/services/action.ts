@@ -28,7 +28,9 @@ export class ActionService {
         email: {
           select: {
             subject: true,
-            sender: true
+            sender: true,
+            threadId: true,
+            gmailMessageId: true
           }
         }
       }
@@ -49,7 +51,9 @@ export class ActionService {
       },
       email: action.email ? {
         subject: action.email.subject,
-        sender: action.email.sender
+        sender: action.email.sender,
+        threadId: action.email.threadId,
+        gmailMessageId: action.email.gmailMessageId
       } : null
     }));
   }
@@ -93,7 +97,9 @@ export class ActionService {
         email: {
           select: {
             subject: true,
-            sender: true
+            sender: true,
+            threadId: true,
+            gmailMessageId: true
           }
         }
       }
@@ -116,7 +122,9 @@ export class ActionService {
       },
       email: updatedAction.email ? {
         subject: updatedAction.email.subject,
-        sender: updatedAction.email.sender
+        sender: updatedAction.email.sender,
+        threadId: updatedAction.email.threadId,
+        gmailMessageId: updatedAction.email.gmailMessageId
       } : null
     };
   }

@@ -25,6 +25,8 @@ router.get('/ambiguous', async (req: Request, res: Response, next: NextFunction)
       id: email.id,
       subject: email.subject,
       sender: email.sender,
+      threadId: email.threadId,
+      gmailMessageId: email.gmailMessageId,
       receivedAt: email.receivedAt ? email.receivedAt.toISOString() : null,
       aiProcessingResult: email.aiProcessingResult ? {
         companyName: email.aiProcessingResult.companyName,
@@ -55,6 +57,8 @@ router.get('/unmatched', async (req: Request, res: Response, next: NextFunction)
       id: email.id,
       subject: email.subject,
       sender: email.sender,
+      threadId: email.threadId,
+      gmailMessageId: email.gmailMessageId,
       receivedAt: email.receivedAt ? email.receivedAt.toISOString() : null,
       aiProcessingResult: email.aiProcessingResult ? {
         companyName: email.aiProcessingResult.companyName,

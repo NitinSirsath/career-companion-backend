@@ -4,6 +4,8 @@ export const AmbiguousMatchResponseSchema = z.object({
   id: z.string(),
   subject: z.string().nullable(),
   sender: z.string().nullable(),
+  threadId: z.string().nullable().optional(),
+  gmailMessageId: z.string().optional(),
   receivedAt: z.string().nullable(), // ISO string or Date, we'll format as ISO
   aiProcessingResult: z.object({
     companyName: z.string().nullable(),
