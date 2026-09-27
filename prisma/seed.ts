@@ -17,23 +17,6 @@ async function main() {
     update: {},
     create: {
       email: devEmail,
-      applications: {
-        create: [
-          {
-            companyName: 'Linear',
-            jobTitle: 'Frontend Engineer',
-            location: 'Remote',
-            userStatus: 'APPLIED',
-            appliedAt: new Date(),
-          },
-          {
-            companyName: 'Notion',
-            jobTitle: 'Backend Engineer',
-            location: 'San Francisco, CA',
-            userStatus: 'RECRUITER_CONTACT',
-          }
-        ]
-      }
     },
   });
 
