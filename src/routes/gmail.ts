@@ -17,6 +17,7 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
+import { Prisma } from '@prisma/client';
 import { google } from 'googleapis';
 import { requireAuth } from '../middleware/auth';
 import { encryptToken, decryptToken, loadEncryptionKey } from '../utils/gmailTokenEncryption';
@@ -422,9 +423,17 @@ router.get('/messages', async (req: Request, res: Response, next: NextFunction) 
   try {
     const userId = req.auth!.user.id;
     const { limit, offset } = getPaginationParams(req.query);
+    const relevance = req.query.relevance as string | undefined;
+
+    const where: Prisma.EmailWhereInput = { userId };
+    if (relevance === 'job_related') {
+      where.relevanceState = { in: ['RELEVANT', 'UNPROCESSED'] };
+    } else if (relevance === 'irrelevant') {
+      where.relevanceState = 'IRRELEVANT';
+    }
 
     const messages = await prisma.email.findMany({
-      where: { userId },
+      where,
       take: limit + 1,
       skip: offset,
       orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],

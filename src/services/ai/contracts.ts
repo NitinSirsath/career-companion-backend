@@ -135,6 +135,12 @@ Analyze the provided email metadata (sender, subject, labels, snippet).
 Classify if it is RELEVANT, IRRELEVANT, or UNCERTAIN.
 Provide a confidence score (0 to 1).
 If RELEVANT, categorize it into one of: RECRUITER, INTERVIEW, ASSESSMENT, OFFER, REJECTION, FOLLOW_UP, NEWSLETTER, SPAM.
+
+IMPORTANT DECISION RULES:
+- LinkedIn, Glassdoor, and Indeed job alerts, sponsored job emails, and recruiter outreach MUST be classified as RELEVANT.
+- OTPs (e.g. Upstox OTP), banking/security notifications, generic newsletters, and personal/transactional noise MUST be classified as IRRELEVANT.
+- Do not classify something as IRRELEVANT merely because it is not an explicit job application. Job alerts and opportunities are RELEVANT.
+
 Return your decision as a structured JSON object according to the schema.
   `.trim(),
   schema: EmailRelevanceSchema,

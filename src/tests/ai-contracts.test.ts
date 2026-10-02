@@ -19,6 +19,12 @@ Analyze the provided email metadata (sender, subject, labels, snippet).
 Classify if it is RELEVANT, IRRELEVANT, or UNCERTAIN.
 Provide a confidence score (0 to 1).
 If RELEVANT, categorize it into one of: RECRUITER, INTERVIEW, ASSESSMENT, OFFER, REJECTION, FOLLOW_UP, NEWSLETTER, SPAM.
+
+IMPORTANT DECISION RULES:
+- LinkedIn, Glassdoor, and Indeed job alerts, sponsored job emails, and recruiter outreach MUST be classified as RELEVANT.
+- OTPs (e.g. Upstox OTP), banking/security notifications, generic newsletters, and personal/transactional noise MUST be classified as IRRELEVANT.
+- Do not classify something as IRRELEVANT merely because it is not an explicit job application. Job alerts and opportunities are RELEVANT.
+
 Return your decision as a structured JSON object according to the schema.
   `.trim(),
 
@@ -187,7 +193,7 @@ const nativeJobExtractionSchema: Schema = {
 // A version always means the same instructions and schema for every provider. Adding a new
 // contract version adds a row here; changing an existing row is a contract break.
 const FINGERPRINTS: Record<string, string> = {
-  'classification/v2': '99075c90f1aed1570951cb3bd6a487eb2af6432c3564f65822c28bf428780659',
+  'classification/v2': '8a9118222ad635794c226677775f917c897a8a220872b73c15c05e0bab6a3239',
   'extraction/v2': '2919427b2419d8601aba25567f970f3b708072e3609fbf356e32c199ed02d7b5',
 };
 const fingerprint = (contract: AIContract<unknown>) =>
