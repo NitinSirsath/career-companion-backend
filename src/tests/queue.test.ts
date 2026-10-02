@@ -1,6 +1,6 @@
 import { afterAll, expect, it } from 'vitest';
 import { randomUUID } from 'crypto';
-import { getQueue, stopQueue } from '../services/queue';
+import { getQueue, getStartedQueue, stopQueue } from '../services/queue';
 it('shares initialization and throttles duplicate jobs using PostgreSQL', async () => {
   const [a, b] = await Promise.all([getQueue(), getQueue()]);
   expect(a).toBe(b);
@@ -14,3 +14,18 @@ it('shares initialization and throttles duplicate jobs using PostgreSQL', async 
   await a.cancel('email-processing-job', ids.find(Boolean)!);
 });
 afterAll(() => stopQueue());
+
+it('discards failed queue initialization and starts afresh on recovery', async () => {
+  await stopQueue();
+  const original = process.env.DATABASE_URL;
+  try {
+    process.env.DATABASE_URL =
+      'postgresql://cc:x@127.0.0.1:1/career_companion_closed_test?schema=public';
+    await expect(getQueue()).rejects.toThrow();
+    expect(getStartedQueue()).toBeUndefined();
+  } finally {
+    process.env.DATABASE_URL = original;
+  }
+  const queue = await getQueue();
+  expect(getStartedQueue()).toBe(queue);
+});

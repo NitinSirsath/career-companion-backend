@@ -198,3 +198,7 @@ Tool results (`structuredContent`): `{ result: created | linked | needs_review |
 - Client check against a running server (official SDK client; token from the environment, never printed): `CC_MCP_TOKEN=… node scripts/mcp-client-check.cjs http://localhost:3000/mcp [--send-fixture <json>]`.
 
 **Tests:** `mcp-data-model`, `integration-tokens`, `external-submission`, `mcp-endpoint` (official SDK client against the real app), `mcp-config`, `submission-review`, `application-submission-evidence`. The SDK client (`@modelcontextprotocol/client` 2.2.0) is a dev dependency.
+
+### Worker readiness
+
+Workers retry registration with bounded backoff (about two minutes of waits, plus connection timeouts), then exit with code 1 if they cannot start. Start PostgreSQL first; restart the backend after an exhausted startup (`npm run dev` otherwise waits for a file change). `GET /health` is HTTP liveness only. `curl -i http://localhost:3000/ready` returns 200 only when every worker is registered, and 503 during startup or when a registration is missing. Readiness uses in-memory registration state; it does not prove ongoing database/provider health.

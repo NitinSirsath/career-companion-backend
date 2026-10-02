@@ -182,3 +182,7 @@ The first sync uses the configured lookback. Later syncs cover the time since th
 ### Action deadlines (Sprint 7)
 
 New deadlines use explicit parsing anchored to the email's received UTC date (one-day sender allowance); relative, numeric non-ISO, invalid and unclear dates remain null. Date-only values carry DATE precision and display without an invented time in the UI and Discord. Existing actions retain their values and null legacy precision; no backfill or AI replay occurs.
+
+### Worker startup (Sprint 7)
+
+Check `/ready` for all workers registered; `/health` only proves the HTTP process is up. Logs include worker_registered, workers_ready, *_worker_start_failed, worker_start_gave_up and queue_error. Startup retries failed workers only, then exits 1. Driver errors include category and allowlisted code, never messages or stacks. Readiness intentionally does not probe database availability after startup.

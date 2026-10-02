@@ -160,4 +160,5 @@ export async function startNotificationWorker() {
       console.log(JSON.stringify({ event: 'notification_delivered', actionId }));
     }
   });
+  console.log(JSON.stringify({ event: 'worker_registered', queue: 'discord-notification-job' }));
 }

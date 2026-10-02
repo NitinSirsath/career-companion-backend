@@ -70,4 +70,5 @@ export async function startGmailSyncWorker() {
       }
     }
   });
+  console.log(JSON.stringify({ event: 'worker_registered', queue: 'gmail-sync-job' }));
 }

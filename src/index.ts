@@ -7,6 +7,7 @@ import { Pool } from 'pg';
 import dotenv from 'dotenv';
 import { validateProductionConfig } from './utils/config';
 import { createMcpRouter } from './mcp/router';
+import { healthRouter } from './routes/health';
 
 dotenv.config();
 validateProductionConfig(process.env);
@@ -35,6 +36,7 @@ const port = process.env.PORT || 3000;
 // MCP endpoint (ADR-0002). Mounted FIRST, before CORS, the global JSON parser, cookies and session:
 // its own 32 KB body limit must apply, and it accepts only Bearer integration tokens.
 app.use('/mcp', createMcpRouter());
+app.use(healthRouter);
 
 // Default to the Vite dev server port so CORS works in local development
 // without requiring FRONTEND_URL to be set.
@@ -79,10 +81,6 @@ import { integrationTokenRouter } from './routes/integrationTokens';
 import { submissionRouter } from './routes/submissions';
 import { errorHandler } from './middleware/error';
 
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', message: 'Career Companion Backend is healthy.' });
-});
-
 app.use('/api/auth', authRouter);
 app.use('/api/applications', applicationRouter);
 app.use('/api/gmail', gmailRouter);
@@ -94,29 +92,20 @@ app.use('/api/submissions', submissionRouter);
 
 app.use(errorHandler);
 
-import { startGmailSyncWorker } from './jobs/gmailSyncJob';
-import { startEmailProcessingWorker } from './jobs/emailProcessingJob';
-import { startNotificationWorker } from './jobs/notificationJob';
+import { startWorkers } from './jobs/startWorkers';
 import { stopQueue } from './services/queue';
 import { prisma } from './db/prisma';
 
 if (process.env.NODE_ENV !== 'test') {
-  startGmailSyncWorker().catch(() =>
-    console.error(JSON.stringify({ event: 'gmail_worker_start_failed' })),
-  );
-  startEmailProcessingWorker().catch(() => {
-    console.error(JSON.stringify({ event: 'email_worker_start_failed' }));
-  });
-
-  startNotificationWorker().catch(() => {
-    console.error(JSON.stringify({ event: 'notification_worker_start_failed' }));
-  });
+  let shuttingDown = false;
+  void startWorkers(undefined, { isShuttingDown: () => shuttingDown });
 
   const server = app.listen(port, () => {
     console.log(`Backend server is running on port ${port}`);
   });
 
   const shutdown = async () => {
+    shuttingDown = true;
     console.log('Shutting down server...');
     server.close(async () => {
       console.log('HTTP server closed.');
