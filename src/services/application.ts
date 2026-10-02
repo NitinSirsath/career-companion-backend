@@ -36,14 +36,21 @@ const sourceEmailSelect = {
 
 // Bounded submission evidence (ADR-0002), plus the owner needed to enforce ownership.
 const sourceSubmissionSelect = {
-  select: { id: true, userId: true, platform: true, destinationHost: true, submittedAt: true, confirmationText: true },
+  select: {
+    id: true,
+    userId: true,
+    platform: true,
+    destinationHost: true,
+    submittedAt: true,
+    confirmationText: true,
+  },
 } as const;
 const AUTOMATION_SUBMITTED = 'AUTOMATION_SUBMITTED';
 
 const enrichment = {
   _count: {
     select: {
-      actions: { where: { status: 'PENDING' } },
+      actions: { where: { status: 'PENDING', retiredAt: null } },
       // submittedVia: a linked or created automation submission (never a status).
       externalSubmissions: { where: { matchState: { in: ['LINKED', 'CREATED'] } } },
     },
@@ -98,7 +105,7 @@ async function loadRecentEvents(db: Db, applicationIds: string[]) {
     CROSS JOIN LATERAL (
       SELECT id, "applicationId", type, "createdAt", "emailId", "externalSubmissionId"
       FROM application_events
-      WHERE "applicationId" = a.id
+      WHERE "applicationId" = a.id AND "retiredAt" IS NULL
       ORDER BY "createdAt" DESC, id DESC
       LIMIT 1
     ) e`;
@@ -107,9 +114,14 @@ async function loadRecentEvents(db: Db, applicationIds: string[]) {
     ? await db.email.findMany({ where: { id: { in: emailIds } }, ...sourceEmailSelect })
     : [];
   const byId = new Map(emails.map((email) => [email.id, email]));
-  const submissionIds = events.flatMap((e) => (e.externalSubmissionId ? [e.externalSubmissionId] : []));
+  const submissionIds = events.flatMap((e) =>
+    e.externalSubmissionId ? [e.externalSubmissionId] : [],
+  );
   const submissions = submissionIds.length
-    ? await db.externalSubmission.findMany({ where: { id: { in: submissionIds } }, ...sourceSubmissionSelect })
+    ? await db.externalSubmission.findMany({
+        where: { id: { in: submissionIds } },
+        ...sourceSubmissionSelect,
+      })
     : [];
   const submissionById = new Map(submissions.map((submission) => [submission.id, submission]));
   for (const event of events)
@@ -119,7 +131,9 @@ async function loadRecentEvents(db: Db, applicationIds: string[]) {
       type: event.type,
       createdAt: event.createdAt,
       email: event.emailId ? (byId.get(event.emailId) ?? null) : null,
-      submission: event.externalSubmissionId ? (submissionById.get(event.externalSubmissionId) ?? null) : null,
+      submission: event.externalSubmissionId
+        ? (submissionById.get(event.externalSubmissionId) ?? null)
+        : null,
     });
   return recent;
 }
@@ -161,7 +175,9 @@ function toSourceSubmission(
 ): SourceSubmission | null {
   if (type !== AUTOMATION_SUBMITTED || !source) return null;
   if (source.userId !== userId) {
-    console.error(JSON.stringify({ event: 'evidence_ownership_mismatch', kind: 'submission', ...context }));
+    console.error(
+      JSON.stringify({ event: 'evidence_ownership_mismatch', kind: 'submission', ...context }),
+    );
     return null;
   }
   return {
@@ -208,9 +224,7 @@ export class ApplicationService {
       prisma,
       applications.map((app) => app.id),
     );
-    return applications.map((app) =>
-      this.mapToResponse(userId, app, recent.get(app.id) ?? null),
-    );
+    return applications.map((app) => this.mapToResponse(userId, app, recent.get(app.id) ?? null));
   }
 
   static async getApplication(
@@ -236,7 +250,9 @@ export class ApplicationService {
     request: UpdateApplicationStatusRequest,
   ): Promise<{ application: ApplicationResponse; changed: boolean }> {
     return prisma.$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<{ userStatus: string | null; userStatusRevision: number }[]>`
+      const locked = await tx.$queryRaw<
+        { userStatus: string | null; userStatusRevision: number }[]
+      >`
         SELECT "userStatus", "userStatusRevision" FROM applications
         WHERE id = ${id}::uuid AND "userId" = ${userId}::uuid
         FOR UPDATE`;
@@ -290,6 +306,8 @@ export class ApplicationService {
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], // deterministic recording order
       select: {
         id: true,
+        retiredAt: true,
+        retiredReason: true,
         applicationId: true,
         emailId: true,
         type: true,
@@ -322,6 +340,8 @@ export class ApplicationService {
       });
       return {
         id: e.id,
+        retiredAt: e.retiredAt?.toISOString() ?? null,
+        retiredReason: e.retiredReason,
         applicationId: e.applicationId,
         emailId: foreign ? null : e.emailId,
         type: e.type,
@@ -362,7 +382,7 @@ export class ApplicationService {
     if (app.userId !== userId) return null;
 
     const actions = await prisma.action.findMany({
-      where: { applicationId },
+      where: { applicationId, retiredAt: null },
       take: limit + 1,
       skip: offset,
       orderBy: [

@@ -6,6 +6,7 @@ import { Prisma } from '@prisma/client';
  * (pg-boss, the smoke lane), because Postgres keeps the two forms apart.
  */
 export const LOCK_NAMESPACE = {
+  emailMatches: 0x4d435003,
   /** MCP submission intake and review resolution (ADR-0002 decision 7). */
   externalSubmissions: 0x4d435001,
   /** Integration token creation, to enforce the active-token limit. */

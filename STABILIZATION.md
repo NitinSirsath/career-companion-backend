@@ -193,3 +193,8 @@ Registration participates in bounded startup retries and readiness. The local
 crash harness (`scripts/test-gmail-crash.cjs`) verifies SIGKILL recovery on an empty
 explicit `*_crash_test` database. Neither harness evidence nor registration proves
 real scheduled execution on the owner's Gmail account.
+
+2026-10-03: Stopped processing after 20 minutes is visible and manually recoverable
+through the existing retry/charge-approval path, with bounded message polling.
+Email link correction retires effects transactionally, recomputes source AI status,
+preserves manual status and prevents worker replay from changing a completed link.

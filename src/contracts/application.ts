@@ -58,7 +58,10 @@ export const StatusSourceSchema = z.enum(['USER', 'AI', 'UNKNOWN']);
 export type StatusSource = z.infer<typeof StatusSourceSchema>;
 
 /** Domain rule: effective status is userStatus ?? aiStatus. Derived, never persisted. */
-export function deriveStatus(aiStatus: ApplicationStatus | null, userStatus: ApplicationStatus | null) {
+export function deriveStatus(
+  aiStatus: ApplicationStatus | null,
+  userStatus: ApplicationStatus | null,
+) {
   return {
     effectiveStatus: userStatus ?? aiStatus,
     statusSource: (userStatus ? 'USER' : aiStatus ? 'AI' : 'UNKNOWN') as StatusSource,
@@ -120,6 +123,8 @@ export type UpdateApplicationStatusRequest = z.infer<typeof UpdateApplicationSta
 // Ordered by recording time (createdAt/recordedAt, then id); not a recruitment chronology.
 
 export const ApplicationEventResponseSchema = z.object({
+  retiredAt: IsoDateTimeSchema.nullable(),
+  retiredReason: z.enum(['EMAIL_MOVED', 'EMAIL_UNLINKED']).nullable(),
   id: z.string(),
   applicationId: z.string(),
   emailId: z.string().nullable(),

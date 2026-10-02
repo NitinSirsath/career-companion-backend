@@ -235,7 +235,14 @@ model AIProcessingResult {
   @@map("ai_processing_results")
 }
 
+enum RetiredReason {
+  EMAIL_MOVED
+  EMAIL_UNLINKED
+}
+
 model ApplicationEvent {
+  retiredAt DateTime?
+  retiredReason RetiredReason?
   id                   String             @id @default(uuid()) @db.Uuid
   applicationId        String             @db.Uuid
   emailId              String?            @db.Uuid // nullable to allow manual events later
@@ -265,6 +272,8 @@ enum DeadlinePrecision {
 }
 
 model Action {
+  retiredAt DateTime?
+  retiredReason RetiredReason?
   deadlinePrecision DeadlinePrecision?
   id            String    @id @default(uuid()) @db.Uuid
   applicationId String    @db.Uuid

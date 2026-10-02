@@ -10,6 +10,7 @@ export class ActionService {
   ): Promise<ActionWithContextResponse[]> {
     const actions = await prisma.action.findMany({
       where: {
+        retiredAt: null,
         application: {
           userId,
         },
@@ -85,16 +86,11 @@ export class ActionService {
       return null; // Return null to indicate 404/403
     }
 
-    // 2. Update idempotently
-    if (existingAction.status === status) {
-      // It's already the requested status, we just return the full object.
-      // We'll refetch via a generic method or just re-run the query.
-    } else {
-      await prisma.action.update({
-        where: { id: actionId },
-        data: { status },
-      });
-    }
+    const changed = await prisma.action.updateMany({
+      where: { id: actionId, retiredAt: null, application: { userId } },
+      data: { status },
+    });
+    if (!changed.count) throw new Error('ACTION_RETIRED');
 
     // 3. Return the updated action with context
     const updatedAction = await prisma.action.findUnique({
@@ -118,6 +114,7 @@ export class ActionService {
     });
 
     if (!updatedAction) return null;
+    if (updatedAction.retiredAt) throw new Error('ACTION_RETIRED');
 
     return {
       id: updatedAction.id,

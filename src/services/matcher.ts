@@ -1,3 +1,6 @@
+import { Prisma, Email, Application } from '@prisma/client';
+import type { CorrectEmailMatchRequest } from '../contracts/email';
+import { lockUser, LOCK_NAMESPACE } from '../utils/advisoryLock';
 import { parseActionDeadline } from '../utils/actionDeadline';
 import { prisma } from '../db/prisma';
 import {
@@ -40,29 +43,20 @@ export class MatcherService {
       return;
     }
 
-    // 1. Thread Match
-    if (email.threadId) {
-      const threadMatch = await prisma.email.findFirst({
-        where: {
-          userId,
-          threadId: email.threadId,
-          matchState: EmailMatchState.MATCHED,
-          applicationId: { not: null },
-          id: { not: email.id },
-        },
-        orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
-      });
-
-      if (threadMatch && threadMatch.applicationId) {
-        await this.applyMatch(
-          email.id,
-          threadMatch.applicationId,
-          aiProcessingResult,
-          MatchConfirmationSource.AI_AUTO,
-        );
-        return;
-      }
+    if (email.matchState === 'MATCHED' && applicationId) {
+      await this.applyMatch(email.id, applicationId, aiProcessingResult, 'AI_AUTO');
+      return;
     }
+    if (email.matchState === 'IGNORED') return;
+
+    // 1. Thread Match
+    const decision = await threadDecision(prisma, email);
+    if (decision.kind === 'STOP') return;
+    if (
+      decision.kind === 'LINK' &&
+      (await this.applyMatch(email.id, decision.applicationId, aiProcessingResult, 'AI_AUTO', true))
+    )
+      return;
 
     // 2. Company + Role Match
     const companyName = aiProcessingResult.companyName;
@@ -103,17 +97,26 @@ export class MatcherService {
         MatchConfirmationSource.AI_AUTO,
       );
     } else if (candidates.length > 1) {
-      // Ambiguous
-      await prisma.email.updateMany({
-        where: {
-          id: email.id,
-          OR: [
-            { matchConfirmedBy: null },
-            { matchConfirmedBy: { not: MatchConfirmationSource.USER_CONFIRMED } },
-          ],
-        },
-        data: { matchState: EmailMatchState.AMBIGUOUS },
+      const current = await prisma.$transaction(async (tx) => {
+        await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
+        await tx.$queryRaw`SELECT id FROM emails WHERE id = ${email.id}::uuid FOR UPDATE`;
+        const fresh = await tx.email.findUniqueOrThrow({ where: { id: email.id } });
+        if (fresh.matchState === 'MATCHED' || fresh.matchState === 'IGNORED')
+          return { kind: 'NONE' as const };
+        const decision = await threadDecision(tx, fresh);
+        if (decision.kind === 'LINK') return decision;
+        await tx.email.updateMany({
+          where: {
+            id: email.id,
+            matchState: { in: ['UNMATCHED', 'AMBIGUOUS'] },
+            OR: [{ matchConfirmedBy: null }, { matchConfirmedBy: { not: 'USER_CONFIRMED' } }],
+          },
+          data: { matchState: decision.kind === 'STOP' ? 'UNMATCHED' : 'AMBIGUOUS' },
+        });
+        return decision;
       });
+      if (current.kind === 'LINK')
+        await this.applyMatch(email.id, current.applicationId, aiProcessingResult, 'AI_AUTO', true);
     }
   }
 
@@ -129,8 +132,15 @@ export class MatcherService {
     applicationId: string,
     aiResult: AIProcessingResult,
     source: MatchConfirmationSource,
+    fromThread = false,
   ) {
+    const owner = await prisma.email.findUnique({
+      where: { id: emailId },
+      select: { userId: true },
+    });
+    if (!owner) throw new Error('EMAIL_NOT_FOUND');
     const actionId = await prisma.$transaction(async (tx) => {
+      await lockUser(tx, LOCK_NAMESPACE.emailMatches, owner.userId);
       // Serialize domain effects for this email and application, inside the DB transaction.
       await tx.$queryRaw`SELECT id FROM emails WHERE id = ${emailId}::uuid FOR UPDATE`;
       const email = await tx.email.findUnique({ where: { id: emailId } });
@@ -140,6 +150,19 @@ export class MatcherService {
         email.matchConfirmedBy === MatchConfirmationSource.USER_CONFIRMED
       )
         return null;
+      if (source === 'AI_AUTO') {
+        if (
+          email.matchState === 'IGNORED' ||
+          (email.matchState === 'MATCHED' && email.applicationId !== applicationId)
+        )
+          return null;
+        if (email.matchState !== 'MATCHED') {
+          const current = await threadDecision(tx, email);
+          if (current.kind === 'STOP') return null;
+          if (current.kind === 'LINK') applicationId = current.applicationId;
+          else if (fromThread) return undefined;
+        }
+      }
       await tx.$queryRaw`SELECT id FROM applications WHERE id = ${applicationId}::uuid AND "userId" = ${email.userId}::uuid FOR UPDATE`;
       const app = await tx.application.findFirst({
         where: { id: applicationId, userId: email.userId },
@@ -166,55 +189,7 @@ export class MatcherService {
           matchConfirmedBy: source,
         },
       });
-      const newState = this.inferState(aiResult);
-      const finalState =
-        newState && this.canTransition(app.aiStatus, newState) ? newState : app.aiStatus;
-      if (finalState !== app.aiStatus)
-        await tx.application.update({
-          where: { id: applicationId },
-          data: { aiStatus: finalState },
-        });
-      const existingEvent = await tx.applicationEvent.findFirst({
-        where: { applicationId, emailId, type: 'EMAIL_PROCESSED' },
-      });
-      if (!existingEvent)
-        await tx.applicationEvent.create({
-          data: {
-            applicationId,
-            emailId,
-            type: 'EMAIL_PROCESSED',
-            oldState: app.aiStatus,
-            newState: finalState,
-            description: newState
-              ? `Received relevant email suggesting state ${newState}`
-              : 'Received relevant email',
-            provenance: aiResult.provenance,
-          },
-        });
-      if (!aiResult.actionRequired && !aiResult.followUpRequired) return null;
-      const existingAction = await tx.action.findFirst({ where: { applicationId, emailId } });
-      if (existingAction) return existingAction.id;
-      const deadlineText = aiResult.actionRequired
-        ? aiResult.actionDeadline
-        : aiResult.followUpDate;
-      const parsed = parseActionDeadline(deadlineText, email.receivedAt);
-      if (deadlineText?.trim() && !parsed.deadline)
-        console.log(
-          JSON.stringify({ event: 'action_deadline_unclear', emailId, reason: parsed.reason }),
-        );
-      const action = await tx.action.create({
-        data: {
-          applicationId,
-          emailId,
-          type: aiResult.actionRequired ? 'ACTION_REQUIRED' : 'FOLLOW_UP_REQUIRED',
-          description: aiResult.actionRequired
-            ? aiResult.requestedAction || 'Action required'
-            : 'Follow up required',
-          deadline: parsed.deadline,
-          deadlinePrecision: parsed.precision,
-        },
-      });
-      return action.id;
+      return applyEffects(tx, email, app, aiResult);
     });
     if (actionId) {
       try {
@@ -223,6 +198,123 @@ export class MatcherService {
         console.error(JSON.stringify({ event: 'notification_enqueue_failed', actionId }));
       }
     }
+    return actionId !== undefined;
+  }
+
+  static async correctEmailMatch(
+    userId: string,
+    emailId: string,
+    request: CorrectEmailMatchRequest,
+  ) {
+    const result = await prisma.$transaction(async (tx) => {
+      await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
+      await tx.$queryRaw`SELECT id FROM emails WHERE id = ${emailId}::uuid AND "userId" = ${userId}::uuid FOR UPDATE`;
+      const email = await tx.email.findFirst({
+        where: { id: emailId, userId },
+        include: { aiProcessingResult: true },
+      });
+      if (!email) throw new MatchCorrectionError('NOT_FOUND');
+      if (
+        email.matchState !== request.expectedMatchState ||
+        email.applicationId !== request.expectedApplicationId
+      )
+        throw new MatchCorrectionError('MATCH_CONFLICT');
+      const target = request.applicationId;
+      const events = await tx.applicationEvent.findMany({
+        where: {
+          emailId,
+          retiredAt: null,
+          externalSubmissionId: null,
+          type: { not: 'AUTOMATION_SUBMITTED' },
+          application: { userId },
+        },
+        select: { applicationId: true },
+      });
+      const actions = await tx.action.findMany({
+        where: { emailId, retiredAt: null, application: { userId } },
+        select: { applicationId: true, status: true },
+      });
+      const affected = [
+        ...new Set([
+          ...(email.applicationId ? [email.applicationId] : []),
+          ...events.map((e) => e.applicationId),
+          ...actions.map((a) => a.applicationId),
+          ...(target ? [target] : []),
+        ]),
+      ].sort();
+      const apps = affected.length
+        ? await tx.$queryRaw<
+            Application[]
+          >`SELECT * FROM applications WHERE id = ANY(${affected}::uuid[]) AND "userId" = ${userId}::uuid ORDER BY id FOR UPDATE`
+        : [];
+      const targetApp = apps.find((a) => a.id === target);
+      if (target && !targetApp) throw new MatchCorrectionError('APPLICATION_NOT_FOUND');
+      if (target && !email.aiProcessingResult)
+        throw new MatchCorrectionError('MATCH_NOT_CORRECTABLE');
+      const sources = apps.filter((a) => a.id !== target).map((a) => a.id);
+      const retirement = {
+        retiredAt: new Date(),
+        retiredReason: target ? ('EMAIL_MOVED' as const) : ('EMAIL_UNLINKED' as const),
+      };
+      const retiredEvents = await tx.applicationEvent.updateMany({
+        where: {
+          emailId,
+          applicationId: { in: sources },
+          retiredAt: null,
+          externalSubmissionId: null,
+          type: { not: 'AUTOMATION_SUBMITTED' },
+        },
+        data: retirement,
+      });
+      const retiredActions = await tx.action.updateMany({
+        where: { emailId, applicationId: { in: sources }, retiredAt: null },
+        data: retirement,
+      });
+      const updated = await tx.email.update({
+        where: { id: emailId },
+        data: {
+          applicationId: target,
+          matchState: target ? 'MATCHED' : 'IGNORED',
+          matchConfirmedBy: 'USER_CONFIRMED',
+        },
+        select: { id: true, matchState: true, matchConfirmedBy: true, applicationId: true },
+      });
+      if (targetApp && email.aiProcessingResult) {
+        const carried = actions.some((a) => a.status === 'COMPLETED')
+          ? 'COMPLETED'
+          : actions.some((a) => a.status === 'DISMISSED')
+            ? 'DISMISSED'
+            : 'PENDING';
+        await applyEffects(tx, email, targetApp, email.aiProcessingResult, true, carried);
+      }
+      for (const id of sources) {
+        const remaining = await tx.aIProcessingResult.findMany({
+          where: { email: { userId, applicationId: id, matchState: 'MATCHED' } },
+        });
+        const aiStatus = aiStatusFromEvidence(remaining);
+        if (apps.find((a) => a.id === id)!.aiStatus !== aiStatus)
+          await tx.application.update({ where: { id }, data: { aiStatus } });
+      }
+      return {
+        email: updated,
+        affectedApplicationIds: apps.map((a) => a.id),
+        fromApplicationIds: sources,
+        retiredEvents: retiredEvents.count,
+        retiredActions: retiredActions.count,
+      };
+    });
+    console.log(
+      JSON.stringify({
+        event: 'email_match_corrected',
+        emailId,
+        kind: request.applicationId ? 'MOVE' : 'UNLINK',
+        fromApplicationIds: result.fromApplicationIds,
+        toApplicationId: request.applicationId,
+        retiredEvents: result.retiredEvents,
+        retiredActions: result.retiredActions,
+      }),
+    );
+    return { email: result.email, affectedApplicationIds: result.affectedApplicationIds };
   }
 
   public static async getAmbiguousMatches(userId: string, limit: number = 20, offset: number = 0) {
@@ -296,12 +388,12 @@ export class MatcherService {
 
     if (!applicationId) {
       // No match — only valid for AMBIGUOUS emails
-      const ignored = await prisma.email.updateMany({
-        where: { id: emailId, userId, matchState: 'AMBIGUOUS' },
-        data: {
-          matchState: EmailMatchState.IGNORED,
-          matchConfirmedBy: MatchConfirmationSource.USER_CONFIRMED,
-        },
+      const ignored = await prisma.$transaction(async (tx) => {
+        await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
+        return tx.email.updateMany({
+          where: { id: emailId, userId, matchState: 'AMBIGUOUS' },
+          data: { matchState: 'IGNORED', matchConfirmedBy: 'USER_CONFIRMED' },
+        });
       });
       if (!ignored.count) throw new Error('INVALID_MATCH_STATE');
       return;
@@ -327,36 +419,143 @@ export class MatcherService {
       MatchConfirmationSource.USER_CONFIRMED,
     );
   }
+}
+export function inferState(aiResult: AIProcessingResult): ApplicationStatus | null {
+  if (aiResult.rejectionInfo || aiResult.category === 'REJECTION')
+    return ApplicationStatus.REJECTED;
+  if (aiResult.offerInfo || aiResult.category === 'OFFER') return ApplicationStatus.OFFER;
+  if (aiResult.interviewStage || aiResult.interviewDate || aiResult.category === 'INTERVIEW')
+    return ApplicationStatus.INTERVIEW;
+  if (aiResult.assessmentInfo || aiResult.category === 'ASSESSMENT')
+    return ApplicationStatus.ASSESSMENT;
+  if (aiResult.recruiterName || aiResult.category === 'RECRUITER')
+    return ApplicationStatus.RECRUITER_CONTACT;
+  return null;
+}
 
-  private static inferState(aiResult: AIProcessingResult): ApplicationStatus | null {
-    if (aiResult.rejectionInfo || aiResult.category === 'REJECTION')
-      return ApplicationStatus.REJECTED;
-    if (aiResult.offerInfo || aiResult.category === 'OFFER') return ApplicationStatus.OFFER;
-    if (aiResult.interviewStage || aiResult.interviewDate || aiResult.category === 'INTERVIEW')
-      return ApplicationStatus.INTERVIEW;
-    if (aiResult.assessmentInfo || aiResult.category === 'ASSESSMENT')
-      return ApplicationStatus.ASSESSMENT;
-    if (aiResult.recruiterName || aiResult.category === 'RECRUITER')
-      return ApplicationStatus.RECRUITER_CONTACT;
-    return null;
+export function canTransition(current: ApplicationStatus | null, next: ApplicationStatus): boolean {
+  if (!current) return true;
+
+  const stateOrder: Record<ApplicationStatus, number> = {
+    APPLIED: 0,
+    RECRUITER_CONTACT: 1,
+    ASSESSMENT: 2,
+    INTERVIEW: 3,
+    OFFER: 4,
+    REJECTED: 5,
+    CLOSED: 6,
+  };
+
+  return stateOrder[next] >= stateOrder[current];
+}
+export function aiStatusFromEvidence(results: AIProcessingResult[]): ApplicationStatus | null {
+  let status: ApplicationStatus | null = null;
+  for (const result of results) {
+    const next = inferState(result);
+    if (next && canTransition(status, next)) status = next;
   }
-
-  private static canTransition(
-    current: ApplicationStatus | null,
-    next: ApplicationStatus,
-  ): boolean {
-    if (!current) return true;
-
-    const stateOrder: Record<ApplicationStatus, number> = {
-      APPLIED: 0,
-      RECRUITER_CONTACT: 1,
-      ASSESSMENT: 2,
-      INTERVIEW: 3,
-      OFFER: 4,
-      REJECTED: 5,
-      CLOSED: 6,
-    };
-
-    return stateOrder[next] >= stateOrder[current];
+  return status;
+}
+export async function threadDecision(db: Prisma.TransactionClient, email: Email) {
+  if (!email.threadId) return { kind: 'NONE' as const };
+  const where = { userId: email.userId, threadId: email.threadId, id: { not: email.id } };
+  const orderBy = [{ receivedAt: 'desc' as const }, { id: 'desc' as const }];
+  const confirmed = await db.email.findFirst({
+    where: {
+      ...where,
+      matchConfirmedBy: 'USER_CONFIRMED',
+      matchState: { in: ['MATCHED', 'IGNORED'] },
+    },
+    orderBy,
+  });
+  if (confirmed)
+    return confirmed.matchState === 'IGNORED' || !confirmed.applicationId
+      ? { kind: 'STOP' as const }
+      : { kind: 'LINK' as const, applicationId: confirmed.applicationId };
+  const automatic = await db.email.findFirst({
+    where: { ...where, matchState: 'MATCHED', applicationId: { not: null } },
+    orderBy,
+  });
+  return automatic?.applicationId
+    ? { kind: 'LINK' as const, applicationId: automatic.applicationId }
+    : { kind: 'NONE' as const };
+}
+export class MatchCorrectionError extends Error {
+  constructor(
+    readonly code:
+      'NOT_FOUND' | 'APPLICATION_NOT_FOUND' | 'MATCH_CONFLICT' | 'MATCH_NOT_CORRECTABLE',
+  ) {
+    super(code);
   }
+}
+
+async function applyEffects(
+  tx: Prisma.TransactionClient,
+  email: Email,
+  app: Application,
+  aiResult: AIProcessingResult,
+  reactivate = false,
+  actionStatus = 'PENDING',
+) {
+  const emailId = email.id,
+    applicationId = app.id;
+  const newState = inferState(aiResult);
+  const finalState = newState && canTransition(app.aiStatus, newState) ? newState : app.aiStatus;
+  if (finalState !== app.aiStatus)
+    await tx.application.update({
+      where: { id: applicationId },
+      data: { aiStatus: finalState },
+    });
+  const existingEvent = await tx.applicationEvent.findFirst({
+    where: { applicationId, emailId, type: 'EMAIL_PROCESSED' },
+  });
+  if (existingEvent?.retiredAt && reactivate)
+    await tx.applicationEvent.update({
+      where: { id: existingEvent.id },
+      data: { retiredAt: null, retiredReason: null },
+    });
+  if (!existingEvent)
+    await tx.applicationEvent.create({
+      data: {
+        applicationId,
+        emailId,
+        type: 'EMAIL_PROCESSED',
+        oldState: app.aiStatus,
+        newState: finalState,
+        description: newState
+          ? `Received relevant email suggesting state ${newState}`
+          : 'Received relevant email',
+        provenance: aiResult.provenance,
+      },
+    });
+  if (!aiResult.actionRequired && !aiResult.followUpRequired) return null;
+  const existingAction = await tx.action.findFirst({ where: { applicationId, emailId } });
+  if (existingAction) {
+    if (existingAction.retiredAt && reactivate)
+      await tx.action.update({
+        where: { id: existingAction.id },
+        data: { retiredAt: null, retiredReason: null },
+      });
+    return existingAction.retiredAt && !reactivate ? null : existingAction.id;
+  }
+  const deadlineText = aiResult.actionRequired ? aiResult.actionDeadline : aiResult.followUpDate;
+  const parsed = parseActionDeadline(deadlineText, email.receivedAt);
+  if (deadlineText?.trim() && !parsed.deadline)
+    console.log(
+      JSON.stringify({ event: 'action_deadline_unclear', emailId, reason: parsed.reason }),
+    );
+  const action = await tx.action.create({
+    data: {
+      applicationId,
+      emailId,
+      status: actionStatus,
+      type: aiResult.actionRequired ? 'ACTION_REQUIRED' : 'FOLLOW_UP_REQUIRED',
+      description: aiResult.actionRequired
+        ? aiResult.requestedAction || 'Action required'
+        : 'Follow up required',
+      deadline: parsed.deadline,
+      deadlinePrecision: parsed.precision,
+    },
+  });
+  return action.id;
 }

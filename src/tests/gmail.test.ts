@@ -677,8 +677,11 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       // Should strictly match EmailMessageSchema
       expect(keys).toEqual([
         'aiProcessingResult', // provenance only: { provider, model } or null (ADR-0001)
+        'application',
+        'applicationId',
         'gmailMessageId',
         'id',
+        'matchConfirmedBy',
         'matchState',
         'processingErrorCategory',
         'processingErrorDetails',
@@ -696,7 +699,9 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       expect(keys).not.toContain('createdAt');
       expect(keys).not.toContain('updatedAt');
       expect(keys).not.toContain('userId');
-      expect(keys).not.toContain('applicationId');
+      expect(msg.applicationId).toBeNull();
+      expect(msg.application).toBeNull();
+      expect(msg.matchConfirmedBy).toBeNull();
       expect(
         msg.aiProcessingResult === null ||
           Object.keys(msg.aiProcessingResult).sort().join() === 'model,provider',

@@ -52,6 +52,12 @@ export const EmailRelevanceStateSchema = z.enum(['UNPROCESSED', 'RELEVANT', 'IRR
 export const EmailMatchStateSchema = z.enum(['UNMATCHED', 'MATCHED', 'AMBIGUOUS', 'IGNORED']);
 
 export const EmailMessageSchema = z.object({
+  applicationId: z.uuid().nullable().optional(),
+  matchConfirmedBy: z.enum(['AI_AUTO', 'USER_CONFIRMED']).nullable().optional(),
+  application: z
+    .object({ id: z.uuid(), companyName: z.string(), jobTitle: z.string().nullable() })
+    .nullable()
+    .optional(),
   id: z.string(),
   gmailMessageId: z.string(),
   threadId: z.string().nullable(),

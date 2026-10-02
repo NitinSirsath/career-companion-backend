@@ -59,7 +59,7 @@ export async function startNotificationWorker() {
       );
       return;
     }
-    if (action.status !== 'PENDING') return;
+    if (action.retiredAt || action.status !== 'PENDING') return;
 
     // Check idempotency: Did we already deliver it?
     const existingDelivery = await prisma.notificationDelivery.findUnique({

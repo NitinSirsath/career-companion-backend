@@ -57,6 +57,23 @@ describe('Notification Job', () => {
     vi.restoreAllMocks();
   });
 
+  it('skips a retired pending action without creating a delivery', async () => {
+    const action = await prisma.action.create({
+      data: {
+        applicationId: app.id,
+        type: 'ACTION_REQUIRED',
+        retiredAt: new Date(),
+        retiredReason: 'EMAIL_MOVED',
+      },
+    });
+    const send = vi.fn();
+    DiscordProvider.prototype.send = send;
+    await startNotificationWorker();
+    await workHandler([{ data: { actionId: action.id } }]);
+    expect(send).not.toHaveBeenCalled();
+    expect(await prisma.notificationDelivery.count({ where: { actionId: action.id } })).toBe(0);
+  });
+
   it('delivers notification for ACTION_REQUIRED and records delivery', async () => {
     const action = await prisma.action.create({
       data: {

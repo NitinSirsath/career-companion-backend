@@ -50,3 +50,27 @@ export const AIRetryApprovalDetailsSchema = z.object({
   currentProvider: z.string().nullable(),
 });
 export type AIRetryApprovalDetails = z.infer<typeof AIRetryApprovalDetailsSchema>;
+
+export const CorrectEmailMatchRequestSchema = z
+  .strictObject({
+    applicationId: z.uuid().nullable(),
+    expectedMatchState: z.enum(['MATCHED', 'IGNORED']),
+    expectedApplicationId: z.uuid().nullable(),
+  })
+  .refine(
+    (body) =>
+      body.applicationId !== body.expectedApplicationId &&
+      (body.applicationId !== null || body.expectedMatchState === 'MATCHED'),
+    { message: 'Choose a different application or unlink a matched email' },
+  );
+export type CorrectEmailMatchRequest = z.infer<typeof CorrectEmailMatchRequestSchema>;
+export const CorrectEmailMatchResponseSchema = z.object({
+  email: z.object({
+    id: z.uuid(),
+    matchState: z.enum(['MATCHED', 'IGNORED']),
+    matchConfirmedBy: z.literal('USER_CONFIRMED'),
+    applicationId: z.uuid().nullable(),
+  }),
+  affectedApplicationIds: z.array(z.uuid()),
+});
+export type CorrectEmailMatchResponse = z.infer<typeof CorrectEmailMatchResponseSchema>;

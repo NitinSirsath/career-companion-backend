@@ -212,3 +212,13 @@ accounts are skipped. Set `GMAIL_SCHEDULED_SYNC_ENABLED=false` and restart to
 remove the durable schedule before rolling back scheduling code. Status reports
 `nextScheduledSyncAt` only after local schedule registration. Real two-day
 Gmail observation remains pending; automated checks use fixture mail.
+
+### Correcting email links (Sprint 8)
+
+`PATCH /api/emails/:id/match` accepts an owned target application (or null to
+unlink), expectedMatchState and expectedApplicationId. It returns the canonical
+email link and affected application IDs. Stale links return MATCH_CONFLICT (409).
+Old effects are retired, not deleted; user status overrides stay intact. Retired
+action updates return ACTION_RETIRED (409). Gmail message responses expose the
+owned application link/source and a computed processingStuck flag; timestamps and
+credentials remain private. Unlink keeps future thread mail for manual review.

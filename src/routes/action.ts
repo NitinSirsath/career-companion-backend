@@ -49,6 +49,15 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => 
 
     res.status(200).json(updated);
   } catch (err) {
+    if (err instanceof Error && err.message === 'ACTION_RETIRED')
+      return res
+        .status(409)
+        .json({
+          error: {
+            code: 'ACTION_RETIRED',
+            message: 'This action belongs to a corrected email link. Refresh the list.',
+          },
+        });
     next(err);
   }
 });
