@@ -1,12 +1,12 @@
-import { OAuth2Client } from 'google-auth-library';
+import { google } from 'googleapis';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
 
-// ─── Mock google-auth-library ────────────────────────────────────────────────────────
-vi.mock('google-auth-library', () => {
+// ─── Mock Google OAuth factory import ────────────────────────────────────────────────────────
+vi.mock('googleapis', () => {
   const mockGetToken = vi.fn().mockResolvedValue({
     tokens: {
       access_token: 'mock_google_auth_access_token',
@@ -29,13 +29,13 @@ vi.mock('google-auth-library', () => {
     .mockReturnValue('https://accounts.google.com/o/oauth2/v2/auth?mock=1&state=teststate');
 
   return {
-    OAuth2Client: vi.fn().mockImplementation(function () {
+    google: { auth: { OAuth2: vi.fn().mockImplementation(function () {
       return {
         generateAuthUrl: mockGenerateAuthUrl,
         getToken: mockGetToken,
         verifyIdToken: mockVerifyIdToken,
       };
-    }),
+    }) } },
   };
 });
 
@@ -107,7 +107,7 @@ describe('Google OAuth Sign-In (COM-24)', () => {
 
   it('rejects unverified email claims before linking an existing user', async () => {
     testUser = await prisma.user.create({ data: { email: 'auth_test_user@gmail.com' } });
-    vi.mocked(new OAuth2Client().verifyIdToken).mockResolvedValueOnce({
+    vi.mocked(new google.auth.OAuth2().verifyIdToken).mockResolvedValueOnce({
       getPayload: () => ({
         iss: 'https://accounts.google.com',
         sub: 'unverified-id',

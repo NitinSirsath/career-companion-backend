@@ -1,3 +1,5 @@
+import { GMAIL_SYNC_EXPIRE_SECONDS } from '../jobs/gmailSyncJob';
+import { SYNC_ATTEMPT_BUDGET_MS } from '../services/googleTransport';
 import { describe, it, expect, vi } from 'vitest';
 import { extractHeaders, GmailAuthError } from '../services/gmailSync';
 import { googleAuthFailure, googleStatus } from '../services/gmailClient';
@@ -88,3 +90,5 @@ describe('GmailSyncService Helpers', () => {
     });
   });
 });
+
+it('ends the attempt at least 30 seconds before queue expiry', () => { expect(GMAIL_SYNC_EXPIRE_SECONDS * 1000 - SYNC_ATTEMPT_BUDGET_MS).toBeGreaterThanOrEqual(30_000); });

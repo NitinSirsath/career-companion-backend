@@ -105,7 +105,7 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
       where: { id: emailId, userId, processingState: { not: 'COMPLETED' } },
       data: { processingState: 'PROCESSING' },
     });
-    await EmailAIPipeline.processEmail(userId, emailId);
+    await EmailAIPipeline.processEmail(userId, emailId, { signal: job.signal });
     console.log(
       JSON.stringify({
         event: 'job_completed',

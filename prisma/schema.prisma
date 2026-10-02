@@ -138,6 +138,7 @@ model GmailConnection {
   gmailEmail             String
   status                 GmailConnectionStatus @default(NOT_CONNECTED)
   syncStatus             GmailSyncStatus       @default(IDLE)
+  accessTokenExpiresAt   DateTime?
   accessToken            String
   refreshToken           String?
   lastHistoryId          String?

@@ -53,6 +53,19 @@ afterAll(async () => {
 });
 
 describe('Gmail → user-provided AI → application pipeline', () => {
+  it('passes the worker signal to both Gmail fetches without changing provider requests', async () => {
+    const provider = fakeProviderClient({ classification: relevant, extraction });
+    vi.mocked(createProviderClient).mockReturnValue(provider);
+    const emailId = await newEmail(ready);
+    const email = await prisma.email.findUniqueOrThrow({ where: { id: emailId } });
+    const controller = new AbortController();
+    await processEmailJob({ ...job(ready, emailId), signal: controller.signal });
+    expect(GmailFetcherService.fetchMessageMetadata).toHaveBeenCalledWith(ready, email.gmailMessageId, { signal: controller.signal });
+    expect(GmailFetcherService.fetchMessageBody).toHaveBeenCalledWith(ready, email.gmailMessageId, { signal: controller.signal });
+    expect(provider.generateStructured).toHaveBeenCalledTimes(2);
+    for (const [sent] of provider.generateStructured.mock.calls) expect(sent).not.toHaveProperty('signal');
+  });
+
   it("processes a configured user's email end to end with provenance, while other users wait", async () => {
     const working = fakeProviderClient({ classification: relevant, extraction });
     const refusing = {

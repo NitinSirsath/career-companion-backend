@@ -1,4 +1,14 @@
-import { SyncBusyError, SyncSupersededError, SyncDeadlineError } from './gmailSyncErrors';
+import {
+  createGoogleOAuthClient,
+  GOOGLE_OAUTH_TIMEOUT_MS,
+  googleFailureReason,
+} from './googleTransport';
+import {
+  SyncBusyError,
+  SyncSupersededError,
+  SyncDeadlineError,
+  SyncCancelledError,
+} from './gmailSyncErrors';
 import { google, gmail_v1 } from 'googleapis';
 import { prisma } from '../db/prisma';
 import { decryptToken, encryptToken } from '../utils/gmailTokenEncryption';
@@ -16,17 +26,24 @@ export function googleAuthFailure(error: unknown): boolean {
 export async function withGmail<T>(
   userId: string,
   work: (gmail: gmail_v1.Gmail) => Promise<T>,
+  options: { signal?: AbortSignal } = {},
 ): Promise<T> {
   const connection = await prisma.gmailConnection.findUnique({ where: { userId } });
   if (!connection || connection.status !== 'CONNECTED') throw new Error('Gmail is not connected');
-  const oauth = new google.auth.OAuth2(
-    process.env.GMAIL_CLIENT_ID,
-    process.env.GMAIL_CLIENT_SECRET,
-    process.env.GMAIL_REDIRECT_URI,
-  );
+  if (options.signal?.aborted) throw new Error('Gmail request failed');
+  const oauth = createGoogleOAuthClient({
+    clientId: process.env.GMAIL_CLIENT_ID,
+    clientSecret: process.env.GMAIL_CLIENT_SECRET,
+    redirectUri: process.env.GMAIL_REDIRECT_URI,
+    timeoutMs: GOOGLE_OAUTH_TIMEOUT_MS,
+    signal: options.signal,
+  });
   const access = decryptToken(connection.accessToken);
   oauth.setCredentials({
     access_token: access,
+    ...(connection.accessTokenExpiresAt
+      ? { expiry_date: connection.accessTokenExpiresAt.getTime() }
+      : {}),
     ...(connection.refreshToken ? { refresh_token: decryptToken(connection.refreshToken) } : {}),
   });
   try {
@@ -35,7 +52,8 @@ export async function withGmail<T>(
     if (
       err instanceof SyncBusyError ||
       err instanceof SyncSupersededError ||
-      err instanceof SyncDeadlineError
+      err instanceof SyncDeadlineError ||
+      err instanceof SyncCancelledError
     )
       throw err;
     if (googleAuthFailure(err))
@@ -44,7 +62,10 @@ export async function withGmail<T>(
         data: { status: 'REVOKED' },
       });
     const sanitized = new Error('Gmail request failed');
-    throw Object.assign(sanitized, { status: googleAuthFailure(err) ? 401 : googleStatus(err) });
+    throw Object.assign(sanitized, {
+      status: googleAuthFailure(err) ? 401 : googleStatus(err),
+      reason: googleFailureReason(err),
+    });
   } finally {
     const updated = oauth.credentials;
     if (updated?.access_token && updated.access_token !== access) {
@@ -52,6 +73,7 @@ export async function withGmail<T>(
         where: { id: connection.id, status: 'CONNECTED', accessToken: connection.accessToken },
         data: {
           accessToken: encryptToken(updated.access_token),
+          accessTokenExpiresAt: updated.expiry_date ? new Date(updated.expiry_date) : null,
           ...(updated.refresh_token ? { refreshToken: encryptToken(updated.refresh_token) } : {}),
         },
       });

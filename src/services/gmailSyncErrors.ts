@@ -37,3 +37,10 @@ export class SyncQueueError extends Error {
     this.name = 'SyncQueueError';
   }
 }
+
+export class SyncCancelledError extends Error {
+  constructor() {
+    super('Sync delivery cancelled');
+    this.name = 'SyncCancelledError';
+  }
+}

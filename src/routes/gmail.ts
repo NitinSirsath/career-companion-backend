@@ -1,3 +1,9 @@
+import {
+  createGoogleOAuthClient,
+  GOOGLE_OAUTH_TIMEOUT_MS,
+  GOOGLE_REVOKE_TIMEOUT_MS,
+  gmailCallOptions,
+} from '../services/googleTransport';
 import { EMAIL_PROCESSING_STUCK_MS } from '../jobs/emailProcessingJob';
 import { nextScheduledSyncAt } from '../services/gmailSchedule';
 import { SyncQueueError } from '../services/gmailSyncErrors';
@@ -41,7 +47,7 @@ const FRONTEND_GMAIL_PATH = '/gmail';
  * Throws at call-time (not module-load-time) so the server can start
  * without credentials and return 500 only when the route is actually called.
  */
-function createOAuth2Client() {
+function createOAuth2Client(timeoutMs = GOOGLE_OAUTH_TIMEOUT_MS) {
   const clientId = process.env.GMAIL_CLIENT_ID;
   const clientSecret = process.env.GMAIL_CLIENT_SECRET;
   const redirectUri = process.env.GMAIL_REDIRECT_URI;
@@ -52,7 +58,7 @@ function createOAuth2Client() {
     );
   }
 
-  return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+  return createGoogleOAuthClient({ clientId, clientSecret, redirectUri, timeoutMs });
 }
 
 /**
@@ -224,7 +230,7 @@ router.get('/callback', async (req: Request, res: Response) => {
     // ── Fetch Gmail address ───────────────────────────────────────────────
     oauth2Client.setCredentials(tokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    const profile = await gmail.users.getProfile({ userId: 'me' });
+    const profile = await gmail.users.getProfile({ userId: 'me' }, gmailCallOptions());
     const gmailEmail = profile.data.emailAddress;
 
     if (!gmailEmail) {
@@ -255,6 +261,7 @@ router.get('/callback', async (req: Request, res: Response) => {
         status: 'CONNECTED',
         syncStatus: 'IDLE',
         accessToken: encryptedAccessToken,
+        accessTokenExpiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
         refreshToken: encryptedRefreshToken ?? null,
       },
       update: {
@@ -262,6 +269,7 @@ router.get('/callback', async (req: Request, res: Response) => {
         status: 'CONNECTED',
         syncStatus: 'IDLE',
         accessToken: encryptedAccessToken,
+        accessTokenExpiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
         syncClaim: null,
         syncLeaseUntil: null,
         syncError: null,
@@ -308,7 +316,7 @@ router.post('/disconnect', async (req: Request, res: Response, next: NextFunctio
     // The token is cleared from the DB regardless of revocation outcome.
     try {
       const decryptedAccessToken = decryptToken(connection.accessToken);
-      const oauth2Client = createOAuth2Client();
+      const oauth2Client = createOAuth2Client(GOOGLE_REVOKE_TIMEOUT_MS);
       await oauth2Client.revokeToken(decryptedAccessToken);
     } catch (revokeErr) {
       // Log that revocation failed, but do NOT log the token value.
@@ -330,6 +338,7 @@ router.post('/disconnect', async (req: Request, res: Response, next: NextFunctio
         status: 'NOT_CONNECTED',
         syncStatus: 'IDLE',
         accessToken: '', // Cleared — not a valid encrypted value
+        accessTokenExpiresAt: null,
         refreshToken: null,
         lastHistoryId: null,
         syncClaim: null,

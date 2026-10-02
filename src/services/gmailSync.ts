@@ -1,3 +1,4 @@
+import { gmailCallOptions, SYNC_ATTEMPT_BUDGET_MS } from './googleTransport';
 import { randomUUID } from 'crypto';
 import { gmail_v1 } from 'googleapis';
 import { prisma } from '../db/prisma';
@@ -11,10 +12,12 @@ import {
   SyncBusyError,
   SyncSupersededError,
   SyncDeadlineError,
+  SyncCancelledError,
 } from './gmailSyncErrors';
 import { acquireSync, withOwnedSync } from './gmailSyncOwnership';
 export { GmailAuthError, SyncInProgressError } from './gmailSyncErrors';
 export interface SyncDelivery {
+  signal?: AbortSignal;
   trigger?: 'manual' | 'scheduled';
   jobId?: string;
   retryCount?: number;
@@ -25,6 +28,11 @@ function syncCategory(error: unknown): string {
   if (error instanceof SyncInProgressError || error instanceof SyncBusyError) return 'REQUEST_BUSY';
   if (error instanceof SyncSupersededError) return 'SUPERSEDED';
   if (error instanceof SyncDeadlineError) return 'DEADLINE_EXCEEDED';
+  if (error instanceof SyncCancelledError) return 'CANCELLED';
+  const reason = (error as { reason?: string })?.reason;
+  if (reason === 'timeout') return 'REQUEST_TIMEOUT';
+  if (reason === 'network') return 'NETWORK_ERROR';
+  if (reason === 'rate_limit') return 'RATE_LIMIT';
   const status = googleStatus(error);
   return status === 429
     ? 'RATE_LIMIT'
@@ -140,8 +148,12 @@ export class GmailSyncService {
     let messagesIngested = 0;
     let messagesSkipped = 0;
     let connectionId: string | undefined;
+    let budget: AbortSignal | undefined;
+    let signal: AbortSignal | undefined;
     try {
       const acquired = await acquireSync(userId, queuedClaim, claim);
+      budget = AbortSignal.timeout(SYNC_ATTEMPT_BUDGET_MS);
+      signal = delivery.signal ? AbortSignal.any([delivery.signal, budget]) : budget;
       const connection = acquired.connection;
       connectionId = connection.id;
       const syncLookbackDays = connection.syncLookbackDays || 1;
@@ -161,132 +173,146 @@ export class GmailSyncService {
           syncLookbackDays > connection.lastSyncedLookbackDays);
       console.log(JSON.stringify({ event: 'gmail_sync_started', ...context }));
       const deadline = () => {
-        if (Date.now() - started > 4 * 60_000) throw new SyncDeadlineError();
+        signal!.throwIfAborted();
       };
       const heartbeat = async () => {
         deadline();
-        await withOwnedSync(userId, connection.id, claim, async () => undefined);
+        await withOwnedSync(userId, connection.id, claim, async () => {
+          deadline();
+        });
       };
-      const historyId = await withGmail(userId, async (gmail) => {
-        const ingest = async (ids: string[]) => {
-          for (const id of new Set(ids)) {
-            await heartbeat();
-            const existing = await prisma.email.findUnique({
-              where: { userId_gmailMessageId: { userId, gmailMessageId: id } },
-            });
-            if (existing) {
-              if (existing.processingState === 'PENDING') {
-                await heartbeat();
-                await enqueueEmailProcessingJob(userId, existing.id);
-              }
-              messagesSkipped++;
-              continue;
-            }
-            let message: gmail_v1.Schema$Message;
-            try {
-              message = (
-                await gmail.users.messages.get(
-                  {
-                    userId: 'me',
-                    id,
-                    format: 'metadata',
-                    metadataHeaders: ['Subject', 'From', 'Date'],
-                  },
-                  { timeout: 15_000 },
-                )
-              ).data;
-            } catch (err) {
-              if (googleStatus(err) === 404) continue;
-              throw err;
-            }
-            if (!message.labelIds?.includes('INBOX')) continue;
-            const receivedAt = message.internalDate ? new Date(Number(message.internalDate)) : null;
-            if (receivedAt && receivedAt < window.windowStart) continue;
-            deadline();
-            const record = await withOwnedSync(userId, connection.id, claim, (tx) =>
-              tx.email.upsert({
-                where: { userId_gmailMessageId: { userId, gmailMessageId: id } },
-                create: {
-                  userId,
-                  gmailMessageId: id,
-                  threadId: message.threadId,
-                  ...extractHeaders(message.payload?.headers),
-                  ...(receivedAt && !isNaN(receivedAt.getTime()) ? { receivedAt } : {}),
-                },
-                update: {},
-              }),
-            );
-            if (record.processingState === 'PENDING') {
+      const historyId = await withGmail(
+        userId,
+        async (gmail) => {
+          const ingest = async (ids: string[]) => {
+            for (const id of new Set(ids)) {
               await heartbeat();
-              await enqueueEmailProcessingJob(userId, record.id);
+              const existing = await prisma.email.findUnique({
+                where: { userId_gmailMessageId: { userId, gmailMessageId: id } },
+              });
+              if (existing) {
+                if (existing.processingState === 'PENDING') {
+                  await heartbeat();
+                  await enqueueEmailProcessingJob(userId, existing.id);
+                }
+                messagesSkipped++;
+                continue;
+              }
+              let message: gmail_v1.Schema$Message;
+              try {
+                message = (
+                  await gmail.users.messages.get(
+                    {
+                      userId: 'me',
+                      id,
+                      format: 'metadata',
+                      metadataHeaders: ['Subject', 'From', 'Date'],
+                    },
+                    gmailCallOptions(signal),
+                  )
+                ).data;
+              } catch (err) {
+                if (googleStatus(err) === 404) continue;
+                throw err;
+              }
+              if (!message.labelIds?.includes('INBOX')) continue;
+              const receivedAt = message.internalDate
+                ? new Date(Number(message.internalDate))
+                : null;
+              if (receivedAt && receivedAt < window.windowStart) continue;
+              deadline();
+              const record = await withOwnedSync(userId, connection.id, claim, (tx) => {
+                deadline();
+                return tx.email.upsert({
+                  where: { userId_gmailMessageId: { userId, gmailMessageId: id } },
+                  create: {
+                    userId,
+                    gmailMessageId: id,
+                    threadId: message.threadId,
+                    ...extractHeaders(message.payload?.headers),
+                    ...(receivedAt && !isNaN(receivedAt.getTime()) ? { receivedAt } : {}),
+                  },
+                  update: {},
+                });
+              });
+              if (record.processingState === 'PENDING') {
+                await heartbeat();
+                await enqueueEmailProcessingJob(userId, record.id);
+              }
+              messagesIngested++;
             }
-            messagesIngested++;
-          }
-        };
-        const fullSync = async () => {
-          // Capture checkpoint BEFORE scanning so mail arriving during the scan remains discoverable.
-          const profile = await gmail.users.getProfile({ userId: 'me' }, { timeout: 15_000 });
-          const baseline = profile.data.historyId;
-          if (!baseline) throw new Error('Missing Gmail history checkpoint');
+          };
+          const fullSync = async () => {
+            // Capture checkpoint BEFORE scanning so mail arriving during the scan remains discoverable.
+            const profile = await gmail.users.getProfile(
+              { userId: 'me' },
+              gmailCallOptions(signal),
+            );
+            const baseline = profile.data.historyId;
+            if (!baseline) throw new Error('Missing Gmail history checkpoint');
+            let pageToken: string | undefined;
+            do {
+              await heartbeat();
+              const page = await gmail.users.messages.list(
+                {
+                  userId: 'me',
+                  labelIds: ['INBOX'],
+                  q: `newer_than:${window.windowDays}d`,
+                  maxResults: 100,
+                  pageToken,
+                },
+                gmailCallOptions(signal),
+              );
+              await ingest((page.data.messages ?? []).flatMap((m) => (m.id ? [m.id] : [])));
+              pageToken = page.data.nextPageToken ?? undefined;
+            } while (pageToken);
+            return baseline;
+          };
+          if (shouldFullSync) return fullSync();
           let pageToken: string | undefined;
+          let latest = connection.lastHistoryId;
           do {
             await heartbeat();
-            const page = await gmail.users.messages.list(
-              {
-                userId: 'me',
-                labelIds: ['INBOX'],
-                q: `newer_than:${window.windowDays}d`,
-                maxResults: 100,
-                pageToken,
-              },
-              { timeout: 15_000 },
-            );
-            await ingest((page.data.messages ?? []).flatMap((m) => (m.id ? [m.id] : [])));
+            let page;
+            try {
+              page = await gmail.users.history.list(
+                {
+                  userId: 'me',
+                  startHistoryId: connection.lastHistoryId!,
+                  historyTypes: ['messageAdded', 'labelAdded'],
+                  pageToken,
+                  maxResults: 100,
+                },
+                gmailCallOptions(signal),
+              );
+            } catch (err) {
+              if (googleStatus(err) === 404) return fullSync();
+              throw err;
+            }
+            const ids = (page.data.history ?? []).flatMap((h) => [
+              ...(h.messagesAdded ?? []).flatMap((m) => (m.message?.id ? [m.message.id] : [])),
+              ...(h.labelsAdded ?? []).flatMap((m) =>
+                m.labelIds?.includes('INBOX') && m.message?.id ? [m.message.id] : [],
+              ),
+            ]);
+            await ingest(ids);
+            latest = page.data.historyId ?? latest;
             pageToken = page.data.nextPageToken ?? undefined;
           } while (pageToken);
-          return baseline;
-        };
-        if (shouldFullSync) return fullSync();
-        let pageToken: string | undefined;
-        let latest = connection.lastHistoryId;
-        do {
-          await heartbeat();
-          let page;
-          try {
-            page = await gmail.users.history.list(
-              {
-                userId: 'me',
-                startHistoryId: connection.lastHistoryId!,
-                historyTypes: ['messageAdded', 'labelAdded'],
-                pageToken,
-                maxResults: 100,
-              },
-              { timeout: 15_000 },
-            );
-          } catch (err) {
-            if (googleStatus(err) === 404) return fullSync();
-            throw err;
-          }
-          const ids = (page.data.history ?? []).flatMap((h) => [
-            ...(h.messagesAdded ?? []).flatMap((m) => (m.message?.id ? [m.message.id] : [])),
-            ...(h.labelsAdded ?? []).flatMap((m) =>
-              m.labelIds?.includes('INBOX') && m.message?.id ? [m.message.id] : [],
-            ),
-          ]);
-          await ingest(ids);
-          latest = page.data.historyId ?? latest;
-          pageToken = page.data.nextPageToken ?? undefined;
-        } while (pageToken);
-        return latest;
-      });
+          return latest;
+        },
+        { signal },
+      );
       // Recover the DB-insert / queue-send gap even when the history no longer returns that email,
       // and resume emails that waited for AI access.
+      deadline();
       await reofferPendingEmails(userId, heartbeat);
       await heartbeat();
       const lastSyncedAt = new Date();
-      checkpointCommitted = null;
-      const committed = await withOwnedSync(userId, connection.id, claim, (tx) =>
-        tx.gmailConnection.updateMany({
+      const committed = await withOwnedSync(userId, connection.id, claim, (tx) => {
+        deadline();
+        checkpointCommitted = null;
+        return tx.gmailConnection.updateMany({
           where: { id: connection.id, userId, syncClaim: claim, status: 'CONNECTED' },
           data: {
             syncStatus: 'IDLE',
@@ -300,8 +326,8 @@ export class GmailSyncService {
               unscannedUntil: window.unscanned.until,
             }),
           },
-        }),
-      );
+        });
+      });
       if (committed.count !== 1) {
         checkpointCommitted = false;
         throw new SyncSupersededError();
@@ -323,7 +349,12 @@ export class GmailSyncService {
         }),
       );
       return { synced: true, messagesIngested, messagesSkipped, lastSyncedAt, checkpointAdvanced };
-    } catch (error) {
+    } catch (caught) {
+      const error = signal?.aborted
+        ? budget?.aborted && signal.reason === budget.reason
+          ? new SyncDeadlineError()
+          : new SyncCancelledError()
+        : caught;
       const superseded = error instanceof SyncSupersededError;
       if (superseded) checkpointCommitted = false;
       if (connectionId && !superseded) {

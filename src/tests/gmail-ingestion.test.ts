@@ -394,20 +394,12 @@ describe('request ownership fencing', () => {
     },
   );
 
-  it('stops at the four-minute budget before an insert', async () => {
+  it('stops a cancelled delivery before inserting the just-fetched message', async () => {
     const original = await mocks.get.getMockImplementation()!({ id: 'message-a' });
-    const now = Date.now();
-    const clock = vi.spyOn(Date, 'now');
-    mocks.get.mockImplementationOnce(async () => {
-      clock.mockReturnValue(now + 240001);
-      return original;
-    });
-    try {
-      await expect(GmailSyncService.syncUser(userId)).rejects.toThrow('time budget');
-      expect(await prisma.email.count({ where: { userId } })).toBe(0);
-    } finally {
-      clock.mockRestore();
-    }
+    const controller = new AbortController();
+    mocks.get.mockImplementationOnce(async () => { controller.abort(); return original; });
+    await expect(GmailSyncService.syncUser(userId, undefined, { signal: controller.signal })).rejects.toThrow('cancelled');
+    expect(await prisma.email.count({ where: { userId } })).toBe(0);
   });
 
   it('retains the request across partial failure and retries without duplicate email rows', async () => {

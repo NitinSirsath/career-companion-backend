@@ -77,6 +77,14 @@ describe('email worker attributable outcomes', () => {
     expect(gemini).not.toHaveBeenCalled();
   });
 
+  it('passes the delivery cancellation signal into the email pipeline', async () => {
+    const controller = new AbortController();
+    const run = vi.spyOn(EmailAIPipeline, 'processEmail').mockResolvedValue(undefined);
+    const delivery = { ...job(), signal: controller.signal };
+    await processEmailJob(delivery);
+    expect(run).toHaveBeenCalledWith(userId, emailId, { signal: controller.signal });
+  });
+
   it('schedules a retry for a retryable failure before the final attempt', async () => {
     vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(new RetryableAIError('AI operation not ready'));
     await expect(processEmailJob(job(1))).rejects.toThrow();

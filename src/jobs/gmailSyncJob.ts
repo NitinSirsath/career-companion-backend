@@ -10,6 +10,8 @@ import {
   syncLease,
 } from '../services/gmailSync';
 
+export const GMAIL_SYNC_EXPIRE_SECONDS = 300;
+
 export async function requestGmailSync(userId: string, trigger: 'manual' | 'scheduled' = 'manual') {
   const claim = `queued:${randomUUID()}`;
   const accepted = await prisma.gmailConnection.updateMany({
@@ -35,7 +37,7 @@ export async function requestGmailSync(userId: string, trigger: 'manual' | 'sche
         retryLimit: 3,
         retryDelay: 60,
         retryBackoff: true,
-        expireInSeconds: 300,
+        expireInSeconds: GMAIL_SYNC_EXPIRE_SECONDS,
       },
     );
     if (!id) throw new Error('Sync job was not queued');
@@ -78,6 +80,7 @@ export async function handleGmailSyncJobs(jobs: JobWithMetadata<GmailSyncJobData
         jobId: job.id,
         retryCount: job.retryCount,
         retryLimit: job.retryLimit,
+        signal: job.signal,
       });
     } catch (error) {
       if (!(error instanceof GmailAuthError) && !(error instanceof SyncSupersededError))

@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { OAuth2Client } from 'google-auth-library';
+import { createGoogleOAuthClient, GOOGLE_OAUTH_TIMEOUT_MS } from '../services/googleTransport';
 import { prisma } from '../db/prisma';
 
 const router = Router();
@@ -40,7 +40,12 @@ function createOAuth2Client() {
     );
   }
 
-  return new OAuth2Client(clientId, clientSecret, redirectUri);
+  return createGoogleOAuthClient({
+    clientId,
+    clientSecret,
+    redirectUri,
+    timeoutMs: GOOGLE_OAUTH_TIMEOUT_MS,
+  });
 }
 
 function getFrontendUrl(): string {

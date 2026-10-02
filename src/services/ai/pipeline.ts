@@ -24,7 +24,7 @@ function provenance(
 }
 
 export class EmailAIPipeline {
-  static async processEmail(userId: string, emailId: string): Promise<void> {
+  static async processEmail(userId: string, emailId: string, options: { signal?: AbortSignal } = {}): Promise<void> {
     const email = await prisma.email.findUnique({
       where: { id: emailId, userId },
       include: { aiProcessingResult: true },
@@ -42,7 +42,7 @@ export class EmailAIPipeline {
       throw new TerminalAIError('Legacy partial AI result requires reconciliation');
 
     // Metadata/body are transient and fetched before reserving a provider call.
-    const gmail = await GmailFetcherService.fetchMessageMetadata(userId, email.gmailMessageId);
+    const gmail = await GmailFetcherService.fetchMessageMetadata(userId, email.gmailMessageId, options);
     const labels = gmail.labelIds ?? [];
     const deterministic = labels.some((label) =>
       ['CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'SPAM'].includes(label),
@@ -91,7 +91,7 @@ export class EmailAIPipeline {
       update: data,
     });
     if (decision !== 'IRRELEVANT') {
-      const body = await GmailFetcherService.fetchMessageBody(userId, email.gmailMessageId);
+      const body = await GmailFetcherService.fetchMessageBody(userId, email.gmailMessageId, options);
       const extraction = await runOperation({
         userId,
         emailId,
