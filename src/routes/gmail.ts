@@ -1,3 +1,4 @@
+import { nextScheduledSyncAt } from '../services/gmailSchedule';
 import { SyncQueueError } from '../services/gmailSyncErrors';
 /**
  * Gmail OAuth routes (COM-19).
@@ -95,6 +96,7 @@ router.get('/status', async (req: Request, res: Response, next: NextFunction) =>
         syncStatus: null,
         lastSyncedAt: null,
         unscannedGap: null,
+        nextScheduledSyncAt: null,
         syncLookbackDays: 1,
       });
     }
@@ -110,6 +112,7 @@ router.get('/status', async (req: Request, res: Response, next: NextFunction) =>
           : connection.syncStatus,
       syncError: connection.syncError,
       lastSyncedAt: connection.lastSyncedAt,
+      nextScheduledSyncAt: nextScheduledSyncAt(connection.status === 'CONNECTED'),
       unscannedGap:
         connection.unscannedFrom && connection.unscannedUntil
           ? {

@@ -1,3 +1,4 @@
+import { GMAIL_SCHEDULE_QUEUE, setGmailScheduleRegistered } from './gmailSchedule';
 import { PgBoss } from 'pg-boss';
 import { errorCategory } from '../utils/errorCategory';
 
@@ -20,7 +21,7 @@ export function getQueue(): Promise<PgBoss> {
       );
       try {
         await boss.start();
-        for (const name of QUEUE_NAMES) await boss.createQueue(name);
+        for (const name of [...QUEUE_NAMES, GMAIL_SCHEDULE_QUEUE]) await boss.createQueue(name);
         started = boss;
         return boss;
       } catch (error) {
@@ -35,6 +36,7 @@ export function getQueue(): Promise<PgBoss> {
 }
 
 export async function stopQueue(): Promise<void> {
+  setGmailScheduleRegistered(false);
   const current = starting;
   started = undefined;
   try {

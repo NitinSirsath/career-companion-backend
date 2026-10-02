@@ -202,3 +202,13 @@ Tool results (`structuredContent`): `{ result: created | linked | needs_review |
 ### Worker readiness
 
 Workers retry registration with bounded backoff (about two minutes of waits, plus connection timeouts), then exit with code 1 if they cannot start. Start PostgreSQL first; restart the backend after an exhausted startup (`npm run dev` otherwise waits for a file change). `GET /health` is HTTP liveness only. `curl -i http://localhost:3000/ready` returns 200 only when every worker is registered, and 503 during startup or when a registration is missing. Readiness uses in-memory registration state; it does not prove ongoing database/provider health.
+
+### Automatic Gmail sync (Sprint 7)
+
+With the backend running, connected accounts sync at 00:00 and 18:00 in
+`GMAIL_SCHEDULED_SYNC_TZ` (default `Asia/Kolkata`). Startup checks for a missed slot;
+pg-boss also catches a missed slot after suspension. Successful/recent and busy
+accounts are skipped. Set `GMAIL_SCHEDULED_SYNC_ENABLED=false` and restart to
+remove the durable schedule before rolling back scheduling code. Status reports
+`nextScheduledSyncAt` only after local schedule registration. Real two-day
+Gmail observation remains pending; automated checks use fixture mail.

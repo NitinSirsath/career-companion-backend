@@ -1,3 +1,5 @@
+import { startGmailScheduledSync } from './gmailScheduledSyncJob';
+import { GMAIL_SCHEDULE_QUEUE } from '../services/gmailSchedule';
 import { startGmailSyncWorker } from './gmailSyncJob';
 import { startEmailProcessingWorker } from './emailProcessingJob';
 import { startNotificationWorker } from './notificationJob';
@@ -11,6 +13,11 @@ export interface WorkerRegistration {
 }
 export function defaultWorkers(): WorkerRegistration[] {
   return [
+    {
+      queue: GMAIL_SCHEDULE_QUEUE,
+      start: () => startGmailScheduledSync(),
+      failureEvent: 'gmail_schedule_start_failed',
+    },
     {
       queue: QUEUE_NAMES[2],
       start: startGmailSyncWorker,

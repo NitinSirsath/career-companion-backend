@@ -436,7 +436,7 @@ describe('request ownership fencing', () => {
       })),
     });
     mocks.list.mockResolvedValue({ data: { messages: [] } });
-    await GmailSyncService.syncUser(userId);
+    await GmailSyncService.syncUser(userId, undefined, { trigger: 'scheduled' });
     expect(enqueueEmailProcessingJob).toHaveBeenCalledTimes(100);
     vi.mocked(enqueueEmailProcessingJob).mockClear();
     vi.mocked(enqueueEmailProcessingJob).mockImplementationOnce(async () => {

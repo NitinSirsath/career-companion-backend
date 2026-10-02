@@ -186,3 +186,10 @@ New deadlines use explicit parsing anchored to the email's received UTC date (on
 ### Worker startup (Sprint 7)
 
 Check `/ready` for all workers registered; `/health` only proves the HTTP process is up. Logs include worker_registered, workers_ready, *_worker_start_failed, worker_start_gave_up and queue_error. Startup retries failed workers only, then exits 1. Driver errors include category and allowlisted code, never messages or stacks. Readiness intentionally does not probe database availability after startup.
+
+2026-10-03: Scheduled Gmail fan-out uses the existing per-user request/attempt
+claims. It runs twice daily in Asia/Kolkata with startup and missed-slot catch-up.
+Registration participates in bounded startup retries and readiness. The local
+crash harness (`scripts/test-gmail-crash.cjs`) verifies SIGKILL recovery on an empty
+explicit `*_crash_test` database. Neither harness evidence nor registration proves
+real scheduled execution on the owner's Gmail account.

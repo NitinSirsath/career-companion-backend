@@ -1,3 +1,8 @@
+import {
+  GMAIL_SCHEDULE_QUEUE,
+  gmailScheduleConfig,
+  isGmailScheduleRegistered,
+} from '../services/gmailSchedule';
 import { Router } from 'express';
 import { getStartedQueue, QUEUE_NAMES } from '../services/queue';
 export const healthRouter = Router();
@@ -7,15 +12,19 @@ healthRouter.get('/health', (_req, res) => {
 healthRouter.get('/ready', (_req, res) => {
   const active = getStartedQueue()?.getWipData() ?? [];
   const workers = Object.fromEntries(
-    QUEUE_NAMES.map((name) => [
-      name,
-      active.some(
-        (worker) =>
-          worker.name === name && (worker.state === 'created' || worker.state === 'active'),
-      )
-        ? 'registered'
-        : 'not_registered',
-    ]),
+    [...QUEUE_NAMES, ...(gmailScheduleConfig().enabled ? [GMAIL_SCHEDULE_QUEUE] : [])].map(
+      (name) => [
+        name,
+        active.some(
+          (worker) =>
+            (name !== GMAIL_SCHEDULE_QUEUE || isGmailScheduleRegistered()) &&
+            worker.name === name &&
+            (worker.state === 'created' || worker.state === 'active'),
+        )
+          ? 'registered'
+          : 'not_registered',
+      ],
+    ),
   );
   const ready = Object.values(workers).every((state) => state === 'registered');
   res

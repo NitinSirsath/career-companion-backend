@@ -1,3 +1,4 @@
+import { GMAIL_SCHEDULE_QUEUE } from '../services/gmailSchedule';
 import { afterAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { app } from '../index';
@@ -5,6 +6,7 @@ import { getQueue, getStartedQueue, stopQueue, QUEUE_NAMES } from '../services/q
 import { defaultWorkers, startWorkers } from '../jobs/startWorkers';
 import { prisma } from '../db/prisma';
 afterAll(async () => {
+  if (getStartedQueue()) await getStartedQueue()!.unschedule(GMAIL_SCHEDULE_QUEUE);
   await stopQueue();
 });
 describe('liveness and worker readiness', () => {
@@ -16,7 +18,7 @@ describe('liveness and worker readiness', () => {
     const ready = await request(app).get('/ready');
     expect(ready.status).toBe(503);
     expect(ready.body.workers).toEqual(
-      Object.fromEntries(QUEUE_NAMES.map((n) => [n, 'not_registered'])),
+      Object.fromEntries([...QUEUE_NAMES, GMAIL_SCHEDULE_QUEUE].map((n) => [n, 'not_registered'])),
     );
     for (const res of [health, ready]) {
       expect(res.headers['access-control-allow-origin']).toBeUndefined();
@@ -33,7 +35,7 @@ describe('liveness and worker readiness', () => {
     expect(ready.status).toBe(200);
     expect(ready.headers['cache-control']).toBe('no-store');
     expect(ready.body.workers).toEqual(
-      Object.fromEntries(QUEUE_NAMES.map((n) => [n, 'registered'])),
+      Object.fromEntries([...QUEUE_NAMES, GMAIL_SCHEDULE_QUEUE].map((n) => [n, 'registered'])),
     );
     await queue.offWork('discord-notification-job', { wait: true });
     const stopped = await request(app).get('/ready');

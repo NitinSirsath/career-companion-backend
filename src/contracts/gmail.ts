@@ -29,6 +29,7 @@ export const GmailStatusResponseSchema = z.object({
   syncError: z.string().nullable().optional(),
   lastSyncedAt: z.date().nullable().or(z.string().nullable()),
   syncLookbackDays: z.number().optional(),
+  nextScheduledSyncAt: IsoDateTime.nullable().optional(),
   unscannedGap: z.object({ from: IsoDateTime, until: IsoDateTime }).nullable().optional(),
 });
 export type GmailStatusResponse = z.infer<typeof GmailStatusResponseSchema>;
