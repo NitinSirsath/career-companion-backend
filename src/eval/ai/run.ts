@@ -16,13 +16,14 @@ import {
   CLASSIFICATION_INPUT_LIMITS as LIMITS,
   EXTRACTION_BODY_LIMIT,
 } from '../../services/ai/contracts';
-import { ProviderFailure } from '../../services/ai/errors';
+import { evaluateCall } from './call';
 import { createProviderClient } from '../../services/ai/providers';
 import {
-  CallOutcome,
   CaseRun,
-  Metrics,
   THRESHOLDS,
+  baselineMetrics,
+  evaluationOutcome,
+  isRefused,
   failures,
   loadDataset,
   score,
@@ -36,23 +37,18 @@ function option(name: string): string | undefined {
   return index === -1 ? undefined : process.argv[index + 1];
 }
 
-async function timed<T>(call: () => Promise<T>): Promise<{ value?: T } & Omit<CallOutcome, 'valid' | 'inputTokens' | 'outputTokens'>> {
-  const started = Date.now();
-  try {
-    return { value: await call(), latencyMs: Date.now() - started };
-  } catch (err) {
-    const error = err instanceof ProviderFailure ? err.kind : err instanceof Error ? err.name : 'UnknownError';
-    return { error, latencyMs: Date.now() - started };
-  }
-}
-
 async function main() {
-  if (process.env.NODE_ENV === 'production') throw new Error('The AI evaluation runner never runs in production');
+  if (process.env.NODE_ENV === 'production')
+    throw new Error('The AI evaluation runner never runs in production');
   const providerId = option('provider') ?? '';
   const provider = getCatalogProvider(providerId);
   const fast = option('fast');
   const detailed = option('detailed');
   const runs = Number(option('runs') ?? 2);
+  const delayMs = Number(option('delay-ms') ?? 0);
+  if (!Number.isInteger(delayMs) || delayMs < 0 || delayMs > 120000)
+    throw new Error('--delay-ms must be 0-120000');
+  const timed = <T>(call: () => Promise<T>) => evaluateCall(call, { delayMs });
   const apiKey = process.env.AI_EVAL_API_KEY;
   if (!provider) throw new Error('--provider must be a catalog provider');
   // Only catalog models are evaluated: candidates are added as hidden catalog entries first.
@@ -64,15 +60,15 @@ async function main() {
   if (!Number.isInteger(runs) || runs < 1 || runs > 5) throw new Error('--runs must be 1-5');
   if (!apiKey) throw new Error('Set AI_EVAL_API_KEY in the shell (never in an .env file)');
   const baselineFile = option('baseline');
-  const baseline: Metrics | undefined = baselineFile
-    ? JSON.parse(fs.readFileSync(baselineFile, 'utf8')).metrics
+  const baseline = baselineFile
+    ? baselineMetrics(JSON.parse(fs.readFileSync(baselineFile, 'utf8')))
     : undefined;
 
   const cases = loadDataset();
   const models = { fast: catalogModel('fast', fast), detailed: catalogModel('detailed', detailed) };
   const ai = bindCapabilities(createProviderClient(provider, apiKey), models);
   const results: CaseRun[] = [];
-  for (let run = 1; run <= runs; run++) {
+  evaluation: for (let run = 1; run <= runs; run++) {
     for (const c of cases) {
       const classified = await timed(() =>
         ai.classifier.classifyRelevance({
@@ -88,6 +84,9 @@ async function main() {
         classification: {
           valid: !!classified.value,
           error: classified.error,
+          status: classified.status,
+          providerCode: classified.providerCode,
+          retryAfterMs: classified.retryAfterMs,
           latencyMs: classified.latencyMs,
           inputTokens: classified.value?.usage.inputTokens ?? null,
           outputTokens: classified.value?.usage.outputTokens ?? null,
@@ -96,12 +95,21 @@ async function main() {
           confidence: classified.value?.data.confidence,
         },
       };
+      if (isRefused(result.classification)) {
+        results.push(result);
+        break evaluation;
+      }
       // Extraction quality is measured independently of the classification outcome.
       if (c.expect.relevance !== 'IRRELEVANT') {
-        const extracted = await timed(() => ai.analyzer.extractJobData(c.input.body.slice(0, EXTRACTION_BODY_LIMIT)));
+        const extracted = await timed(() =>
+          ai.analyzer.extractJobData(c.input.body.slice(0, EXTRACTION_BODY_LIMIT)),
+        );
         result.extraction = {
           valid: !!extracted.value,
           error: extracted.error,
+          status: extracted.status,
+          providerCode: extracted.providerCode,
+          retryAfterMs: extracted.retryAfterMs,
           latencyMs: extracted.latencyMs,
           inputTokens: extracted.value?.usage.inputTokens ?? null,
           outputTokens: extracted.value?.usage.outputTokens ?? null,
@@ -109,6 +117,7 @@ async function main() {
         };
       }
       results.push(result);
+      if (result.extraction && isRefused(result.extraction)) break evaluation;
       process.stdout.write('.');
     }
   }
@@ -116,6 +125,7 @@ async function main() {
 
   const metrics = score(cases, results);
   const failed = failures(metrics, baseline);
+  const outcome = evaluationOutcome(metrics, baseline);
   const createdAt = new Date().toISOString();
   const report = {
     createdAt,
@@ -127,7 +137,8 @@ async function main() {
     thresholds: THRESHOLDS,
     baseline: baselineFile ? path.basename(baselineFile) : null,
     metrics,
-    passed: failed.length === 0,
+    outcome,
+    passed: outcome === 'PASS',
     failures: failed,
     results,
   };
@@ -135,13 +146,15 @@ async function main() {
   fs.mkdirSync(REPORTS_DIR, { recursive: true });
   const file = path.join(
     REPORTS_DIR,
-    `${createdAt.slice(0, 10)}_${safe(provider.id)}_${safe(models.fast.id)}_${safe(models.detailed.id)}.json`,
+    `${createdAt.replace(/[:.]/g, '-')}_${safe(provider.id)}_${safe(models.fast.id)}_${safe(models.detailed.id)}.json`,
   );
-  fs.writeFileSync(file, `${JSON.stringify(report, null, 2)}\n`);
+  fs.writeFileSync(file, `${JSON.stringify(report, null, 2)}\n`, { flag: 'wx' });
   console.table(metrics);
-  console.log(failed.length ? `FAIL: ${failed.join('; ')}` : 'PASS');
+  console.log(
+    `${outcome}: ${metrics.refusedCalls} calls refused (${JSON.stringify(metrics.refusedByKind)})${failed.length ? '; ' + failed.join('; ') : ''}`,
+  );
   console.log(`Report: ${path.relative(process.cwd(), file)}`);
-  process.exitCode = failed.length ? 1 : 0;
+  process.exitCode = outcome === 'PASS' ? 0 : outcome === 'FAIL' ? 1 : 2;
 }
 
 main().catch((err: unknown) => {
