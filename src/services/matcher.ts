@@ -1,3 +1,4 @@
+import { parseActionDeadline } from '../utils/actionDeadline';
 import { prisma } from '../db/prisma';
 import {
   ApplicationStatus,
@@ -196,7 +197,11 @@ export class MatcherService {
       const deadlineText = aiResult.actionRequired
         ? aiResult.actionDeadline
         : aiResult.followUpDate;
-      const deadline = deadlineText ? new Date(deadlineText) : null;
+      const parsed = parseActionDeadline(deadlineText, email.receivedAt);
+      if (deadlineText?.trim() && !parsed.deadline)
+        console.log(
+          JSON.stringify({ event: 'action_deadline_unclear', emailId, reason: parsed.reason }),
+        );
       const action = await tx.action.create({
         data: {
           applicationId,
@@ -205,7 +210,8 @@ export class MatcherService {
           description: aiResult.actionRequired
             ? aiResult.requestedAction || 'Action required'
             : 'Follow up required',
-          deadline: deadline && !isNaN(deadline.getTime()) ? deadline : null,
+          deadline: parsed.deadline,
+          deadlinePrecision: parsed.precision,
         },
       });
       return action.id;

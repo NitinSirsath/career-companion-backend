@@ -152,6 +152,7 @@ export const ApplicationActionResponseSchema = z.object({
   type: z.string(),
   description: z.string().nullable(),
   deadline: z.union([z.date(), z.string()]).nullable(),
+  deadlinePrecision: z.enum(['DATE', 'DATETIME']).nullable(),
   status: z.string(),
   createdAt: z.union([z.date(), z.string()]),
 });

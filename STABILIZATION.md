@@ -178,3 +178,7 @@ Teardown order: close the browser, stop HTTP intake and worker fetch, drain in-f
 ### Sprint 7 bounded scan window
 
 The first sync uses the configured lookback. Later syncs cover the time since the last successful sync, with a one-hour overlap and a 30-day cap. The Gmail page retains an unscanned-gap notice when the cap excludes older mail, until a newer capped scan replaces it. A failed attempt does not advance checkpoints or replace the notice. Reconnecting the same mailbox follows the same rule. Stored completed emails and user matches are preserved.
+
+### Action deadlines (Sprint 7)
+
+New deadlines use explicit parsing anchored to the email's received UTC date (one-day sender allowance); relative, numeric non-ISO, invalid and unclear dates remain null. Date-only values carry DATE precision and display without an invented time in the UI and Discord. Existing actions retain their values and null legacy precision; no backfill or AI replay occurs.

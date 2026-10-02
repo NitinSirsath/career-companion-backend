@@ -378,6 +378,7 @@ export class ApplicationService {
         type: true,
         description: true,
         deadline: true,
+        deadlinePrecision: true,
         status: true,
         createdAt: true,
       },
@@ -390,6 +391,7 @@ export class ApplicationService {
       type: a.type,
       description: a.description,
       deadline: a.deadline,
+      deadlinePrecision: a.deadlinePrecision,
       status: a.status,
       createdAt: a.createdAt,
     }));

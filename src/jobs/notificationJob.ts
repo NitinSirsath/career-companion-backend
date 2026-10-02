@@ -102,6 +102,7 @@ export async function startNotificationWorker() {
       actionRequested: action.description || action.type,
       actionType: action.type,
       deadline: action.deadline ? action.deadline.toISOString() : null,
+      deadlinePrecision: action.deadlinePrecision,
     };
 
     // Commit a claim before delivery. A crash after sending leaves it claimed;

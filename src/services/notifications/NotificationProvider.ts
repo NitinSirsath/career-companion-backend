@@ -5,6 +5,7 @@ export interface NotificationPayload {
   actionRequested: string; // The specific action e.g. "Send thank you note"
   actionType: string;
   deadline?: string | null;
+  deadlinePrecision?: 'DATE' | 'DATETIME' | null;
 }
 
 export interface NotificationResult {

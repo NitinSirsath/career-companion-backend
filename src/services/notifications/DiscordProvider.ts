@@ -30,7 +30,15 @@ export class DiscordProvider implements NotificationProvider {
       if (payload.deadline) {
         embed.fields.push({
           name: 'Deadline',
-          value: new Date(payload.deadline).toLocaleString(),
+          value:
+            payload.deadlinePrecision === 'DATE'
+              ? new Date(payload.deadline).toLocaleDateString('en-US', {
+                  timeZone: 'UTC',
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric',
+                })
+              : new Date(payload.deadline).toLocaleString(),
           inline: false,
         });
       }

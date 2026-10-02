@@ -259,7 +259,13 @@ model ApplicationEvent {
   @@map("application_events")
 }
 
+enum DeadlinePrecision {
+  DATE
+  DATETIME
+}
+
 model Action {
+  deadlinePrecision DeadlinePrecision?
   id            String    @id @default(uuid()) @db.Uuid
   applicationId String    @db.Uuid
   emailId       String?   @db.Uuid

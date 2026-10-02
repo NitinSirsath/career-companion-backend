@@ -48,6 +48,7 @@ export class ActionService {
       type: action.type,
       description: action.description,
       deadline: action.deadline ? action.deadline.toISOString() : null,
+      deadlinePrecision: action.deadlinePrecision,
       status: action.status,
       createdAt: action.createdAt.toISOString(),
       application: {
@@ -125,6 +126,7 @@ export class ActionService {
       type: updatedAction.type,
       description: updatedAction.description,
       deadline: updatedAction.deadline ? updatedAction.deadline.toISOString() : null,
+      deadlinePrecision: updatedAction.deadlinePrecision,
       status: updatedAction.status,
       createdAt: updatedAction.createdAt.toISOString(),
       application: {
