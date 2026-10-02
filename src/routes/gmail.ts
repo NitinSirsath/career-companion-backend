@@ -1,3 +1,4 @@
+import { EMAIL_PROCESSING_STUCK_MS } from '../jobs/emailProcessingJob';
 import { nextScheduledSyncAt } from '../services/gmailSchedule';
 import { SyncQueueError } from '../services/gmailSyncErrors';
 /**
@@ -459,6 +460,7 @@ router.get('/messages', async (req: Request, res: Response, next: NextFunction) 
         relevanceState: true,
         matchState: true,
         processingState: true,
+        updatedAt: true,
         processingErrorCategory: true,
         processingErrorDetails: true,
         processingErrorStage: true,
@@ -468,7 +470,12 @@ router.get('/messages', async (req: Request, res: Response, next: NextFunction) 
       },
     });
 
-    return res.status(200).json(createPaginatedResponse(messages, limit, offset));
+    const cutoff = Date.now() - EMAIL_PROCESSING_STUCK_MS;
+    const items = messages.map(({ updatedAt, ...message }) => ({
+      ...message,
+      processingStuck: message.processingState === 'PROCESSING' && updatedAt.getTime() < cutoff,
+    }));
+    return res.status(200).json(createPaginatedResponse(items, limit, offset));
   } catch (err) {
     next(err);
   }

@@ -6,6 +6,9 @@ import { EmailAIPipeline } from '../services/ai/pipeline';
 
 export const EMAIL_PROCESSING_JOB = 'email-processing-job';
 export const EMAIL_RETRY_LIMIT = 3;
+// 300s expiry + ~120s detection + 60 * 2^3 backoff; also clears the
+// 15-minute uncertain AI claim threshold by five minutes.
+export const EMAIL_PROCESSING_STUCK_MS = 20 * 60_000;
 
 export interface EmailProcessingJobData {
   userId: string;
@@ -16,7 +19,8 @@ export const emailJobOptions = (userId: string, emailId: string, approval?: numb
   // Stable idempotency identity based on (userId, emailId). A user-approved retry of a held
   // operation has its own identity per approval: the failed delivery still holds the email's
   // 5-minute slot, and approvals cannot race (compare-and-set) while held emails get no other jobs.
-  singletonKey: approval === undefined ? `${userId}-${emailId}` : `${userId}-${emailId}-approved-${approval}`,
+  singletonKey:
+    approval === undefined ? `${userId}-${emailId}` : `${userId}-${emailId}-approved-${approval}`,
   singletonSeconds: 300,
   retryLimit: EMAIL_RETRY_LIMIT,
   retryDelay: 60,
@@ -31,7 +35,11 @@ export async function enqueueEmailProcessingJob(
   approval?: number,
 ): Promise<string | null> {
   const queue = await getQueue();
-  return queue.send(EMAIL_PROCESSING_JOB, { userId, emailId }, emailJobOptions(userId, emailId, approval));
+  return queue.send(
+    EMAIL_PROCESSING_JOB,
+    { userId, emailId },
+    emailJobOptions(userId, emailId, approval),
+  );
 }
 
 /**
@@ -89,9 +97,7 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
   const startTime = Date.now();
   const attempt = { retryCount: job.retryCount, retryLimit: job.retryLimit };
 
-  console.log(
-    JSON.stringify({ event: 'job_started', jobId: job.id, emailId, ...attempt }),
-  );
+  console.log(JSON.stringify({ event: 'job_started', jobId: job.id, emailId, ...attempt }));
 
   try {
     // The worker alone moves an email (including a manually retried FAILED one) into PROCESSING.

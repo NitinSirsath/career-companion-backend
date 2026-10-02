@@ -60,6 +60,8 @@ export const EmailMessageSchema = z.object({
   receivedAt: z.union([z.string(), z.date()]).nullable(),
   relevanceState: EmailRelevanceStateSchema,
   matchState: EmailMatchStateSchema,
+  // Server-derived inactivity signal; timestamps remain private.
+  processingStuck: z.boolean().optional(),
   processingState: z.enum(['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED']).optional(),
   processingErrorCategory: z.string().nullable().optional(),
   processingErrorDetails: z.string().nullable().optional(),

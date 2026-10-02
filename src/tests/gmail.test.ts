@@ -1,3 +1,5 @@
+import { EMAIL_PROCESSING_STUCK_MS, emailJobOptions } from '../jobs/emailProcessingJob';
+import { STALE_PROCESSING_MS } from '../services/ai/heldOperations';
 import { GmailStatusResponseSchema } from '../contracts/gmail';
 import { GmailSyncService } from '../services/gmailSync';
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -21,7 +23,8 @@ import { prisma } from '../db/prisma';
 import { encryptToken } from '../utils/gmailTokenEncryption';
 import { configureAI } from './helpers/aiAccess';
 
-vi.mock('../jobs/emailProcessingJob', () => ({
+vi.mock('../jobs/emailProcessingJob', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../jobs/emailProcessingJob')>()),
   enqueueEmailProcessingJob: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -606,6 +609,50 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       expect(res.body.items).toEqual([]);
     });
 
+    it('keeps the stuck threshold beyond job retry and uncertain-call bounds', () => {
+      const options = emailJobOptions('user', 'email');
+      expect(EMAIL_PROCESSING_STUCK_MS).toBe(20 * 60000);
+      expect(EMAIL_PROCESSING_STUCK_MS).toBeGreaterThan(
+        (options.expireInSeconds + 120 + options.retryDelay * 2 ** options.retryLimit) * 1000,
+      );
+      expect(EMAIL_PROCESSING_STUCK_MS).toBeGreaterThanOrEqual(STALE_PROCESSING_MS + 5 * 60000);
+    });
+
+    it('computes stuck state from row inactivity without exposing its timestamp', async () => {
+      const old = new Date(Date.now() - 21 * 60000);
+      const data = [
+        { gmailMessageId: 'stuck', processingState: 'PROCESSING' as const, updatedAt: old },
+        { gmailMessageId: 'live', processingState: 'PROCESSING' as const, updatedAt: new Date() },
+        { gmailMessageId: 'pending', processingState: 'PENDING' as const, updatedAt: old },
+        { gmailMessageId: 'done', processingState: 'COMPLETED' as const, updatedAt: old },
+      ];
+      await prisma.email.createMany({ data: data.map((row) => ({ ...row, userId: testUser.id })) });
+      const res = await request(app)
+        .get('/api/gmail/messages')
+        .set('X-Development-User', testUser.email);
+      expect(res.status).toBe(200);
+      expect(
+        Object.fromEntries(
+          res.body.items.map((row: { gmailMessageId: string; processingStuck: boolean }) => [
+            row.gmailMessageId,
+            row.processingStuck,
+          ]),
+        ),
+      ).toEqual({ stuck: true, live: false, pending: false, done: false });
+      expect(res.body.items.every((row: object) => !('updatedAt' in row))).toBe(true);
+      await prisma.email.updateMany({
+        where: { userId: testUser.id, gmailMessageId: 'stuck' },
+        data: { processingState: 'PROCESSING' },
+      });
+      expect(
+        (
+          await prisma.email.findUniqueOrThrow({
+            where: { userId_gmailMessageId: { userId: testUser.id, gmailMessageId: 'stuck' } },
+          })
+        ).updatedAt.getTime(),
+      ).toBeGreaterThan(old.getTime());
+    });
+
     it('returns messages matching the strict contract shape', async () => {
       await prisma.email.create({
         data: {
@@ -639,6 +686,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
         'processingFailedAt',
         'processingRetryable',
         'processingState',
+        'processingStuck',
         'receivedAt',
         'relevanceState',
         'sender',
