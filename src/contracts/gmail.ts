@@ -62,6 +62,8 @@ export const EmailMessageSchema = z.object({
   processingErrorStage: z.string().nullable().optional(),
   processingRetryable: z.boolean().nullable().optional(),
   processingFailedAt: z.union([z.string(), z.date()]).nullable().optional(),
+  /** Provenance of the AI result: which provider and model produced it (ADR-0001). */
+  aiProcessingResult: z.object({ provider: z.string(), model: z.string() }).nullable().optional(),
 });
 export type EmailMessage = z.infer<typeof EmailMessageSchema>;
 

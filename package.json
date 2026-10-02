@@ -16,7 +16,8 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:seed": "prisma db seed",
-    "db:reset": "prisma migrate reset"
+    "db:reset": "prisma migrate reset",
+    "ai:eval": "ts-node-dev --transpile-only src/eval/ai/run.ts"
   },
   "repository": {
     "type": "git",
@@ -31,7 +32,10 @@
   },
   "homepage": "https://github.com/NitinSirsath/career-companion-backend#readme",
   "dependencies": {
+    "@anthropic-ai/sdk": "0.131.0",
     "@google/genai": "^2.22.0",
+    "@modelcontextprotocol/node": "2.1.0",
+    "@modelcontextprotocol/server": "2.2.0",
     "@prisma/client": "^6.19.3",
     "connect-pg-simple": "^10.0.0",
     "cookie-parser": "^1.4.7",
@@ -41,12 +45,14 @@
     "express-session": "^1.19.0",
     "google-auth-library": "^11.0.2",
     "googleapis": "^180.0.0",
+    "openai": "7.27.0",
     "pg": "^8.23.0",
     "pg-boss": "^12.31.0",
     "zod": "^4.5.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@modelcontextprotocol/client": "2.2.0",
     "@types/connect-pg-simple": "^7.0.3",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",

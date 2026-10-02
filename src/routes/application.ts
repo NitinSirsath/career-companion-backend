@@ -1,7 +1,11 @@
 import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
-import { CreateApplicationRequestSchema } from '../contracts';
-import { ApplicationService } from '../services/application';
+import { CreateApplicationRequestSchema, UpdateApplicationStatusRequestSchema } from '../contracts';
+import {
+  ApplicationService,
+  ApplicationNotFoundError,
+  StatusConflictError,
+} from '../services/application';
 import { requireAuth } from '../middleware/auth';
 
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
@@ -89,6 +93,36 @@ router.get('/:id/actions', async (req: Request, res: Response, next: NextFunctio
 
     return res.status(200).json(createPaginatedResponse(actions, limit, offset));
   } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * PATCH /api/applications/:id/status
+ * Owned manual status set/change/clear guarded by expectedUserStatusRevision.
+ * 200 full canonical application · 400 VALIDATION_ERROR · 404 NOT_FOUND (missing or foreign)
+ * · 409 STATUS_CONFLICT (stale revision; reload before a deliberate retry).
+ */
+router.patch('/:id/status', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.auth!.user.id;
+    const id = z.uuid().parse(req.params.id);
+    const body = UpdateApplicationStatusRequestSchema.parse(req.body);
+    const { application, changed } = await ApplicationService.updateUserStatus(userId, id, body);
+    console.log(
+      JSON.stringify({
+        event: 'application_status_corrected',
+        applicationId: id,
+        changed,
+        revision: application.userStatusRevision,
+      }),
+    );
+    return res.status(200).json(application);
+  } catch (err) {
+    if (err instanceof ApplicationNotFoundError)
+      return res.status(404).json({ error: { code: err.code, message: err.message } });
+    if (err instanceof StatusConflictError)
+      return res.status(409).json({ error: { code: err.code, message: err.message } });
     next(err);
   }
 });

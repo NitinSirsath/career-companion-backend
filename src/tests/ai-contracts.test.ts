@@ -1,22 +1,17 @@
-import { GoogleGenAI, Type, Schema } from '@google/genai';
+import { createHash } from 'crypto';
+import { describe, expect, it } from 'vitest';
+import { Schema, Type } from '@google/genai';
 import { z } from 'zod';
 import {
-  RelevanceClassifier,
-  EmailAnalyzer,
-  RelevanceClassifierInput,
-  EmailRelevanceSchema,
-  EmailRelevanceResult,
-  JobExtractionSchema,
-  JobExtractionResult,
   AI_CONTRACT_VERSIONS,
-} from '../contracts';
-import {
-  AIProviderError,
-  RetryableAIError,
-  TerminalAIError,
-  SchemaValidationFailure,
-} from '../errors';
+  AIContract,
+  CLASSIFICATION_CONTRACT,
+  EXTRACTION_CONTRACT,
+} from '../services/ai/contracts';
+import { geminiSchema } from '../services/ai/providers/gemini';
 
+// Verbatim copies of the prompts and hand-written Gemini schemas that lived in
+// services/ai/gemini/GeminiProvider.ts before the provider-neutral seam (BYO AI, AI-01).
 const PROMPTS = {
   [AI_CONTRACT_VERSIONS.CLASSIFICATION]: `
 You are an AI assistant that determines if an email is related to a user's job search.
@@ -189,140 +184,36 @@ const nativeJobExtractionSchema: Schema = {
   ],
 };
 
-export class GeminiProvider implements RelevanceClassifier, EmailAnalyzer {
-  private client: GoogleGenAI;
-  private relevanceModel: string;
-  private extractionModel: string;
-  private static instance: GeminiProvider;
+// A version always means the same instructions and schema for every provider. Adding a new
+// contract version adds a row here; changing an existing row is a contract break.
+const FINGERPRINTS: Record<string, string> = {
+  'classification/v2': '99075c90f1aed1570951cb3bd6a487eb2af6432c3564f65822c28bf428780659',
+  'extraction/v2': '2919427b2419d8601aba25567f970f3b708072e3609fbf356e32c199ed02d7b5',
+};
+const fingerprint = (contract: AIContract<unknown>) =>
+  createHash('sha256')
+    .update(`${contract.version}\n${contract.instructions}\n${JSON.stringify(z.toJSONSchema(contract.schema))}`)
+    .digest('hex');
 
-  constructor() {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new TerminalAIError('GEMINI_API_KEY is not configured');
-    }
+describe('provider-neutral AI contracts', () => {
+  it('moved the prompts byte-for-byte with unchanged versions', () => {
+    expect(CLASSIFICATION_CONTRACT.version).toBe('classification/v2');
+    expect(EXTRACTION_CONTRACT.version).toBe('extraction/v2');
+    expect(CLASSIFICATION_CONTRACT.instructions).toBe(PROMPTS[AI_CONTRACT_VERSIONS.CLASSIFICATION]);
+    expect(EXTRACTION_CONTRACT.instructions).toBe(PROMPTS[AI_CONTRACT_VERSIONS.EXTRACTION]);
+  });
 
-    this.client = new GoogleGenAI({
-      apiKey,
-      httpOptions: { timeout: 30_000, retryOptions: { attempts: 1 } },
-    });
-    this.relevanceModel = process.env.GEMINI_RELEVANCE_MODEL || 'gemini-2.5-flash-lite';
-    this.extractionModel = process.env.GEMINI_EXTRACTION_MODEL || 'gemini-2.5-flash';
-  }
+  it('derives the Gemini schema equal to the former hand-written copy', () => {
+    // Zod's minimum/maximum on confidence scores are dropped from the Gemini dialect and still
+    // enforced by Zod validation; nothing else differs.
+    expect(geminiSchema(CLASSIFICATION_CONTRACT.schema)).toEqual(nativeEmailRelevanceSchema);
+    expect(geminiSchema(EXTRACTION_CONTRACT.schema)).toEqual(nativeJobExtractionSchema);
+  });
 
-  static getInstance(): GeminiProvider {
-    if (!this.instance) {
-      this.instance = new GeminiProvider();
-    }
-    return this.instance;
-  }
-
-  private mapError(err: unknown): never {
-    if (err instanceof TerminalAIError || err instanceof RetryableAIError) {
-      throw err;
-    }
-
-    const status =
-      typeof err === 'object' && err !== null && 'status' in err ? Number(err.status) : undefined;
-    if (status === 429 || status === 503)
-      throw new RetryableAIError('AI provider rejected request; retry after cooldown');
-    if (status && status >= 400 && status < 500)
-      throw new TerminalAIError('AI provider rejected request');
-    throw new AIProviderError('AI provider outcome unknown; reconciliation required', false);
-  }
-
-  private async generateStructuredOutput<T>(
-    model: string,
-    systemInstruction: string,
-    input: string,
-    schema: z.ZodSchema<T>,
-    nativeSchema: Schema,
-  ): Promise<T> {
-    try {
-      const response = await this.client.models.generateContent({
-        model,
-        contents: input,
-        config: {
-          systemInstruction,
-          responseMimeType: 'application/json',
-          responseSchema: nativeSchema,
-          temperature: 0.1,
-          maxOutputTokens: 2048,
-          thinkingConfig: { thinkingBudget: 0 },
-        },
-      });
-
-      console.log(
-        JSON.stringify({
-          event: 'ai_usage',
-          model,
-          inputTokens: response.usageMetadata?.promptTokenCount,
-          outputTokens: response.usageMetadata?.candidatesTokenCount,
-        }),
-      );
-      const text = response.text;
-      if (!text) {
-        throw new TerminalAIError('AI provider returned empty response');
-      }
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(text);
-      } catch (parseErr) {
-        throw new TerminalAIError('AI provider returned invalid JSON', parseErr);
-      }
-
-      const validationResult = schema.safeParse(parsed);
-      if (!validationResult.success) {
-        throw new SchemaValidationFailure(
-          'AI provider returned malformed structured data',
-          'Structured response failed validation',
-        );
-      }
-
-      return validationResult.data;
-    } catch (err) {
-      this.mapError(err);
-    }
-  }
-
-  async classifyRelevance(
-    input: RelevanceClassifierInput,
-  ): Promise<{ version: string; data: EmailRelevanceResult }> {
-    const version = AI_CONTRACT_VERSIONS.CLASSIFICATION;
-    const content = JSON.stringify(input);
-    const data = await this.generateStructuredOutput(
-      this.relevanceModel,
-      PROMPTS[version],
-      content,
-      EmailRelevanceSchema,
-      nativeEmailRelevanceSchema,
-    );
-
-    return { version, data };
-  }
-
-  async extractJobData(emailBody: string): Promise<{ version: string; data: JobExtractionResult }> {
-    const version = AI_CONTRACT_VERSIONS.EXTRACTION;
-    const data = await this.generateStructuredOutput(
-      this.extractionModel,
-      PROMPTS[version],
-      emailBody,
-      JobExtractionSchema,
-      nativeJobExtractionSchema,
-    );
-
-    return { version, data };
-  }
-
-  getProviderName(): string {
-    return 'gemini';
-  }
-
-  getRelevanceModel(): string {
-    return this.relevanceModel;
-  }
-
-  getExtractionModel(): string {
-    return this.extractionModel;
-  }
-}
+  it.each([CLASSIFICATION_CONTRACT, EXTRACTION_CONTRACT])(
+    'keeps $version bound to one prompt and schema',
+    (contract) => {
+      expect(fingerprint(contract as AIContract<unknown>)).toBe(FINGERPRINTS[contract.version]);
+    },
+  );
+});

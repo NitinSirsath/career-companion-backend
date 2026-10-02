@@ -1,0 +1,93 @@
+[
+  {
+    "id": "follow-up-recruiter-check-in",
+    "input": {
+      "sender": "Marco Bianchi <marco@talentbridge.example.org>",
+      "subject": "Following up",
+      "labels": [
+        "INBOX",
+        "CATEGORY_UPDATES"
+      ],
+      "body": "Hi Alex, following up on my note last week about the Staff Backend Engineer role at Woodgrove Payments. Is this still of interest?\nMarco"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": [
+        "FOLLOW_UP",
+        "RECRUITER"
+      ],
+      "fields": {
+        "jobTitle": {
+          "contains": [
+            "backend engineer"
+          ]
+        }
+      },
+      "mustBeNull": [
+        "offerInfo",
+        "rejectionInfo",
+        "interviewDate"
+      ]
+    },
+    "group": "follow-up"
+  },
+  {
+    "id": "follow-up-documents",
+    "input": {
+      "sender": "Relecloud People Team <people@relecloud.example.com>",
+      "subject": "Documents needed before your start date",
+      "labels": [
+        "INBOX",
+        "CATEGORY_UPDATES"
+      ],
+      "body": "Hi Alex,\n\nTo complete your onboarding, please upload two professional references and a copy of your work permit by November 20, 2026.\n\nThank you,\nRelecloud People Team"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": [
+        "FOLLOW_UP"
+      ],
+      "fields": {
+        "companyName": {
+          "contains": [
+            "relecloud"
+          ]
+        },
+        "actionRequired": {
+          "equals": true
+        },
+        "actionDeadline": {
+          "date": "2026-11-20"
+        }
+      },
+      "mustBeNull": [
+        "rejectionInfo"
+      ]
+    },
+    "group": "follow-up"
+  },
+  {
+    "id": "follow-up-thank-you-reply",
+    "input": {
+      "sender": "Daniel Okafor <daniel.okafor@northwind-robotics.example.com>",
+      "subject": "Re: Thank you",
+      "labels": [
+        "INBOX",
+        "CATEGORY_PERSONAL"
+      ],
+      "body": "Thanks for the kind note, Alex. It was great talking with you. We'll share an update on next steps by the end of next week.\nDaniel"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": [
+        "FOLLOW_UP",
+        "INTERVIEW"
+      ],
+      "mustBeNull": [
+        "offerInfo",
+        "rejectionInfo"
+      ]
+    },
+    "group": "follow-up"
+  }
+]

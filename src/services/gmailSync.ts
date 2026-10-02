@@ -3,6 +3,7 @@ import { gmail_v1 } from 'googleapis';
 import { prisma } from '../db/prisma';
 import { withGmail, googleStatus, googleAuthFailure } from './gmailClient';
 import { enqueueEmailProcessingJob } from '../jobs/emailProcessingJob';
+import { getAccessState } from './ai/access';
 
 export class SyncInProgressError extends Error {
   readonly code = 'SYNC_IN_PROGRESS';
@@ -18,6 +19,27 @@ export class GmailAuthError extends Error {
     this.name = 'GmailAuthError';
   }
 }
+export const REOFFER_LIMIT = 100;
+
+/**
+ * Re-offers up to 100 of the user's PENDING emails to the worker, newest first, so fresh mail is
+ * not stuck behind a backlog. Covers the DB-insert / queue-send gap and emails that waited for AI
+ * access. Does nothing while the user's AI access is not ready: those emails wait and are
+ * re-offered by the next sync or after the user fixes access (no scheduler). Enqueueing is
+ * idempotent per email (singleton key).
+ */
+export async function reofferPendingEmails(userId: string): Promise<number> {
+  if ((await getAccessState(userId)).state !== 'READY') return 0;
+  const pending = await prisma.email.findMany({
+    where: { userId, processingState: 'PENDING' },
+    orderBy: [{ receivedAt: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
+    take: REOFFER_LIMIT,
+    select: { id: true },
+  });
+  for (const email of pending) await enqueueEmailProcessingJob(userId, email.id);
+  return pending.length;
+}
+
 const LEASE_MS = 5 * 60_000;
 export const syncLease = () => new Date(Date.now() + LEASE_MS);
 
@@ -213,13 +235,9 @@ export class GmailSyncService {
         } while (pageToken);
         return latest;
       });
-      // Recover the DB-insert / queue-send gap even when the history no longer returns that email.
-      const pending = await prisma.email.findMany({
-        where: { userId, processingState: 'PENDING' },
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-        take: 100,
-      });
-      for (const email of pending) await enqueueEmailProcessingJob(userId, email.id);
+      // Recover the DB-insert / queue-send gap even when the history no longer returns that email,
+      // and resume emails that waited for AI access.
+      await reofferPendingEmails(userId);
       const lastSyncedAt = new Date();
       await prisma.gmailConnection.updateMany({
         where: { id: connection.id, syncClaim: claim, status: 'CONNECTED' },

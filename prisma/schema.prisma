@@ -15,9 +15,13 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  applications    Application[]
-  gmailConnection GmailConnection?
-  emails          Email[]
+  applications        Application[]
+  gmailConnection     GmailConnection?
+  emails              Email[]
+  aiConfiguration     AIConfiguration?
+  aiUsageDays         AIUsageDay[]
+  integrationTokens   IntegrationToken[]
+  externalSubmissions ExternalSubmission[]
 
   @@map("users")
 }
@@ -33,22 +37,25 @@ enum ApplicationStatus {
 }
 
 model Application {
-  id              String             @id @default(uuid()) @db.Uuid
-  userId          String             @db.Uuid
-  companyName     String
-  jobTitle        String?
-  location        String?
-  aiStatus        ApplicationStatus?
-  userStatus      ApplicationStatus?
-  userStatusSetAt DateTime?
-  appliedAt       DateTime?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  id                 String             @id @default(uuid()) @db.Uuid
+  userId             String             @db.Uuid
+  companyName        String
+  jobTitle           String?
+  location           String?
+  aiStatus           ApplicationStatus?
+  userStatus         ApplicationStatus?
+  userStatusSetAt    DateTime?
+  /// Manual-correction revision (S6-01). Changed only by user status set/clear; never by AI.
+  userStatusRevision Int                @default(0)
+  appliedAt          DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 
-  user    User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emails  Email[]
-  events  ApplicationEvent[]
-  actions Action[]
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emails              Email[]
+  events              ApplicationEvent[]
+  actions             Action[]
+  externalSubmissions ExternalSubmission[]
 
   @@index([userId])
   @@map("applications")
@@ -75,27 +82,27 @@ enum EmailProcessingState {
 }
 
 model Email {
-  aiOperations       AIOperation[]
-  aiProcessingResult AIProcessingResult?
-  id                 String                   @id @default(uuid()) @db.Uuid
-  userId             String                   @db.Uuid
-  gmailMessageId     String // stable Gmail message ID
-  threadId           String? // Gmail thread ID; stored for future matching
-  subject            String? // email subject header
-  sender             String? // From header value
-  receivedAt         DateTime? // message received timestamp
-  relevanceState     EmailRelevanceState      @default(UNPROCESSED)
-  matchState         EmailMatchState          @default(UNMATCHED)
-  matchConfirmedBy   MatchConfirmationSource?
-  processingState    EmailProcessingState     @default(PENDING)
+  aiOperations            AIOperation[]
+  aiProcessingResult      AIProcessingResult?
+  id                      String                   @id @default(uuid()) @db.Uuid
+  userId                  String                   @db.Uuid
+  gmailMessageId          String // stable Gmail message ID
+  threadId                String? // Gmail thread ID; stored for future matching
+  subject                 String? // email subject header
+  sender                  String? // From header value
+  receivedAt              DateTime? // message received timestamp
+  relevanceState          EmailRelevanceState      @default(UNPROCESSED)
+  matchState              EmailMatchState          @default(UNMATCHED)
+  matchConfirmedBy        MatchConfirmationSource?
+  processingState         EmailProcessingState     @default(PENDING)
   processingErrorCategory String?
   processingErrorDetails  String?
   processingErrorStage    String?
   processingRetryable     Boolean?
   processingFailedAt      DateTime?
-  applicationId      String?                  @db.Uuid // nullable FK to Application
-  createdAt          DateTime                 @default(now())
-  updatedAt          DateTime                 @updatedAt
+  applicationId           String?                  @db.Uuid // nullable FK to Application
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
 
   user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   application Application?       @relation(fields: [applicationId], references: [id], onDelete: SetNull)
@@ -126,22 +133,22 @@ enum GmailSyncStatus {
 }
 
 model GmailConnection {
-  id             String                @id @default(uuid()) @db.Uuid
-  userId         String                @unique @db.Uuid
-  gmailEmail     String
-  status         GmailConnectionStatus @default(NOT_CONNECTED)
-  syncStatus     GmailSyncStatus       @default(IDLE)
-  accessToken    String
-  refreshToken   String?
-  lastHistoryId  String?
-  lastSyncedAt   DateTime?
-  syncClaim      String?
-  syncLeaseUntil DateTime?
-  syncError      String?
+  id                     String                @id @default(uuid()) @db.Uuid
+  userId                 String                @unique @db.Uuid
+  gmailEmail             String
+  status                 GmailConnectionStatus @default(NOT_CONNECTED)
+  syncStatus             GmailSyncStatus       @default(IDLE)
+  accessToken            String
+  refreshToken           String?
+  lastHistoryId          String?
+  lastSyncedAt           DateTime?
+  syncClaim              String?
+  syncLeaseUntil         DateTime?
+  syncError              String?
   syncLookbackDays       Int                   @default(1)
   lastSyncedLookbackDays Int?
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -227,19 +234,22 @@ model AIProcessingResult {
 }
 
 model ApplicationEvent {
-  id            String             @id @default(uuid()) @db.Uuid
-  applicationId String             @db.Uuid
-  emailId       String?            @db.Uuid // nullable to allow manual events later
-  type          String // e.g., 'STATE_INFERRED', 'NOTE_ADDED'
-  oldState      ApplicationStatus?
-  newState      ApplicationStatus?
-  description   String?
-  provenance    String? // to track why this event was created
+  id                   String             @id @default(uuid()) @db.Uuid
+  applicationId        String             @db.Uuid
+  emailId              String?            @db.Uuid // nullable to allow manual events later
+  type                 String // e.g., 'STATE_INFERRED', 'NOTE_ADDED'
+  oldState             ApplicationStatus?
+  newState             ApplicationStatus?
+  description          String?
+  provenance           String? // to track why this event was created
+  /// Set only on AUTOMATION_SUBMITTED events: one event per submission (ADR-0002 decision 6).
+  externalSubmissionId String?            @unique @db.Uuid
 
   createdAt DateTime @default(now())
 
-  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  email       Email?      @relation(fields: [emailId], references: [id], onDelete: SetNull)
+  application        Application         @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  email              Email?              @relation(fields: [emailId], references: [id], onDelete: SetNull)
+  externalSubmission ExternalSubmission? @relation(fields: [externalSubmissionId], references: [id], onDelete: SetNull)
 
   @@unique([applicationId, emailId, type])
   @@index([applicationId])
@@ -311,20 +321,26 @@ enum AIOperationStatus {
 // A claim is committed BEFORE the external effect. A lost/uncertain response
 // is never automatically reclaimed: an operator must reconcile it first.
 model AIOperation {
-  id          String            @id @default(uuid()) @db.Uuid
-  emailId     String            @db.Uuid
-  operation   String
-  version     String
-  status      AIOperationStatus @default(PENDING)
-  attempts    Int               @default(0)
-  result      Json?
-  errorCode   String?
-  retryAfter  DateTime?
-  startedAt   DateTime?
-  completedAt DateTime?
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-  email       Email             @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  id              String            @id @default(uuid()) @db.Uuid
+  emailId         String            @db.Uuid
+  operation       String
+  version         String
+  status          AIOperationStatus @default(PENDING)
+  attempts        Int               @default(0)
+  /// Catalog provider and model of the latest claimed call: provenance of the result, and where
+  /// an uncertain charge happened. Metadata only (ADR-0001 decision 12).
+  provider        String?
+  model           String?
+  /// Each explicit user approval permits exactly one more call (ADR-0001 decision 10).
+  approvedRetries Int               @default(0)
+  result          Json?
+  errorCode       String?
+  retryAfter      DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  email           Email             @relation(fields: [emailId], references: [id], onDelete: Cascade)
 
   @@unique([emailId, operation, version])
   @@index([status, retryAfter])
@@ -338,4 +354,146 @@ model AICallBudget {
   cooldownUntil DateTime?
 
   @@map("ai_call_budgets")
+}
+
+// ─── User-provided AI (ADR-0001) ─────────────────────────────────────────────
+
+/// Why a user's AI access cannot be used now. Needs attention: KEY_REJECTED, ACCOUNT_OR_BILLING,
+/// MODEL_UNAVAILABLE, KEY_UNREADABLE (stored key cannot be decrypted; re-enter it). Limited (with
+/// cooldownUntil): RATE_LIMITED, PROVIDER_UNAVAILABLE.
+enum AIAccessIssue {
+  KEY_REJECTED
+  ACCOUNT_OR_BILLING
+  MODEL_UNAVAILABLE
+  KEY_UNREADABLE
+  RATE_LIMITED
+  PROVIDER_UNAVAILABLE
+}
+
+/// One active AI setup per user (ADR-0001 decision 5). The key is write-only AES-256-GCM
+/// ciphertext bound to the user; it is selected only where a provider call or verification needs it.
+model AIConfiguration {
+  userId              String         @id @db.Uuid
+  /// Catalog provider ID (code catalog, not a database catalog).
+  provider            String
+  encryptedApiKey     String
+  /// null follows the catalog's recommended model for the role.
+  fastModel           String?
+  detailedModel       String?
+  accessIssue         AIAccessIssue?
+  accessIssueModel    String?
+  verifiedAt          DateTime?
+  lastCheckedAt       DateTime?
+  /// Per-user provider cooldown; survives the UTC day boundary.
+  cooldownUntil       DateTime?
+  consecutiveFailures Int            @default(0)
+  /// Catalog disclosure version the user agreed to, and when.
+  consentDisclosure   String
+  consentedAt         DateTime
+  /// Incremented on every save; job-side state writes are conditional on it.
+  revision            Int            @default(0)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("ai_configurations")
+}
+
+/// Career Companion's own per-user counts for one UTC day. `calls` is the safety limit counter.
+/// Not provider quota or billing data.
+model AIUsageDay {
+  userId        String @db.Uuid
+  day           String
+  calls         Int    @default(0)
+  inputTokens   Int    @default(0)
+  outputTokens  Int    @default(0)
+  verifications Int    @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, day])
+  @@map("ai_usage_days")
+}
+
+// ─── Automation submissions through MCP (ADR-0002) ───────────────────────────
+
+/// A per-user bearer token for the MCP endpoint. Only the SHA-256 hash and a display prefix are
+/// stored; the plaintext is shown once at creation. Revoking keeps the row for the audit trail.
+model IntegrationToken {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @db.Uuid
+  name          String
+  tokenHash     String    @unique
+  displayPrefix String
+  /// Single scope in v1 (ADR-0002 decision 10).
+  scope         String    @default("submissions:write")
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime
+  lastUsedAt    DateTime?
+  revokedAt     DateTime?
+
+  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  submissions ExternalSubmission[]
+
+  @@index([userId, createdAt])
+  @@map("integration_tokens")
+}
+
+enum ExternalSubmissionSource {
+  AUTOMATION
+}
+
+enum ExternalSubmissionMatchState {
+  NEEDS_REVIEW
+  LINKED
+  CREATED
+  IGNORED
+}
+
+/// Who settled a submission's match. Rule-based matching is AUTOMATIC: no AI makes this decision,
+/// so the Gmail MatchConfirmationSource (AI_AUTO) is deliberately not reused.
+enum SubmissionResolvedBy {
+  AUTOMATIC
+  USER
+}
+
+/// Evidence that the user's automation reported a confirmed submission (ADR-0002 decision 6).
+/// Immutable: never updated from a later call. Only the match fields change, once, on resolution.
+model ExternalSubmission {
+  id               String                       @id @default(uuid()) @db.Uuid
+  userId           String                       @db.Uuid
+  source           ExternalSubmissionSource
+  /// `YYYY-MM-DD/HH:MM:SS` from the automation's daily file; the idempotency key.
+  sourceRecordRef  String
+  platform         String
+  company          String
+  jobTitle         String
+  submittedAt      DateTime
+  jobUrl           String?
+  portalJobId      String?
+  destinationHost  String?
+  discoverySource  String?
+  location         String?
+  workMode         String?
+  confirmationText String?
+  receivedAt       DateTime                     @default(now())
+  tokenId          String?                      @db.Uuid
+  matchState       ExternalSubmissionMatchState
+  /// null while NEEDS_REVIEW.
+  resolvedBy       SubmissionResolvedBy?
+  applicationId    String?                      @db.Uuid
+  /// null while NEEDS_REVIEW.
+  resolvedAt       DateTime?
+
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token       IntegrationToken? @relation(fields: [tokenId], references: [id], onDelete: SetNull)
+  application Application?      @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  event       ApplicationEvent?
+
+  @@unique([userId, source, sourceRecordRef])
+  @@index([userId, matchState])
+  @@index([userId, receivedAt])
+  @@index([applicationId])
+  @@map("external_submissions")
 }

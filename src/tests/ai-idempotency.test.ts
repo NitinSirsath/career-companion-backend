@@ -2,13 +2,16 @@ import { beforeAll, beforeEach, afterAll, describe, expect, it, vi } from 'vites
 import { z } from 'zod';
 import { prisma } from '../db/prisma';
 import { runOperation } from '../services/ai/operations';
-import { RetryableAIError } from '../services/ai/errors';
+import { AIAccessError, ProviderFailure } from '../services/ai/errors';
 import { EmailAIPipeline } from '../services/ai/pipeline';
 import { GmailFetcherService } from '../services/gmailFetcher';
-import { GeminiProvider } from '../services/ai/gemini/GeminiProvider';
+import { createProviderClient } from '../services/ai/providers';
 import { MatcherService } from '../services/matcher';
 import { JobExtractionSchema } from '../services/ai/contracts';
+import { fakeProviderClient } from './helpers/fakeProviderClient';
+import { configureAI, fakeAccess } from './helpers/aiAccess';
 vi.mock('../services/gmailFetcher');
+vi.mock('../services/ai/providers', () => ({ createProviderClient: vi.fn() }));
 vi.mock('../jobs/notificationJob', () => ({ enqueueNotificationJob: vi.fn() }));
 
 let userId: string;
@@ -16,20 +19,31 @@ let emailId: string;
 const schema = z.object({ decision: z.string() });
 beforeAll(async () => {
   userId = (await prisma.user.create({ data: { email: 'idempotency@audit.test' } })).id;
+  await configureAI(userId);
 });
 beforeEach(async () => {
   vi.restoreAllMocks();
-  process.env.AI_DAILY_CALL_LIMIT = '100';
+  vi.mocked(createProviderClient).mockReset();
+  process.env.AI_USER_DAILY_CALL_LIMIT = '100';
   await prisma.email.deleteMany({ where: { userId } });
-  await prisma.aICallBudget.deleteMany();
+  await prisma.aIUsageDay.deleteMany({ where: { userId } });
+  await configureAI(userId, { cooldownUntil: null, accessIssue: null, consecutiveFailures: 0 });
   emailId = (await prisma.email.create({ data: { userId, gmailMessageId: 'logical-message' } })).id;
 });
 afterAll(async () => {
   await prisma.user.delete({ where: { id: userId } });
 });
 
+const contract = { version: 'v1', schema, role: 'fast' as const };
 const run = (call: () => Promise<{ decision: string }>) =>
-  runOperation(userId, emailId, 'classification', 'v1', schema, call);
+  runOperation({
+    userId,
+    emailId,
+    operation: 'classification',
+    contract,
+    access: async () => fakeAccess(userId),
+    call: async () => ({ version: 'v1', data: await call(), model: 'm', usage: { inputTokens: 1, outputTokens: 1 } }),
+  });
 describe('Durable AI external-effect boundary', () => {
   it('reuses a result on repeated execution', async () => {
     const call = vi.fn().mockResolvedValue({ decision: 'yes' });
@@ -74,20 +88,24 @@ describe('Durable AI external-effect boundary', () => {
       'UNKNOWN',
     );
   });
-  it('bounds explicit provider rejection retries durably', async () => {
-    const call = vi.fn().mockRejectedValue(new RetryableAIError('rate limited'));
-    for (let i = 0; i < 3; i++) {
-      await prisma.aIOperation.updateMany({ where: { emailId }, data: { retryAfter: null } });
-      await prisma.aICallBudget.updateMany({ data: { cooldownUntil: null } });
-      await expect(run(call)).rejects.toThrow();
+  it('never charges an attempt for an explicit provider refusal (ADR-0001 decision 9)', async () => {
+    const call = vi.fn().mockRejectedValue(new ProviderFailure('RATE_LIMITED'));
+    for (let i = 0; i < 4; i++) {
+      await prisma.aIConfiguration.update({ where: { userId }, data: { cooldownUntil: null } });
+      await expect(run(call)).rejects.toBeInstanceOf(AIAccessError);
+      expect(await prisma.aIOperation.findFirstOrThrow({ where: { emailId } })).toMatchObject({
+        status: 'PENDING',
+        attempts: 0,
+        errorCode: 'RATE_LIMITED',
+      });
     }
-    await expect(run(call)).rejects.toThrow('requires review');
-    expect(call).toHaveBeenCalledTimes(3);
+    // Four refusals, no attempt used: the per-user cooldown and safety limit bound the loop instead.
+    expect(call).toHaveBeenCalledTimes(4);
   });
-  it('enforces the application budget and rolls back claims when exhausted', async () => {
-    process.env.AI_DAILY_CALL_LIMIT = '0';
+  it('enforces the application safety limit and rolls back claims when paused', async () => {
+    process.env.AI_USER_DAILY_CALL_LIMIT = '0';
     const call = vi.fn();
-    await expect(run(call)).rejects.toThrow('budget');
+    await expect(run(call)).rejects.toMatchObject({ name: 'AIAccessError', reason: 'PAUSED' });
     expect(call).not.toHaveBeenCalled();
     expect((await prisma.aIOperation.findFirstOrThrow({ where: { emailId } })).status).toBe(
       'PENDING',
@@ -96,14 +114,14 @@ describe('Durable AI external-effect boundary', () => {
   it('rejects a job with another user before calling the provider', async () => {
     const call = vi.fn();
     await expect(
-      runOperation(
-        '00000000-0000-0000-0000-000000000000',
+      runOperation({
+        userId: '00000000-0000-0000-0000-000000000000',
         emailId,
-        'classification',
-        'v1',
-        schema,
+        operation: 'classification',
+        contract,
+        access: async () => fakeAccess(userId),
         call,
-      ),
+      }),
     ).rejects.toThrow();
     expect(call).not.toHaveBeenCalled();
   });
@@ -118,9 +136,8 @@ describe('Durable AI external-effect boundary', () => {
         relevanceDecision: 'IRRELEVANT',
       },
     });
-    const provider = vi.spyOn(GeminiProvider, 'getInstance');
     await EmailAIPipeline.processEmail(userId, emailId);
-    expect(provider).not.toHaveBeenCalled();
+    expect(createProviderClient).not.toHaveBeenCalled();
     expect((await prisma.email.findUniqueOrThrow({ where: { id: emailId } })).processingState).toBe(
       'COMPLETED',
     );
@@ -130,11 +147,10 @@ describe('Durable AI external-effect boundary', () => {
       labelIds: ['INBOX', 'CATEGORY_PROMOTIONS'],
       snippet: null,
     });
-    const provider = vi.spyOn(GeminiProvider, 'getInstance');
     vi.mocked(GmailFetcherService.fetchMessageBody).mockClear();
     await EmailAIPipeline.processEmail(userId, emailId);
     await EmailAIPipeline.processEmail(userId, emailId);
-    expect(provider).not.toHaveBeenCalled();
+    expect(createProviderClient).not.toHaveBeenCalled();
     expect(GmailFetcherService.fetchMessageBody).not.toHaveBeenCalled();
     expect(await prisma.aIOperation.count({ where: { emailId } })).toBe(0);
     expect((await prisma.email.findUniqueOrThrow({ where: { id: emailId } })).relevanceState).toBe(
@@ -146,17 +162,11 @@ describe('Durable AI external-effect boundary', () => {
     const extraction = JobExtractionSchema.parse(
       Object.fromEntries(Object.keys(JobExtractionSchema.shape).map((key) => [key, null])),
     );
-    const classifyRelevance = vi.fn().mockResolvedValue({
-      data: { decision: 'IRRELEVANT', confidence: 0.2, reasoning: 'uncertain' },
+    const client = fakeProviderClient({
+      classification: { decision: 'IRRELEVANT', confidence: 0.2, reasoning: 'uncertain' },
+      extraction,
     });
-    const extractJobData = vi.fn().mockResolvedValue({ data: extraction });
-    vi.spyOn(GeminiProvider, 'getInstance').mockReturnValue({
-      classifyRelevance,
-      extractJobData,
-      getProviderName: () => 'gemini',
-      getRelevanceModel: () => 'test',
-      getExtractionModel: () => 'test',
-    } as unknown as GeminiProvider);
+    vi.mocked(createProviderClient).mockReturnValue(client);
     vi.mocked(GmailFetcherService.fetchMessageMetadata).mockResolvedValue({
       labelIds: ['INBOX'],
       snippet: null,
@@ -165,9 +175,9 @@ describe('Durable AI external-effect boundary', () => {
     vi.spyOn(MatcherService, 'matchEmailToApplication').mockResolvedValue(undefined);
     await EmailAIPipeline.processEmail(userId, emailId);
     await EmailAIPipeline.processEmail(userId, emailId);
-    expect(classifyRelevance).toHaveBeenCalledTimes(1);
-    expect(extractJobData).toHaveBeenCalledTimes(1);
-    expect(extractJobData.mock.calls[0][0]).toHaveLength(8000);
+    expect(client.calls('email_relevance')).toHaveLength(1);
+    expect(client.calls('job_extraction')).toHaveLength(1);
+    expect(client.calls('job_extraction')[0][0].input).toHaveLength(8000);
     expect(
       (await prisma.aIProcessingResult.findUniqueOrThrow({ where: { emailId } })).relevanceDecision,
     ).toBe('UNCERTAIN');
@@ -176,18 +186,11 @@ describe('Durable AI external-effect boundary', () => {
     const extraction = JobExtractionSchema.parse(
       Object.fromEntries(Object.keys(JobExtractionSchema.shape).map((key) => [key, null])),
     );
-    const classifyRelevance = vi.fn().mockResolvedValue({
-      version: 'v1',
-      data: { decision: 'RELEVANT', confidence: 0.9, reasoning: 'job' },
+    const client = fakeProviderClient({
+      classification: { decision: 'RELEVANT', confidence: 0.9, reasoning: 'job' },
+      extraction,
     });
-    const extractJobData = vi.fn().mockResolvedValue({ version: 'v1', data: extraction });
-    vi.spyOn(GeminiProvider, 'getInstance').mockReturnValue({
-      classifyRelevance,
-      extractJobData,
-      getProviderName: () => 'gemini',
-      getRelevanceModel: () => 'test',
-      getExtractionModel: () => 'test',
-    } as unknown as GeminiProvider);
+    vi.mocked(createProviderClient).mockReturnValue(client);
     vi.mocked(GmailFetcherService.fetchMessageMetadata).mockResolvedValue({
       labelIds: ['INBOX'],
       snippet: '',
@@ -198,7 +201,7 @@ describe('Durable AI external-effect boundary', () => {
       .mockResolvedValue(undefined);
     await expect(EmailAIPipeline.processEmail(userId, emailId)).rejects.toThrow('domain failure');
     await EmailAIPipeline.processEmail(userId, emailId);
-    expect(classifyRelevance).toHaveBeenCalledTimes(1);
-    expect(extractJobData).toHaveBeenCalledTimes(1);
+    expect(client.calls('email_relevance')).toHaveLength(1);
+    expect(client.calls('job_extraction')).toHaveLength(1);
   });
 });

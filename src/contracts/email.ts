@@ -13,6 +13,9 @@ export const AmbiguousMatchResponseSchema = z.object({
       jobTitle: z.string().nullable(),
       confidence: z.number().nullable(),
       category: z.string().nullable(),
+      /** Which provider and model produced this result (ADR-0001). */
+      provider: z.string(),
+      model: z.string(),
     })
     .nullable(),
 });
@@ -24,3 +27,26 @@ export const ResolveAmbiguityRequestSchema = z.object({
 });
 
 export type ResolveAmbiguityRequest = z.infer<typeof ResolveAmbiguityRequestSchema>;
+
+// ─── POST /api/emails/:id/retry ───────────────────────────────────────────────
+
+/** Send `acceptPossibleDuplicateCharge: true` only after the user approved one more AI attempt. */
+export const RetryEmailRequestSchema = z.strictObject({
+  acceptPossibleDuplicateCharge: z.literal(true).optional(),
+});
+export type RetryEmailRequest = z.infer<typeof RetryEmailRequestSchema>;
+
+/** Details of 409 AI_RETRY_NEEDS_APPROVAL: where the earlier attempt went and which provider a retry uses. */
+export const AIRetryApprovalDetailsSchema = z.object({
+  operations: z.array(
+    z.object({
+      operation: z.string(),
+      reason: z.enum(['OUTCOME_UNKNOWN', 'INVALID_OUTPUT', 'ATTEMPTS_EXHAUSTED']),
+      provider: z.string().nullable(),
+      model: z.string().nullable(),
+      attemptedAt: z.string().nullable(),
+    }),
+  ),
+  currentProvider: z.string().nullable(),
+});
+export type AIRetryApprovalDetails = z.infer<typeof AIRetryApprovalDetailsSchema>;

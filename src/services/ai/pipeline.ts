@@ -1,10 +1,27 @@
 import { prisma } from '../../db/prisma';
-import { GeminiProvider } from './gemini/GeminiProvider';
 import { GmailFetcherService } from '../gmailFetcher';
 import { MatcherService } from '../matcher';
-import { AI_CONTRACT_VERSIONS, EmailRelevanceSchema, JobExtractionSchema } from './contracts';
+import { AIAccess, resolveAIAccess } from './access';
+import {
+  AI_CONTRACT_VERSIONS,
+  CLASSIFICATION_CONTRACT,
+  CLASSIFICATION_INPUT_LIMITS as LIMITS,
+  EXTRACTION_BODY_LIMIT,
+  EXTRACTION_CONTRACT,
+} from './contracts';
 import { TerminalAIError } from './errors';
 import { runOperation } from './operations';
+
+/** Ledger rows from before provenance was recorded carry no model; keep the stored one. */
+function provenance(
+  produced: { provider: string | null; model: string | null },
+  stored: { provider: string; model: string } | null,
+) {
+  return {
+    provider: produced.provider ?? stored?.provider ?? 'gemini',
+    model: produced.model ?? stored?.model ?? 'unknown',
+  };
+}
 
 export class EmailAIPipeline {
   static async processEmail(userId: string, emailId: string): Promise<void> {
@@ -33,33 +50,35 @@ export class EmailAIPipeline {
     const threshold = Number(process.env.RELEVANCE_CONFIDENCE_THRESHOLD ?? 0.7);
     if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1)
       throw new TerminalAIError('Invalid relevance threshold');
-    const provider = deterministic ? null : GeminiProvider.getInstance();
+    // The user's own AI access is resolved lazily, at most once per job, and only when a provider
+    // call is about to be claimed: promotions and reused results need no key.
+    let resolved: Promise<AIAccess> | undefined;
+    const access = () => (resolved ??= resolveAIAccess(userId));
     const relevance = deterministic
-      ? { decision: 'IRRELEVANT' as const, confidence: 1, category: undefined }
-      : await runOperation(
+      ? { data: { decision: 'IRRELEVANT' as const, confidence: 1, category: undefined }, provider: 'deterministic', model: 'none' }
+      : await runOperation({
           userId,
           emailId,
-          'classification',
-          AI_CONTRACT_VERSIONS.CLASSIFICATION,
-          EmailRelevanceSchema,
-          async () =>
-            (
-              await provider!.classifyRelevance({
-                sender: email.sender?.slice(0, 512),
-                subject: email.subject?.slice(0, 1000),
-                labels: labels.slice(0, 30),
-                snippet: gmail.snippet?.slice(0, 1000),
-              })
-            ).data,
-        );
-    const decision = relevance.confidence < threshold ? 'UNCERTAIN' : relevance.decision;
+          operation: 'classification',
+          contract: CLASSIFICATION_CONTRACT,
+          access,
+          call: (ai) =>
+            ai.classifier.classifyRelevance({
+              sender: email.sender?.slice(0, LIMITS.sender),
+              subject: email.subject?.slice(0, LIMITS.subject),
+              labels: labels.slice(0, LIMITS.labels),
+              snippet: gmail.snippet?.slice(0, LIMITS.snippet),
+            }),
+        });
+    const decision = relevance.data.confidence < threshold ? 'UNCERTAIN' : relevance.data.decision;
     const data = {
-      provider: provider?.getProviderName() ?? 'deterministic',
-      model: provider?.getRelevanceModel() ?? 'none',
+      // Provenance comes from the operation that produced the result, so a result reused after a
+      // provider switch keeps its own provider and model.
+      ...provenance(relevance, result),
       contractVersion: deterministic ? 'deterministic/v1' : AI_CONTRACT_VERSIONS.CLASSIFICATION,
       relevanceDecision: decision,
-      confidence: relevance.confidence,
-      category: relevance.category ?? null,
+      confidence: relevance.data.confidence,
+      category: relevance.data.category ?? null,
       deterministic,
       processingStatus:
         decision === 'IRRELEVANT' ? ('COMPLETED' as const) : ('PROCESSING' as const),
@@ -73,19 +92,19 @@ export class EmailAIPipeline {
     });
     if (decision !== 'IRRELEVANT') {
       const body = await GmailFetcherService.fetchMessageBody(userId, email.gmailMessageId);
-      const extraction = await runOperation(
+      const extraction = await runOperation({
         userId,
         emailId,
-        'extraction',
-        AI_CONTRACT_VERSIONS.EXTRACTION,
-        JobExtractionSchema,
-        async () => (await provider!.extractJobData(body.slice(0, 8000))).data,
-      );
+        operation: 'extraction',
+        contract: EXTRACTION_CONTRACT,
+        access,
+        call: (ai) => ai.analyzer.extractJobData(body.slice(0, EXTRACTION_BODY_LIMIT)),
+      });
       await prisma.aIProcessingResult.update({
         where: { emailId },
         data: {
-          ...extraction,
-          model: provider!.getExtractionModel(),
+          ...extraction.data,
+          ...provenance(extraction, result),
           contractVersion: AI_CONTRACT_VERSIONS.EXTRACTION,
           processingStatus: 'COMPLETED',
         },

@@ -47,11 +47,14 @@ export function loadEncryptionKey(): Buffer {
  *
  * @param plaintext - The raw OAuth token string (accessToken or refreshToken).
  * @param key       - 32-byte encryption key (from loadEncryptionKey()).
+ * @param aad       - Optional additional authenticated data that must match on decryption
+ *                    (binds the ciphertext to a context such as its owner).
  * @returns EncryptedToken containing base64-encoded ciphertext+authTag and IV.
  */
-export function encrypt(plaintext: string, key: Buffer): EncryptedToken {
+export function encrypt(plaintext: string, key: Buffer, aad?: Buffer): EncryptedToken {
   const iv = randomBytes(IV_LENGTH);
   const cipher = createCipheriv(ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
+  if (aad) cipher.setAAD(aad);
 
   const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   const authTag = cipher.getAuthTag();
@@ -71,10 +74,11 @@ export function encrypt(plaintext: string, key: Buffer): EncryptedToken {
  * @param ciphertext - Base64-encoded ciphertext+authTag.
  * @param iv         - Base64-encoded IV used during encryption.
  * @param key        - 32-byte encryption key (must be the same key used for encryption).
+ * @param aad        - The additional authenticated data used for encryption, if any.
  * @returns The original plaintext token string.
  * @throws If decryption or authentication tag verification fails.
  */
-export function decrypt(ciphertext: string, iv: string, key: Buffer): string {
+export function decrypt(ciphertext: string, iv: string, key: Buffer, aad?: Buffer): string {
   const ciphertextBuf = Buffer.from(ciphertext, 'base64');
   const ivBuf = Buffer.from(iv, 'base64');
 
@@ -88,6 +92,7 @@ export function decrypt(ciphertext: string, iv: string, key: Buffer): string {
 
   const decipher = createDecipheriv(ALGORITHM, key, ivBuf, { authTagLength: AUTH_TAG_LENGTH });
   decipher.setAuthTag(authTag);
+  if (aad) decipher.setAAD(aad);
 
   const decrypted = Buffer.concat([decipher.update(encryptedData), decipher.final()]);
   return decrypted.toString('utf8');

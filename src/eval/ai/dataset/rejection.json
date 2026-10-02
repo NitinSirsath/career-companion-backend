@@ -1,0 +1,131 @@
+[
+  {
+    "id": "rejection-standard",
+    "input": {
+      "sender": "Tailspin Toys Recruiting <no-reply@jobs.tailspin.example.com>",
+      "subject": "Your application to Tailspin Toys",
+      "labels": [
+        "INBOX",
+        "CATEGORY_UPDATES"
+      ],
+      "body": "Hi Alex,\n\nThank you for applying for the Product Designer role. After careful review, we have decided not to move forward with your application.\nWe wish you the best in your search.\n\nTailspin Toys Recruiting"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": [
+        "REJECTION"
+      ],
+      "fields": {
+        "companyName": {
+          "contains": [
+            "tailspin"
+          ]
+        },
+        "rejectionInfo": {
+          "present": true
+        }
+      },
+      "mustBeNull": [
+        "offerInfo",
+        "interviewDate"
+      ]
+    },
+    "group": "rejection"
+  },
+  {
+    "id": "rejection-post-interview",
+    "input": {
+      "sender": "Hannah Lee <hannah.lee@careers.contoso-analytics.example.com>",
+      "subject": "Update on the Data Engineer role",
+      "labels": [
+        "INBOX",
+        "CATEGORY_UPDATES"
+      ],
+      "body": "Hi Alex,\n\nThank you for the time you spent with the panel. The team was impressed, but we have decided to proceed with another candidate\nwhose experience more closely matches the role. We'd be glad to stay in touch for future openings.\n\nBest,\nHannah"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": [
+        "REJECTION"
+      ],
+      "fields": {
+        "companyName": {
+          "contains": [
+            "contoso"
+          ]
+        },
+        "rejectionInfo": {
+          "present": true
+        }
+      },
+      "mustBeNull": [
+        "offerInfo"
+      ]
+    },
+    "group": "rejection"
+  },
+  {
+    "id": "rejection-position-filled",
+    "input": {
+      "sender": "Litware Talent <talent@litware.example.org>",
+      "subject": "Site Reliability Engineer (Req 4471) — position filled",
+      "labels": [
+        "INBOX",
+        "CATEGORY_UPDATES"
+      ],
+      "body": "Dear Alex,\n\nThe Site Reliability Engineer position you applied for has now been filled. Thank you for your interest in Litware.\n\nLitware Talent Team"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": [
+        "REJECTION"
+      ],
+      "fields": {
+        "companyName": {
+          "contains": [
+            "litware"
+          ]
+        },
+        "rejectionInfo": {
+          "present": true
+        }
+      },
+      "mustBeNull": [
+        "offerInfo"
+      ]
+    },
+    "group": "rejection"
+  },
+  {
+    "id": "rejection-keep-on-file",
+    "input": {
+      "sender": "Proseware Hiring <hiring@proseware.example.com>",
+      "subject": "About your Frontend Engineer application",
+      "labels": [
+        "INBOX",
+        "CATEGORY_UPDATES"
+      ],
+      "body": "Hi Alex,\n\nWe won't be moving forward with your application at this time, but we'd like to keep your details on file for similar roles\nover the next six months.\n\nProseware Hiring"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": [
+        "REJECTION"
+      ],
+      "fields": {
+        "companyName": {
+          "contains": [
+            "proseware"
+          ]
+        },
+        "rejectionInfo": {
+          "present": true
+        }
+      },
+      "mustBeNull": [
+        "offerInfo"
+      ]
+    },
+    "group": "rejection"
+  }
+]

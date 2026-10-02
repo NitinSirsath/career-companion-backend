@@ -1,0 +1,247 @@
+[
+  {
+    "id": "interview-invite-timezone",
+    "input": {
+      "sender": "Grace Kim <grace.kim@fabrikam.example.com>",
+      "subject": "Fabrikam — technical interview on Nov 10",
+      "labels": [
+        "INBOX",
+        "CATEGORY_UPDATES"
+      ],
+      "body": "Hi Alex,\n\nGreat speaking last week. We'd like to schedule your technical interview for the Senior DevOps Engineer role\non Tuesday, November 10, 2026 at 10:30 AM Central European Time (CET). It will be a 60-minute video call.\n\nPlease confirm by replying to this email.\n\nGrace Kim\nFabrikam"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "critical": true,
+      "category": [
+        "INTERVIEW"
+      ],
+      "fields": {
+        "companyName": {
+          "contains": [
+            "fabrikam"
+          ]
+        },
+        "interviewDate": {
+          "date": "2026-11-10"
+        },
+        "interviewTime": {
+          "contains": [
+            "10:30"
+          ]
+        },
+        "interviewType": {
+          "contains": [
+            "video"
+          ]
+        },
+        "actionRequired": {
+          "equals": true
+        }
+      },
+      "mustBeNull": [
+        "offerInfo",
+        "rejectionInfo"
+      ]
+    },
+    "group": "interview"
+  },
+  {
+    "id": "interview-choose-slot",
+    "input": {
+      "sender": "Scheduling at Litware <scheduling@litware.example.org>",
+      "subject": "Pick a time for your Litware interview",
+      "labels": [
+        "INBOX",
+        "CATEGORY_UPDATES"
+      ],
+      "body": "Hi Alex,\n\nThe Litware SRE hiring team would like to meet you for a 45-minute phone screen.\nPlease choose a slot using the scheduling link below by October 28, 2026.\n\nAvailable days: November 2-6, 2026.\n\nThanks,\nLitware Recruiting"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "critical": true,
+      "category": [
+        "INTERVIEW"
+      ],
+      "fields": {
+        "companyName": {
+          "contains": [
+            "litware"
+          ]
+        },
+        "actionRequired": {
+          "equals": true
+        },
+        "actionDeadline": {
+          "date": "2026-10-28"
+        }
+      },
+      "mustBeNull": [
+        "offerInfo",
+        "rejectionInfo"
+      ]
+    },
+    "group": "interview"
+  },
+  {
+    "id": "interview-reschedule",
+    "input": {
+      "sender": "Daniel Okafor <daniel.okafor@northwind-robotics.example.com>",
+      "subject": "Need to move our interview",
+      "labels": [
+        "INBOX",
+        "CATEGORY_PERSONAL"
+      ],
+      "body": "Hi Alex,\n\nApologies — something came up. Could we move our interview from Wednesday November 4 to Thursday, November 5, 2026, same time (2:00 PM ET)?\nLet me know if that works.\n\nDaniel"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "critical": true,
+      "category": [
+        "INTERVIEW"
+      ],
+      "fields": {
+        "interviewDate": {
+          "date": "2026-11-05"
+        },
+        "actionRequired": {
+          "equals": true
+        }
+      },
+      "mustBeNull": [
+        "offerInfo",
+        "rejectionInfo"
+      ]
+    },
+    "group": "interview"
+  },
+  {
+    "id": "interview-onsite-panel",
+    "input": {
+      "sender": "Contoso Analytics Recruiting <recruiting@contoso-analytics.example.com>",
+      "subject": "Your onsite interview at Contoso Analytics",
+      "labels": [
+        "INBOX",
+        "CATEGORY_UPDATES"
+      ],
+      "body": "Dear Alex,\n\nWe are pleased to invite you to an onsite panel interview for the Data Engineer position on Monday, November 16, 2026, from 9:00 AM to 1:00 PM.\nThe panel includes our data platform lead and two senior engineers. Lunch will be provided.\n\nAddress: 100 Example Street, Floor 4. Please bring a photo ID.\n\nContoso Analytics Recruiting"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "critical": true,
+      "category": [
+        "INTERVIEW"
+      ],
+      "fields": {
+        "companyName": {
+          "contains": [
+            "contoso"
+          ]
+        },
+        "jobTitle": {
+          "contains": [
+            "data engineer"
+          ]
+        },
+        "interviewDate": {
+          "date": "2026-11-16"
+        },
+        "interviewStage": {
+          "contains": [
+            "onsite",
+            "panel"
+          ]
+        }
+      },
+      "mustBeNull": [
+        "offerInfo",
+        "rejectionInfo"
+      ]
+    },
+    "group": "interview"
+  },
+  {
+    "id": "interview-video-link",
+    "input": {
+      "sender": "Wingtip Talent <talent@wingtip.example.net>",
+      "subject": "Video link for tomorrow's interview — Mobile Engineer",
+      "labels": [
+        "INBOX",
+        "CATEGORY_UPDATES"
+      ],
+      "body": "Hi Alex,\n\nHere is the video link for your Mobile Engineer interview with Wingtip Toys on October 22, 2026 at 4:00 PM:\nhttps://meet.example.com/wingtip-mobile-alex\n\nSee you then!\nWingtip Talent"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "critical": true,
+      "category": [
+        "INTERVIEW"
+      ],
+      "fields": {
+        "companyName": {
+          "contains": [
+            "wingtip"
+          ]
+        },
+        "jobTitle": {
+          "contains": [
+            "mobile engineer"
+          ]
+        },
+        "interviewDate": {
+          "date": "2026-10-22"
+        },
+        "interviewTime": {
+          "contains": [
+            "4:00",
+            "16:00"
+          ]
+        }
+      },
+      "mustBeNull": [
+        "offerInfo",
+        "rejectionInfo"
+      ]
+    },
+    "group": "interview"
+  },
+  {
+    "id": "interview-reminder",
+    "input": {
+      "sender": "Relecloud Interviews <interviews@relecloud.example.com>",
+      "subject": "Reminder: final round interview Friday",
+      "labels": [
+        "INBOX",
+        "CATEGORY_UPDATES"
+      ],
+      "body": "Hi Alex,\n\nA reminder that your final round interview for the Solutions Architect role at Relecloud is this Friday, October 23, 2026 at 11:00 AM.\nNo preparation is needed.\n\nRelecloud"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "critical": true,
+      "category": [
+        "INTERVIEW"
+      ],
+      "fields": {
+        "companyName": {
+          "contains": [
+            "relecloud"
+          ]
+        },
+        "interviewStage": {
+          "contains": [
+            "final"
+          ]
+        },
+        "interviewDate": {
+          "date": "2026-10-23"
+        }
+      },
+      "mustBeNull": [
+        "offerInfo",
+        "rejectionInfo"
+      ]
+    },
+    "group": "interview"
+  }
+]

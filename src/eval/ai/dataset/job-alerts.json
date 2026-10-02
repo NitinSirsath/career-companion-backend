@@ -1,0 +1,72 @@
+[
+  {
+    "id": "alert-job-board-digest",
+    "input": {
+      "sender": "JobBoard Alerts <alerts@jobboard.example.com>",
+      "subject": "12 new Platform Engineer jobs for you",
+      "labels": [
+        "INBOX",
+        "CATEGORY_UPDATES"
+      ],
+      "body": "New jobs matching your alert 'Platform Engineer, Remote':\n- Platform Engineer, Adventure Works\n- Senior Platform Engineer, Coho Winery\n- Platform Reliability Engineer, Lucerne Publishing\n\nView all jobs or change your alert settings."
+    },
+    "expect": {
+      "relevance": "ANY",
+      "category": [
+        "NEWSLETTER"
+      ],
+      "mustBeNull": [
+        "offerInfo",
+        "rejectionInfo",
+        "interviewDate"
+      ]
+    },
+    "group": "job-alerts"
+  },
+  {
+    "id": "alert-career-newsletter",
+    "input": {
+      "sender": "Career Weekly <newsletter@careerweekly.example.org>",
+      "subject": "This week: negotiating your first offer",
+      "labels": [
+        "INBOX",
+        "CATEGORY_FORUMS"
+      ],
+      "body": "Career Weekly — issue 214\n\nHow to negotiate a first offer, five questions to ask in a final round, and the salary report for backend roles."
+    },
+    "expect": {
+      "relevance": "ANY",
+      "category": [
+        "NEWSLETTER"
+      ],
+      "mustBeNull": [
+        "offerInfo",
+        "rejectionInfo"
+      ]
+    },
+    "group": "job-alerts"
+  },
+  {
+    "id": "alert-company-careers",
+    "input": {
+      "sender": "Alpine Ski House Careers <careers@alpineskihouse.example.com>",
+      "subject": "New roles at Alpine Ski House",
+      "labels": [
+        "INBOX",
+        "CATEGORY_UPDATES"
+      ],
+      "body": "We're hiring! New openings this month: Data Analyst, Seasonal Operations Lead, Backend Developer.\nSee all openings on our careers page."
+    },
+    "expect": {
+      "relevance": "ANY",
+      "category": [
+        "NEWSLETTER"
+      ],
+      "mustBeNull": [
+        "offerInfo",
+        "rejectionInfo"
+      ]
+    },
+    "group": "job-alerts"
+  }
+]

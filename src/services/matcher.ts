@@ -144,11 +144,17 @@ export class MatcherService {
         where: { id: applicationId, userId: email.userId },
       });
       if (!app) throw new Error('APPLICATION_NOT_FOUND');
-      // A concurrent manual resolution wins once; do not move already created domain effects.
+      // Fresh state check at the write boundary (S6-03). A user link is legal only for an email
+      // that is still unresolved, or as a replay of the same confirmed link. A resolution whose
+      // pre-lock read was overtaken by another decision (another user link, an ignore, or a
+      // completed automatic match) fails exactly as it would sequentially; effects never move.
       if (
         source === MatchConfirmationSource.USER_CONFIRMED &&
-        email.matchConfirmedBy === source &&
-        email.applicationId !== applicationId
+        !(
+          email.matchState === EmailMatchState.UNMATCHED ||
+          email.matchState === EmailMatchState.AMBIGUOUS ||
+          (email.matchConfirmedBy === source && email.applicationId === applicationId)
+        )
       )
         throw new Error('INVALID_MATCH_STATE');
       await tx.email.update({

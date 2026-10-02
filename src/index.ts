@@ -6,6 +6,7 @@ import pgSession from 'connect-pg-simple';
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
 import { validateProductionConfig } from './utils/config';
+import { createMcpRouter } from './mcp/router';
 
 dotenv.config();
 validateProductionConfig(process.env);
@@ -30,6 +31,10 @@ const app = express();
 // Explicit deployment setting; never trust arbitrary forwarded headers by default.
 if (process.env.TRUST_PROXY_HOPS) app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS));
 const port = process.env.PORT || 3000;
+
+// MCP endpoint (ADR-0002). Mounted FIRST, before CORS, the global JSON parser, cookies and session:
+// its own 32 KB body limit must apply, and it accepts only Bearer integration tokens.
+app.use('/mcp', createMcpRouter());
 
 // Default to the Vite dev server port so CORS works in local development
 // without requiring FRONTEND_URL to be set.
@@ -69,6 +74,9 @@ import { applicationRouter } from './routes/application';
 import { gmailRouter } from './routes/gmail';
 import { emailRouter } from './routes/email';
 import { actionRouter } from './routes/action';
+import { aiRouter } from './routes/ai';
+import { integrationTokenRouter } from './routes/integrationTokens';
+import { submissionRouter } from './routes/submissions';
 import { errorHandler } from './middleware/error';
 
 app.get('/health', (req, res) => {
@@ -80,6 +88,9 @@ app.use('/api/applications', applicationRouter);
 app.use('/api/gmail', gmailRouter);
 app.use('/api/emails', emailRouter);
 app.use('/api/actions', actionRouter);
+app.use('/api/ai', aiRouter);
+app.use('/api/integration-tokens', integrationTokenRouter);
+app.use('/api/submissions', submissionRouter);
 
 app.use(errorHandler);
 

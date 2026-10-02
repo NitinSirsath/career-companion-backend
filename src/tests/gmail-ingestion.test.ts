@@ -4,6 +4,7 @@ import { GmailSyncService } from '../services/gmailSync';
 import { GmailFetcherService } from '../services/gmailFetcher';
 import { encryptToken, decryptToken } from '../utils/gmailTokenEncryption';
 import { enqueueEmailProcessingJob } from '../jobs/emailProcessingJob';
+import { configureAI } from './helpers/aiAccess';
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   history: vi.fn(),
@@ -36,6 +37,8 @@ vi.mock('googleapis', () => ({
 let userId: string;
 beforeAll(async () => {
   userId = (await prisma.user.create({ data: { email: 'ingestion@audit.test' } })).id;
+  // Sync re-offers waiting emails only to users whose own AI access is ready (ADR-0001).
+  await configureAI(userId);
 });
 afterAll(async () => {
   await prisma.user.delete({ where: { id: userId } });
@@ -65,7 +68,7 @@ beforeEach(async () => {
       payload: { headers: [{ name: 'Subject', value: 'Job interview' }] },
     },
   }));
-  vi.mocked(enqueueEmailProcessingJob).mockResolvedValue(undefined);
+  vi.mocked(enqueueEmailProcessingJob).mockResolvedValue('fixture-job');
 });
 
 describe('Gmail ingestion checkpoints and recovery', () => {

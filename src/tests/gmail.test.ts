@@ -18,6 +18,7 @@ import request from 'supertest';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
 import { encryptToken } from '../utils/gmailTokenEncryption';
+import { configureAI } from './helpers/aiAccess';
 
 vi.mock('../jobs/emailProcessingJob', () => ({
   enqueueEmailProcessingJob: vi.fn().mockResolvedValue(undefined),
@@ -129,6 +130,8 @@ describe('Gmail OAuth Routes (COM-19)', () => {
     testUser = await prisma.user.create({
       data: { email: 'gmail-test@test.local' },
     });
+    // Sync re-offers waiting emails only to users whose own AI access is ready (ADR-0001).
+    await configureAI(testUser.id);
   });
 
   afterAll(async () => {
@@ -599,6 +602,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       const keys = Object.keys(msg).sort();
       // Should strictly match EmailMessageSchema
       expect(keys).toEqual([
+        'aiProcessingResult', // provenance only: { provider, model } or null (ADR-0001)
         'gmailMessageId',
         'id',
         'matchState',
@@ -618,6 +622,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       expect(keys).not.toContain('updatedAt');
       expect(keys).not.toContain('userId');
       expect(keys).not.toContain('applicationId');
+      expect(msg.aiProcessingResult === null || Object.keys(msg.aiProcessingResult).sort().join() === 'model,provider').toBe(true);
     });
 
     it('isolates messages between users', async () => {

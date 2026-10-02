@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { MatcherService } from '../services/matcher';
-import { ResolveAmbiguityRequestSchema } from '../contracts/email';
+import { ResolveAmbiguityRequestSchema, RetryEmailRequestSchema } from '../contracts/email';
 
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
 
@@ -34,6 +34,8 @@ router.get('/ambiguous', async (req: Request, res: Response, next: NextFunction)
             jobTitle: email.aiProcessingResult.jobTitle,
             confidence: email.aiProcessingResult.confidence,
             category: email.aiProcessingResult.category,
+            provider: email.aiProcessingResult.provider,
+            model: email.aiProcessingResult.model,
           }
         : null,
     }));
@@ -68,6 +70,8 @@ router.get('/unmatched', async (req: Request, res: Response, next: NextFunction)
             jobTitle: email.aiProcessingResult.jobTitle,
             confidence: email.aiProcessingResult.confidence,
             category: email.aiProcessingResult.category,
+            provider: email.aiProcessingResult.provider,
+            model: email.aiProcessingResult.model,
           }
         : null,
     }));
@@ -131,18 +135,41 @@ router.post('/:id/resolve', async (req: Request, res: Response, next: NextFuncti
 
 /**
  * POST /api/emails/:id/retry
- * Manually retries AI processing for a failed or stuck email.
+ * Re-offers a failed or stuck email to the email worker. Paid AI operation claims, completed
+ * results and user match decisions are never reset here. Acknowledgment does not write processing
+ * state: the worker alone moves the email into PROCESSING and its final outcome.
+ *
+ * Held operations are never replayed automatically (ADR-0001 decision 10). When the outcome was
+ * uncertain or unusable, the user may approve exactly one more call by resending with
+ * `{ acceptPossibleDuplicateCharge: true }`; without it the response explains the hold
+ * (409 AI_RETRY_NEEDS_APPROVAL). Engineering failures and legacy partial results stay with the
+ * operator (409 AI_OPERATION_REQUIRES_REVIEW).
  */
 router.post('/:id/retry', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.auth!.user.id;
     const emailId = z.uuid().parse(req.params.id);
+    const { acceptPossibleDuplicateCharge } = RetryEmailRequestSchema.parse(req.body ?? {});
 
     const { prisma } = await import('../db/prisma');
-    const { getQueue } = await import('../services/queue');
+    const { enqueueEmailProcessingJob } = await import('../jobs/emailProcessingJob');
+    const { holdOf } = await import('../services/ai/heldOperations');
+    const { getAccessState } = await import('../services/ai/access');
 
-    const email = await prisma.email.findUnique({ where: { id: emailId } });
-    if (!email || email.userId !== userId) {
+    const email = await prisma.email.findFirst({
+      where: { id: emailId, userId },
+      select: {
+        processingState: true,
+        aiProcessingResult: { select: { processingStatus: true } },
+        aiOperations: {
+          select: {
+            id: true, operation: true, version: true, status: true, attempts: true,
+            approvedRetries: true, errorCode: true, startedAt: true, provider: true, model: true,
+          },
+        },
+      },
+    });
+    if (!email) {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Email not found.' } });
       return;
     }
@@ -152,29 +179,110 @@ router.post('/:id/retry', async (req: Request, res: Response, next: NextFunction
       return;
     }
 
-    // Reset AIOperations so they are attempted again from scratch
-    await prisma.aIOperation.deleteMany({
-      where: { emailId }
+    const now = new Date();
+    const held = email.aiOperations.flatMap((op) => {
+      const hold = holdOf(op, now);
+      return hold ? [{ op, approvable: hold.approvable }] : [];
     });
+    const legacyPartial =
+      !!email.aiProcessingResult &&
+      email.aiProcessingResult.processingStatus !== 'COMPLETED' &&
+      email.aiOperations.length === 0;
+    if (legacyPartial || held.some((h) => !h.approvable)) {
+      res.status(409).json({
+        error: {
+          code: 'AI_OPERATION_REQUIRES_REVIEW',
+          message: 'This email has an AI operation that needs review before it can be retried.',
+        },
+      });
+      return;
+    }
 
-    // Reset email state
-    await prisma.email.update({
-      where: { id: emailId },
-      data: {
-        processingState: 'PENDING',
-        processingErrorCategory: null,
-        processingErrorDetails: null,
-        processingErrorStage: null,
-        processingRetryable: null,
-        processingFailedAt: null,
-        relevanceState: 'UNPROCESSED',
-        matchState: 'UNMATCHED',
+    let approval: number | undefined;
+    if (held.length) {
+      const config = await prisma.aIConfiguration.findUnique({ where: { userId }, select: { provider: true } });
+      if (!acceptPossibleDuplicateCharge) {
+        res.status(409).json({
+          error: {
+            code: 'AI_RETRY_NEEDS_APPROVAL',
+            message: 'The earlier AI attempt may already have been charged. Approve one more attempt to retry.',
+            details: {
+              operations: held.map(({ op, approvable }) => ({
+                operation: op.operation,
+                reason: approvable,
+                provider: op.provider,
+                model: op.model,
+                attemptedAt: op.startedAt ? op.startedAt.toISOString() : null,
+              })),
+              currentProvider: config?.provider ?? null,
+            },
+          },
+        });
+        return;
       }
-    });
+      const access = await getAccessState(userId, now);
+      if (access.state !== 'READY') {
+        res.status(409).json({
+          error: {
+            code: 'AI_ACCESS_UNAVAILABLE',
+            message: 'Fix AI access before approving a retry.',
+            details: {
+              state: access.state,
+              reason: access.reason,
+              resumesAt: access.resumesAt ? access.resumesAt.toISOString() : null,
+            },
+          },
+        });
+        return;
+      }
+      // Compare-and-set on what the user saw: a concurrent approval or claim changes the row.
+      approval = Math.max(...held.map(({ op }) => op.approvedRetries)) + 1;
+      const approved = await prisma
+        .$transaction(async (tx) => {
+          for (const { op } of held) {
+            const changed = await tx.aIOperation.updateMany({
+              where: { id: op.id, status: op.status, attempts: op.attempts, approvedRetries: op.approvedRetries },
+              data: { status: 'RETRYABLE', retryAfter: null, approvedRetries: { increment: 1 } },
+            });
+            if (changed.count !== 1) throw new Error('AI_OPERATION_CHANGED');
+          }
+          return true;
+        })
+        .catch((err: unknown) => {
+          if (err instanceof Error && err.message === 'AI_OPERATION_CHANGED') return false;
+          throw err;
+        });
+      if (!approved) {
+        res.status(409).json({
+          error: { code: 'AI_OPERATION_CHANGED', message: 'This email changed. Refresh and try again.' },
+        });
+        return;
+      }
+      for (const { op } of held)
+        console.log(
+          JSON.stringify({
+            event: 'ai_retry_approved',
+            userId,
+            emailId,
+            operation: op.operation,
+            version: op.version,
+            previousStatus: op.status,
+            previousProvider: op.provider,
+            currentProvider: config?.provider ?? null,
+          }),
+        );
+    }
 
-    // Re-enqueue job
-    const boss = await getQueue();
-    await boss.send('email-processing-job', { emailId, userId });
+    const jobId = await enqueueEmailProcessingJob(userId, emailId, approval);
+    if (!jobId) {
+      res.status(409).json({
+        error: {
+          code: 'RETRY_RECENTLY_QUEUED',
+          message: 'A processing attempt was queued recently. Try again in a few minutes.',
+        },
+      });
+      return;
+    }
 
     res.status(200).json({ success: true });
   } catch (err) {

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { EmailCategory } from '@prisma/client';
+import type { AIRole } from '../../contracts/aiCatalog';
 
 export const AI_CONTRACT_VERSIONS = {
   CLASSIFICATION: 'classification/v2',
@@ -80,12 +81,77 @@ export interface RelevanceClassifierInput {
   snippet?: string | null;
 }
 
+/** Token counts Career Companion observed for one call. Not provider billing data. */
+export interface AIUsage {
+  inputTokens: number | null;
+  outputTokens: number | null;
+}
+
+export interface AIResult<T> {
+  version: string;
+  data: T;
+  model: string;
+  usage: AIUsage;
+}
+
 export interface RelevanceClassifier {
-  classifyRelevance(
-    input: RelevanceClassifierInput,
-  ): Promise<{ version: string; data: EmailRelevanceResult }>;
+  classifyRelevance(input: RelevanceClassifierInput): Promise<AIResult<EmailRelevanceResult>>;
 }
 
 export interface EmailAnalyzer {
-  extractJobData(emailBody: string): Promise<{ version: string; data: JobExtractionResult }>;
+  extractJobData(emailBody: string): Promise<AIResult<JobExtractionResult>>;
 }
+
+// ─── Provider-neutral contracts (ADR-0001 decision 4) ──────────────────────
+// Career Companion owns each capability's prompt and schema. Adapters only translate a contract
+// into their protocol. A version always means exactly these instructions and this schema, for
+// every provider: the ledger identity (email, operation, version) and the no-replay rules depend on
+// it. Change either one only together with a new version.
+
+export type { AIRole };
+
+export interface AIContract<T> {
+  version: string;
+  /** Which of the user's models runs it: `fast` screening or `detailed` analysis. */
+  role: AIRole;
+  /** Stable name some protocols require for a structured-output schema. */
+  schemaName: string;
+  instructions: string;
+  schema: z.ZodType<T>;
+  maxOutputTokens: number;
+}
+
+/** Input bounds: only these bounded fields of an email ever reach a provider. */
+export const CLASSIFICATION_INPUT_LIMITS = { sender: 512, subject: 1000, labels: 30, snippet: 1000 } as const;
+export const EXTRACTION_BODY_LIMIT = 8000;
+
+export const CLASSIFICATION_CONTRACT: AIContract<EmailRelevanceResult> = {
+  version: AI_CONTRACT_VERSIONS.CLASSIFICATION,
+  role: 'fast',
+  schemaName: 'email_relevance',
+  instructions: `
+You are an AI assistant that determines if an email is related to a user's job search.
+Analyze the provided email metadata (sender, subject, labels, snippet).
+Classify if it is RELEVANT, IRRELEVANT, or UNCERTAIN.
+Provide a confidence score (0 to 1).
+If RELEVANT, categorize it into one of: RECRUITER, INTERVIEW, ASSESSMENT, OFFER, REJECTION, FOLLOW_UP, NEWSLETTER, SPAM.
+Return your decision as a structured JSON object according to the schema.
+  `.trim(),
+  schema: EmailRelevanceSchema,
+  maxOutputTokens: 2048,
+};
+
+export const EXTRACTION_CONTRACT: AIContract<JobExtractionResult> = {
+  version: AI_CONTRACT_VERSIONS.EXTRACTION,
+  role: 'detailed',
+  schemaName: 'job_extraction',
+  instructions: `
+You are an AI assistant that extracts structured job application data from an email body.
+Extract all requested fields. If information is missing, use null.
+Do not invent or assume information.
+Provide an extractionConfidence score (0 to 1).
+Return your findings as a structured JSON object according to the schema.
+  `.trim(),
+  schema: JobExtractionSchema,
+  maxOutputTokens: 2048,
+};

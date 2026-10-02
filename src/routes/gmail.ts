@@ -443,6 +443,7 @@ router.get('/messages', async (req: Request, res: Response, next: NextFunction) 
         processingErrorStage: true,
         processingRetryable: true,
         processingFailedAt: true,
+        aiProcessingResult: { select: { provider: true, model: true } },
       },
     });
 
