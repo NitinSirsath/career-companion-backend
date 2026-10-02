@@ -4,7 +4,7 @@ import { runScheduledGmailSync } from '../jobs/gmailScheduledSyncJob';
 const mocks = vi.hoisted(() => ({ send: vi.fn() }));
 vi.mock('../services/queue', () => ({ getQueue: async () => ({ send: mocks.send }) }));
 const now = new Date('2026-10-02T12:31:00Z');
-let ids: string[] = [];
+const ids: string[] = [];
 beforeAll(async () => {
   for (let i = 0; i < 5; i++)
     ids.push((await prisma.user.create({ data: { email: `scheduled-${i}@fixture.test` } })).id);
