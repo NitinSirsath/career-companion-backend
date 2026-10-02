@@ -7,7 +7,7 @@
 //
 //   npm run build && FRESH_DATABASE_URL=... UPGRADE_DATABASE_URL=... node scripts/verify-mcp-migration.cjs
 const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
+const nodeCrypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -28,7 +28,7 @@ const backend = path.resolve(__dirname, '..');
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-mcp-migrate-'));
 
 function guardedMigrate(url, extraArgs = []) {
-  const envFile = path.join(work, `${crypto.randomUUID()}.env`);
+  const envFile = path.join(work, `${nodeCrypto.randomUUID()}.env`);
   fs.writeFileSync(envFile, `DATABASE_URL="${url}"\nTEST_DATABASE_URL="${url}"\n`, { mode: 0o600 });
   const result = spawnSync(process.execPath, [path.join(__dirname, 'guarded-migrate.cjs'), 'migrate', 'deploy', ...extraArgs], {
     cwd: backend, env: { ...process.env, TEST_ENV_FILE: envFile, TEST_DATABASE_URL: url }, encoding: 'utf8',
@@ -63,7 +63,7 @@ const newApp = (db, user, company) => one(db, `INSERT INTO applications (id, "us
 const newToken = (db, user) => one(db,
   `INSERT INTO integration_tokens (id, "userId", name, "tokenHash", "displayPrefix", "expiresAt")
    VALUES (gen_random_uuid(), $1, 'laptop', $2, 'ccmcp_abcdef', now() + interval '90 days') RETURNING id`,
-  [user, crypto.randomBytes(32).toString('hex')]).then((r) => r.id);
+  [user, nodeCrypto.randomBytes(32).toString('hex')]).then((r) => r.id);
 const SUBMISSION = `INSERT INTO external_submissions (id, "userId", source, "sourceRecordRef", platform, company, "jobTitle", "submittedAt", "tokenId", "matchState", "resolvedBy", "applicationId", "resolvedAt")
   VALUES (gen_random_uuid(), $1, 'AUTOMATION', $2, 'linkedin', 'Acme', 'Engineer', now(), $3, $4, $5, $6, $7) RETURNING id`;
 const newSubmission = (db, user, ref, { token = null, state = 'NEEDS_REVIEW', app = null } = {}) =>
@@ -161,7 +161,7 @@ async function snapshot(db) {
   const out = {};
   for (const [name, sql] of Object.entries(SNAPSHOT_TABLES)) {
     const { rows } = await db.query(sql);
-    out[name] = { count: rows.length, digest: crypto.createHash('sha256').update(JSON.stringify(rows)).digest('hex') };
+    out[name] = { count: rows.length, digest: nodeCrypto.createHash('sha256').update(JSON.stringify(rows)).digest('hex') };
   }
   return out;
 }

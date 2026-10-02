@@ -6,7 +6,7 @@
 //
 //   FRESH_DATABASE_URL=... UPGRADE_DATABASE_URL=... node scripts/verify-migration-preservation.cjs
 const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
+const nodeCrypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -19,7 +19,7 @@ const backend = path.resolve(__dirname, '..');
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-s6-migrate-'));
 
 function guardedMigrate(url, extraArgs = []) {
-  const envFile = path.join(work, `${crypto.randomUUID()}.env`);
+  const envFile = path.join(work, `${nodeCrypto.randomUUID()}.env`);
   fs.writeFileSync(envFile, `DATABASE_URL="${url}"\nTEST_DATABASE_URL="${url}"\n`, { mode: 0o600 });
   const result = spawnSync(process.execPath, [path.join(__dirname, 'guarded-migrate.cjs'), 'migrate', 'deploy', ...extraArgs], {
     cwd: backend, env: { ...process.env, TEST_ENV_FILE: envFile, TEST_DATABASE_URL: url }, encoding: 'utf8',
@@ -115,7 +115,7 @@ async function snapshot(db) {
   const out = {};
   for (const [name, sql] of Object.entries(SNAPSHOT_TABLES)) {
     const { rows } = await db.query(sql);
-    out[name] = { count: rows.length, digest: crypto.createHash('sha256').update(JSON.stringify(rows)).digest('hex') };
+    out[name] = { count: rows.length, digest: nodeCrypto.createHash('sha256').update(JSON.stringify(rows)).digest('hex') };
   }
   return out;
 }

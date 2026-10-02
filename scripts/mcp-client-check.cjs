@@ -20,8 +20,9 @@ async function main() {
   const client = new Client({ name: 'cc-mcp-client-check', version: '1.0.0' }, { versionNegotiation: { mode: 'auto' } });
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
-  } catch (err) {
-    throw new Error(`Could not connect (check the URL, MCP_ALLOWED_HOSTS and that the token is active): ${err.message}`);
+  } catch {
+    // Provider errors may contain the Bearer token; do not include a cause or raw message.
+    throw new Error("Could not connect (check the URL, MCP_ALLOWED_HOSTS and that the token is active)");
   }
   const { tools } = await client.listTools();
   console.log(JSON.stringify({ connected: true, protocolVersion: client.getNegotiatedProtocolVersion(), tools: tools.map((t) => t.name) }));

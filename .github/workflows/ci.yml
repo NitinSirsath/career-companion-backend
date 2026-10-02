@@ -1,0 +1,95 @@
+name: CI
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TEST_DATABASE_URL: postgresql://cc_ci:cc_ci_fixture_only@localhost:5432/career_companion_ci_test?schema=public
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: cc_ci
+          POSTGRES_PASSWORD: cc_ci_fixture_only
+          POSTGRES_DB: career_companion_ci_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Write isolated fixture configuration
+        shell: bash
+        run: |
+          umask 077
+          cp .env.test.example .env.test
+          node <<'JS'
+          const fs = require('node:fs');
+          const { randomBytes } = require('node:crypto');
+          const replacements = {
+            DATABASE_URL: process.env.TEST_DATABASE_URL,
+            TEST_DATABASE_URL: process.env.TEST_DATABASE_URL,
+            SESSION_SECRET: randomBytes(32).toString('hex'),
+            OAUTH_STATE_COOKIE_SECRET: randomBytes(32).toString('hex'),
+            GMAIL_TOKEN_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
+            AI_CREDENTIAL_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
+          };
+          if (replacements.GMAIL_TOKEN_ENCRYPTION_KEY === replacements.AI_CREDENTIAL_ENCRYPTION_KEY) process.exit(1);
+          let env = fs.readFileSync('.env.test', 'utf8');
+          for (const [key, value] of Object.entries(replacements)) env = env.replace(new RegExp('^' + key + '=.*$', 'm'), key + '=' + value);
+          fs.writeFileSync('.env.test', env, { mode: 0o600 });
+          JS
+          diff <(grep -oE '^[A-Z0-9_]+=' .env.test.example | sort) <(grep -oE '^[A-Z0-9_]+=' .env.test | sort)
+      - run: npm run db:generate
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+      - run: node scripts/guarded-migrate.cjs
+      - run: npm test
+  migration-lanes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: cc_ci
+          POSTGRES_PASSWORD: cc_ci_fixture_only
+          POSTGRES_DB: career_companion_ci_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate && npm run build
+      - name: Verify fresh and upgrade migration lanes
+        shell: bash
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          for lane in s6 ai mcp; do
+            for mode in fresh upgrade; do
+              docker exec "$POSTGRES_CONTAINER" createdb -U cc_ci "career_companion_${lane}_${mode}_test"
+            done
+            export FRESH_DATABASE_URL="postgresql://cc_ci:cc_ci_fixture_only@localhost:5432/career_companion_${lane}_fresh_test?schema=public"
+            export UPGRADE_DATABASE_URL="postgresql://cc_ci:cc_ci_fixture_only@localhost:5432/career_companion_${lane}_upgrade_test?schema=public"
+            case "$lane" in
+              s6) node scripts/verify-migration-preservation.cjs ;;
+              ai) node scripts/verify-ai-migration.cjs ;;
+              mcp) node scripts/verify-mcp-migration.cjs ;;
+            esac
+          done
