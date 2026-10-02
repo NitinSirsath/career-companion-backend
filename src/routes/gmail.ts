@@ -1,3 +1,4 @@
+import { SyncQueueError } from '../services/gmailSyncErrors';
 /**
  * Gmail OAuth routes (COM-19).
  *
@@ -413,7 +414,7 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
     // Return a safe, descriptive 503 when Gmail rejects our credentials.
     // This tells the frontend to prompt the user to reconnect Gmail rather
     // than showing a generic "unexpected error" for an auth failure.
-    if (err instanceof GmailAuthError) {
+    if (err instanceof GmailAuthError || err instanceof SyncQueueError) {
       return res.status(503).json({
         error: {
           code: err.code,

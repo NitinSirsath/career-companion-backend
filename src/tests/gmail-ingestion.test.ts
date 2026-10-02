@@ -327,3 +327,126 @@ describe('capped and failed scan persistence', () => {
     }
   });
 });
+
+describe('request ownership fencing', () => {
+  it('reclaims only an expired attempt of the same request', async () => {
+    await prisma.gmailConnection.update({
+      where: { userId },
+      data: {
+        syncStatus: 'SYNCING',
+        syncClaim: 'queued:one:attempt:0:old',
+        syncLeaseUntil: new Date(Date.now() + 60000),
+      },
+    });
+    await expect(GmailSyncService.syncUser(userId, 'queued:one')).rejects.toThrow(
+      'already in progress',
+    );
+    await expect(GmailSyncService.syncUser(userId, 'queued:two')).rejects.toThrow('superseded');
+    expect(mocks.list).not.toHaveBeenCalled();
+    await prisma.gmailConnection.update({
+      where: { userId },
+      data: { syncLeaseUntil: new Date(0) },
+    });
+    await GmailSyncService.syncUser(userId, 'queued:one', {
+      retryCount: 1,
+      jobId: 'job-fixture',
+      retryLimit: 3,
+    });
+    expect(
+      (await prisma.gmailConnection.findUniqueOrThrow({ where: { userId } })).lastHistoryId,
+    ).toBe('100');
+  });
+
+  it.each(['claim', 'disconnect', 'expire'])(
+    'rejects an insert after %s changes during Google I/O',
+    async (change) => {
+      const original = await mocks.get.getMockImplementation()!({ id: 'message-a' });
+      mocks.get.mockImplementationOnce(async () => {
+        await prisma.gmailConnection.update({
+          where: { userId },
+          data:
+            change === 'claim'
+              ? { syncClaim: 'replacement' }
+              : change === 'disconnect'
+                ? { status: 'NOT_CONNECTED', accessToken: '', refreshToken: null }
+                : { syncLeaseUntil: new Date(0) },
+        });
+        return original;
+      });
+      const events = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        await expect(GmailSyncService.syncUser(userId)).rejects.toThrow('superseded');
+        expect(await prisma.email.count({ where: { userId } })).toBe(0);
+        expect(enqueueEmailProcessingJob).not.toHaveBeenCalled();
+        expect(
+          (await prisma.gmailConnection.findUniqueOrThrow({ where: { userId } })).lastHistoryId,
+        ).toBeNull();
+        expect(
+          events.mock.calls
+            .map(([value]) => JSON.parse(value))
+            .filter((e) => e.event === 'gmail_sync_superseded'),
+        ).toEqual([
+          expect.objectContaining({ checkpointCommitted: false, checkpointAdvanced: false }),
+        ]);
+      } finally {
+        events.mockRestore();
+      }
+    },
+  );
+
+  it('stops at the four-minute budget before an insert', async () => {
+    const original = await mocks.get.getMockImplementation()!({ id: 'message-a' });
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now');
+    mocks.get.mockImplementationOnce(async () => {
+      clock.mockReturnValue(now + 240001);
+      return original;
+    });
+    try {
+      await expect(GmailSyncService.syncUser(userId)).rejects.toThrow('time budget');
+      expect(await prisma.email.count({ where: { userId } })).toBe(0);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('retains the request across partial failure and retries without duplicate email rows', async () => {
+    await prisma.gmailConnection.update({
+      where: { userId },
+      data: { syncClaim: 'queued:retry', syncStatus: 'SYNCING' },
+    });
+    mocks.list
+      .mockResolvedValueOnce({ data: { messages: [{ id: 'message-a' }], nextPageToken: 'two' } })
+      .mockRejectedValueOnce({ status: 503 });
+    await expect(GmailSyncService.syncUser(userId, 'queued:retry')).rejects.toThrow();
+    expect(await prisma.gmailConnection.findUniqueOrThrow({ where: { userId } })).toMatchObject({
+      syncClaim: 'queued:retry',
+      lastHistoryId: null,
+    });
+    await GmailSyncService.syncUser(userId, 'queued:retry', { retryCount: 1 });
+    expect(await prisma.email.count({ where: { userId } })).toBe(1);
+  });
+
+  it('caps pending recovery and stops offering immediately when ownership changes', async () => {
+    await prisma.email.createMany({
+      data: Array.from({ length: 101 }, (_, i) => ({
+        userId,
+        gmailMessageId: `pending-${i}`,
+        receivedAt: new Date(1700000000000 + i),
+      })),
+    });
+    mocks.list.mockResolvedValue({ data: { messages: [] } });
+    await GmailSyncService.syncUser(userId);
+    expect(enqueueEmailProcessingJob).toHaveBeenCalledTimes(100);
+    vi.mocked(enqueueEmailProcessingJob).mockClear();
+    vi.mocked(enqueueEmailProcessingJob).mockImplementationOnce(async () => {
+      await prisma.gmailConnection.update({
+        where: { userId },
+        data: { syncClaim: 'replacement' },
+      });
+      return 'fixture';
+    });
+    await expect(GmailSyncService.syncUser(userId)).rejects.toThrow('superseded');
+    expect(enqueueEmailProcessingJob).toHaveBeenCalledTimes(1);
+  });
+});

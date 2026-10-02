@@ -1,7 +1,6 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi } from 'vitest';
 import { extractHeaders, GmailAuthError } from '../services/gmailSync';
-import { GaxiosError } from 'gaxios';
+import { googleAuthFailure, googleStatus } from '../services/gmailClient';
 
 vi.mock('../jobs/emailProcessingJob', () => ({
   enqueueEmailProcessingJob: vi.fn().mockResolvedValue(undefined),
@@ -75,50 +74,17 @@ describe('GmailSyncService Helpers', () => {
     });
   });
 
-  // ─── GaxiosError detection ─────────────────────────────────────────────────
-
-  describe('GaxiosError 401/403 detection', () => {
-    it('GaxiosError with status 401 is detectable for reclassification', () => {
-      // Simulate the detection logic used in syncUser's inner catch
-      const err = new GaxiosError(
-        'Unauthorized',
-        { headers: new Headers(), url: new URL('https://test.com') },
-        {
-          status: 401,
-          statusText: 'Unauthorized',
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          data: {} as any,
-          headers: {} as any,
-          config: {} as any,
-          request: {} as any,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any,
-      );
-
-      const isGmailAuthFailure =
-        err instanceof GaxiosError && (err.status === 401 || err.status === 403);
-      expect(isGmailAuthFailure).toBe(true);
-    });
-
-    it('GaxiosError with status 429 is NOT reclassified as auth failure', () => {
-      const err = new GaxiosError(
-        'Too Many Requests',
-        { headers: new Headers(), url: new URL('https://test.com') },
-        {
-          status: 429,
-          statusText: 'Too Many Requests',
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          data: {} as any,
-          headers: {} as any,
-          config: {} as any,
-          request: {} as any,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any,
-      );
-
-      const isGmailAuthFailure =
-        err instanceof GaxiosError && (err.status === 401 || err.status === 403);
-      expect(isGmailAuthFailure).toBe(false);
+  describe('production Google error classification', () => {
+    it.each([
+      [{ status: 401 }, 401, true],
+      [{ response: { status: 403 } }, 403, false],
+      [{ status: 429 }, 429, false],
+      [{ response: { data: { error: 'invalid_grant' } } }, undefined, true],
+      [Object.assign(new Error('Gmail request failed'), { status: 401 }), 401, true],
+      [new Error('401 invalid_grant in unrelated text'), undefined, false],
+    ])('classifies structured errors without guessing from messages', (error, status, auth) => {
+      expect(googleStatus(error)).toBe(status);
+      expect(googleAuthFailure(error)).toBe(auth);
     });
   });
 });

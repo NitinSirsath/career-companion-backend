@@ -5,19 +5,34 @@ import { withGmail, googleStatus, googleAuthFailure } from './gmailClient';
 import { enqueueEmailProcessingJob } from '../jobs/emailProcessingJob';
 import { getAccessState } from './ai/access';
 
-export class SyncInProgressError extends Error {
-  readonly code = 'SYNC_IN_PROGRESS';
-  constructor(message: string) {
-    super(message);
-    this.name = 'SyncInProgressError';
-  }
+import {
+  GmailAuthError,
+  SyncInProgressError,
+  SyncBusyError,
+  SyncSupersededError,
+  SyncDeadlineError,
+} from './gmailSyncErrors';
+import { acquireSync, withOwnedSync } from './gmailSyncOwnership';
+export { GmailAuthError, SyncInProgressError } from './gmailSyncErrors';
+export interface SyncDelivery {
+  trigger?: 'manual' | 'scheduled';
+  jobId?: string;
+  retryCount?: number;
+  retryLimit?: number;
 }
-export class GmailAuthError extends Error {
-  readonly code = 'GMAIL_AUTH_FAILED';
-  constructor(message: string) {
-    super(message);
-    this.name = 'GmailAuthError';
-  }
+function syncCategory(error: unknown): string {
+  if (error instanceof GmailAuthError || googleAuthFailure(error)) return 'AUTH_REVOKED';
+  if (error instanceof SyncInProgressError || error instanceof SyncBusyError) return 'REQUEST_BUSY';
+  if (error instanceof SyncSupersededError) return 'SUPERSEDED';
+  if (error instanceof SyncDeadlineError) return 'DEADLINE_EXCEEDED';
+  const status = googleStatus(error);
+  return status === 429
+    ? 'RATE_LIMIT'
+    : status === 403
+      ? 'FORBIDDEN'
+      : status && status >= 500
+        ? 'PROVIDER_UNAVAILABLE'
+        : 'UNCLASSIFIED';
 }
 export const REOFFER_LIMIT = 100;
 
@@ -28,7 +43,10 @@ export const REOFFER_LIMIT = 100;
  * re-offered by the next sync or after the user fixes access (no scheduler). Enqueueing is
  * idempotent per email (singleton key).
  */
-export async function reofferPendingEmails(userId: string): Promise<number> {
+export async function reofferPendingEmails(
+  userId: string,
+  guard?: () => Promise<void>,
+): Promise<number> {
   if ((await getAccessState(userId)).state !== 'READY') return 0;
   const pending = await prisma.email.findMany({
     where: { userId, processingState: 'PENDING' },
@@ -36,7 +54,10 @@ export async function reofferPendingEmails(userId: string): Promise<number> {
     take: REOFFER_LIMIT,
     select: { id: true },
   });
-  for (const email of pending) await enqueueEmailProcessingJob(userId, email.id);
+  for (const email of pending) {
+    await guard?.();
+    await enqueueEmailProcessingJob(userId, email.id);
+  }
   return pending.length;
 }
 
@@ -101,63 +122,51 @@ export function syncWindow({
 }
 
 export class GmailSyncService {
-  static async syncUser(userId: string, queuedClaim?: string) {
-    const connection = await prisma.gmailConnection.findUnique({ where: { userId } });
-    if (!connection || connection.status !== 'CONNECTED')
-      throw new GmailAuthError('Gmail is not connected');
-
-    const syncLookbackDays = connection.syncLookbackDays || 1;
-    const lastSyncedLookbackDays = connection.lastSyncedLookbackDays;
-    const window = syncWindow({
-      now: new Date(),
-      lastSyncedAt: connection.lastSyncedAt,
-      lookbackDays: syncLookbackDays,
-    });
-    const daysSinceLastSync = connection.lastSyncedAt
-      ? (Date.now() - connection.lastSyncedAt.getTime()) / 86400000
-      : Infinity;
-    const shouldFullSync =
-      !connection.lastHistoryId ||
-      !connection.lastSyncedAt ||
-      daysSinceLastSync > syncLookbackDays ||
-      (lastSyncedLookbackDays !== null && syncLookbackDays > lastSyncedLookbackDays);
-
-    const claim = randomUUID();
-    const acquired = await prisma.gmailConnection.updateMany({
-      where: {
-        id: connection.id,
-        status: 'CONNECTED',
-        ...(queuedClaim
-          ? { syncClaim: queuedClaim }
-          : {
-              OR: [
-                { syncStatus: { not: 'SYNCING' } },
-                { syncLeaseUntil: { lt: new Date() } },
-                { syncLeaseUntil: null },
-              ],
-            }),
-      },
-      data: {
-        syncStatus: 'SYNCING',
-        syncClaim: claim,
-        syncLeaseUntil: syncLease(),
-        syncError: null,
-      },
-    });
-    if (!acquired.count) throw new SyncInProgressError('A sync is already in progress');
+  static async syncUser(userId: string, queuedClaim?: string, delivery: SyncDelivery = {}) {
+    const started = Date.now();
+    const requestId = queuedClaim ?? `direct:${randomUUID()}`;
+    const claim = `${requestId}:attempt:${delivery.retryCount ?? 0}:${randomUUID()}`;
+    const context = {
+      trigger: delivery.trigger ?? 'manual',
+      userId,
+      requestId,
+      jobId: delivery.jobId ?? null,
+      attemptId: claim,
+      retryCount: delivery.retryCount ?? 0,
+      retryLimit: delivery.retryLimit ?? 0,
+    };
+    let checkpointCommitted: boolean | null = false;
+    let checkpointAdvanced = false;
     let messagesIngested = 0;
     let messagesSkipped = 0;
-    const started = Date.now();
-    const heartbeat = async () => {
-      if (Date.now() - started > 4 * 60_000)
-        throw new Error('Sync time budget reached; resume on next sync');
-      const alive = await prisma.gmailConnection.updateMany({
-        where: { id: connection.id, syncClaim: claim, status: 'CONNECTED' },
-        data: { syncLeaseUntil: syncLease() },
-      });
-      if (!alive.count) throw new Error('Sync superseded or disconnected');
-    };
+    let connectionId: string | undefined;
     try {
+      const acquired = await acquireSync(userId, queuedClaim, claim);
+      const connection = acquired.connection;
+      connectionId = connection.id;
+      const syncLookbackDays = connection.syncLookbackDays || 1;
+      const window = syncWindow({
+        now: acquired.now,
+        lastSyncedAt: connection.lastSyncedAt,
+        lookbackDays: syncLookbackDays,
+      });
+      const daysSinceLastSync = connection.lastSyncedAt
+        ? (acquired.now.getTime() - connection.lastSyncedAt.getTime()) / DAY_MS
+        : Infinity;
+      const shouldFullSync =
+        !connection.lastHistoryId ||
+        !connection.lastSyncedAt ||
+        daysSinceLastSync > syncLookbackDays ||
+        (connection.lastSyncedLookbackDays !== null &&
+          syncLookbackDays > connection.lastSyncedLookbackDays);
+      console.log(JSON.stringify({ event: 'gmail_sync_started', ...context }));
+      const deadline = () => {
+        if (Date.now() - started > 4 * 60_000) throw new SyncDeadlineError();
+      };
+      const heartbeat = async () => {
+        deadline();
+        await withOwnedSync(userId, connection.id, claim, async () => undefined);
+      };
       const historyId = await withGmail(userId, async (gmail) => {
         const ingest = async (ids: string[]) => {
           for (const id of new Set(ids)) {
@@ -166,8 +175,10 @@ export class GmailSyncService {
               where: { userId_gmailMessageId: { userId, gmailMessageId: id } },
             });
             if (existing) {
-              if (existing.processingState === 'PENDING')
+              if (existing.processingState === 'PENDING') {
+                await heartbeat();
                 await enqueueEmailProcessingJob(userId, existing.id);
+              }
               messagesSkipped++;
               continue;
             }
@@ -191,20 +202,24 @@ export class GmailSyncService {
             if (!message.labelIds?.includes('INBOX')) continue;
             const receivedAt = message.internalDate ? new Date(Number(message.internalDate)) : null;
             if (receivedAt && receivedAt < window.windowStart) continue;
-            await heartbeat();
-            const record = await prisma.email.upsert({
-              where: { userId_gmailMessageId: { userId, gmailMessageId: id } },
-              create: {
-                userId,
-                gmailMessageId: id,
-                threadId: message.threadId,
-                ...extractHeaders(message.payload?.headers),
-                ...(receivedAt && !isNaN(receivedAt.getTime()) ? { receivedAt } : {}),
-              },
-              update: {},
-            });
-            if (record.processingState === 'PENDING')
+            deadline();
+            const record = await withOwnedSync(userId, connection.id, claim, (tx) =>
+              tx.email.upsert({
+                where: { userId_gmailMessageId: { userId, gmailMessageId: id } },
+                create: {
+                  userId,
+                  gmailMessageId: id,
+                  threadId: message.threadId,
+                  ...extractHeaders(message.payload?.headers),
+                  ...(receivedAt && !isNaN(receivedAt.getTime()) ? { receivedAt } : {}),
+                },
+                update: {},
+              }),
+            );
+            if (record.processingState === 'PENDING') {
+              await heartbeat();
               await enqueueEmailProcessingJob(userId, record.id);
+            }
             messagesIngested++;
           }
         };
@@ -266,26 +281,39 @@ export class GmailSyncService {
       });
       // Recover the DB-insert / queue-send gap even when the history no longer returns that email,
       // and resume emails that waited for AI access.
-      await reofferPendingEmails(userId);
+      await reofferPendingEmails(userId, heartbeat);
+      await heartbeat();
       const lastSyncedAt = new Date();
-      await prisma.gmailConnection.updateMany({
-        where: { id: connection.id, syncClaim: claim, status: 'CONNECTED' },
-        data: {
-          syncStatus: 'IDLE',
-          syncClaim: null,
-          syncLeaseUntil: null,
-          lastHistoryId: historyId,
-          lastSyncedAt,
-          lastSyncedLookbackDays: syncLookbackDays,
-          ...(window.unscanned && {
-            unscannedFrom: window.unscanned.from,
-            unscannedUntil: window.unscanned.until,
-          }),
-        },
-      });
+      checkpointCommitted = null;
+      const committed = await withOwnedSync(userId, connection.id, claim, (tx) =>
+        tx.gmailConnection.updateMany({
+          where: { id: connection.id, userId, syncClaim: claim, status: 'CONNECTED' },
+          data: {
+            syncStatus: 'IDLE',
+            syncClaim: null,
+            syncLeaseUntil: null,
+            lastHistoryId: historyId,
+            lastSyncedAt,
+            lastSyncedLookbackDays: syncLookbackDays,
+            ...(window.unscanned && {
+              unscannedFrom: window.unscanned.from,
+              unscannedUntil: window.unscanned.until,
+            }),
+          },
+        }),
+      );
+      if (committed.count !== 1) {
+        checkpointCommitted = false;
+        throw new SyncSupersededError();
+      }
+      checkpointCommitted = true;
+      checkpointAdvanced = historyId !== connection.lastHistoryId;
       console.log(
         JSON.stringify({
           event: 'gmail_sync_completed',
+          ...context,
+          checkpointCommitted,
+          checkpointAdvanced,
           windowDays: window.windowDays,
           gapCapped: window.unscanned !== null,
           userId,
@@ -294,19 +322,39 @@ export class GmailSyncService {
           durationMs: Date.now() - started,
         }),
       );
-      return { synced: true, messagesIngested, messagesSkipped, lastSyncedAt };
+      return { synced: true, messagesIngested, messagesSkipped, lastSyncedAt, checkpointAdvanced };
     } catch (error) {
-      const auth = googleAuthFailure(error);
-      await prisma.gmailConnection.updateMany({
-        where: { id: connection.id, syncClaim: claim },
-        data: {
-          syncStatus: 'FAILED',
-          syncClaim: queuedClaim ?? null,
-          syncLeaseUntil: null,
-          syncError: auth ? 'GMAIL_AUTH_FAILED' : 'SYNC_FAILED',
-        },
-      });
-      if (auth) throw new GmailAuthError('Gmail authorization expired; reconnect Gmail');
+      const superseded = error instanceof SyncSupersededError;
+      if (superseded) checkpointCommitted = false;
+      if (connectionId && !superseded) {
+        try {
+          await prisma.gmailConnection.updateMany({
+            where: { id: connectionId, userId, syncClaim: claim },
+            data: {
+              syncStatus: 'FAILED',
+              syncClaim: queuedClaim ?? null,
+              syncLeaseUntil: null,
+              syncError:
+                googleAuthFailure(error) || error instanceof GmailAuthError
+                  ? 'GMAIL_AUTH_FAILED'
+                  : 'SYNC_FAILED',
+            },
+          });
+        } catch {
+          /* A failed cleanup must not hide the original delivery outcome. */
+        }
+      }
+      console.error(
+        JSON.stringify({
+          event: superseded ? 'gmail_sync_superseded' : 'gmail_sync_failed',
+          ...context,
+          durationMs: Date.now() - started,
+          checkpointCommitted,
+          checkpointAdvanced,
+          category: syncCategory(error),
+        }),
+      );
+      if (googleAuthFailure(error)) throw new GmailAuthError();
       throw error;
     }
   }

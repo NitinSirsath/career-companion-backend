@@ -1,3 +1,4 @@
+import { SyncBusyError, SyncSupersededError, SyncDeadlineError } from './gmailSyncErrors';
 import { google, gmail_v1 } from 'googleapis';
 import { prisma } from '../db/prisma';
 import { decryptToken, encryptToken } from '../utils/gmailTokenEncryption';
@@ -31,6 +32,12 @@ export async function withGmail<T>(
   try {
     return await work(google.gmail({ version: 'v1', auth: oauth }));
   } catch (err) {
+    if (
+      err instanceof SyncBusyError ||
+      err instanceof SyncSupersededError ||
+      err instanceof SyncDeadlineError
+    )
+      throw err;
     if (googleAuthFailure(err))
       await prisma.gmailConnection.updateMany({
         where: { id: connection.id, accessToken: connection.accessToken },

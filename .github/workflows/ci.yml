@@ -54,6 +54,16 @@ jobs:
       - run: npm run build
       - run: node scripts/guarded-migrate.cjs
       - run: npm test
+      - name: Verify killed-worker recovery twice
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec "$POSTGRES_CONTAINER" createdb -U cc_ci career_companion_ci_crash_test
+          export TEST_DATABASE_URL="postgresql://cc_ci:cc_ci_fixture_only@localhost:5432/career_companion_ci_crash_test?schema=public"
+          umask 077
+          printf 'DATABASE_URL=%s\nTEST_DATABASE_URL=%s\n' "$TEST_DATABASE_URL" "$TEST_DATABASE_URL" > .env.crash.test
+          node scripts/test-gmail-crash.cjs
+          node scripts/test-gmail-crash.cjs
   migration-lanes:
     runs-on: ubuntu-latest
     timeout-minutes: 15
