@@ -1,3 +1,4 @@
+import { GmailStatusResponseSchema } from '../contracts/gmail';
 import { GmailSyncService } from '../services/gmailSync';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
@@ -167,6 +168,30 @@ describe('Gmail OAuth Routes (COM-19)', () => {
   // ─── GET /api/gmail/status ────────────────────────────────────────────────
 
   describe('GET /api/gmail/status', () => {
+    it('exposes only the owned capped-gap dates through the status contract', async () => {
+      const from = new Date('2026-01-01T00:00:00Z'),
+        until = new Date('2026-01-15T00:00:00Z');
+      await prisma.gmailConnection.create({
+        data: {
+          userId: testUser.id,
+          gmailEmail: 'testuser@gmail.com',
+          status: 'CONNECTED',
+          accessToken: encryptToken('secret'),
+          unscannedFrom: from,
+          unscannedUntil: until,
+        },
+      });
+      const res = await request(app)
+        .get('/api/gmail/status')
+        .set('X-Development-User', testUser.email);
+      expect(res.status).toBe(200);
+      expect(GmailStatusResponseSchema.parse(res.body).unscannedGap).toEqual({
+        from: from.toISOString(),
+        until: until.toISOString(),
+      });
+      expect(JSON.stringify(res.body)).not.toContain('secret');
+    });
+
     it('returns connected=false when no GmailConnection exists', async () => {
       const res = await request(app)
         .get('/api/gmail/status')
@@ -174,6 +199,8 @@ describe('Gmail OAuth Routes (COM-19)', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.connected).toBe(false);
+      expect(res.body.unscannedGap).toBeNull();
+      expect(GmailStatusResponseSchema.safeParse(res.body).success).toBe(true);
       expect(res.body.gmailEmail).toBeNull();
       expect(res.body.status).toBeNull();
       expect(res.body.syncStatus).toBeNull();
@@ -622,7 +649,10 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       expect(keys).not.toContain('updatedAt');
       expect(keys).not.toContain('userId');
       expect(keys).not.toContain('applicationId');
-      expect(msg.aiProcessingResult === null || Object.keys(msg.aiProcessingResult).sort().join() === 'model,provider').toBe(true);
+      expect(
+        msg.aiProcessingResult === null ||
+          Object.keys(msg.aiProcessingResult).sort().join() === 'model,provider',
+      ).toBe(true);
     });
 
     it('isolates messages between users', async () => {

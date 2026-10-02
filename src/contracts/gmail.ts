@@ -9,6 +9,8 @@ import { createPaginatedResponseSchema } from './pagination';
 
 import { z } from 'zod';
 
+const IsoDateTime = z.iso.datetime({ offset: true });
+
 // ─── Shared enums (mirrors Prisma enums) ────────────────────────────────────
 
 export const GmailConnectionStatusSchema = z.enum(['NOT_CONNECTED', 'CONNECTED', 'REVOKED']);
@@ -27,6 +29,7 @@ export const GmailStatusResponseSchema = z.object({
   syncError: z.string().nullable().optional(),
   lastSyncedAt: z.date().nullable().or(z.string().nullable()),
   syncLookbackDays: z.number().optional(),
+  unscannedGap: z.object({ from: IsoDateTime, until: IsoDateTime }).nullable().optional(),
 });
 export type GmailStatusResponse = z.infer<typeof GmailStatusResponseSchema>;
 

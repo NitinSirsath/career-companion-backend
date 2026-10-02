@@ -195,3 +195,135 @@ describe('Gmail ingestion checkpoints and recovery', () => {
     ).toBe('');
   });
 });
+
+describe('long-gap synchronization (S7-02)', () => {
+  it('ingests mail from the gap with lookback 1 instead of silently dropping it', async () => {
+    const now = Date.now();
+    await prisma.gmailConnection.update({
+      where: { userId },
+      data: {
+        lastHistoryId: 'old',
+        lastSyncedAt: new Date(now - 5 * 86400_000),
+        syncLookbackDays: 1,
+      },
+    });
+    mocks.list.mockResolvedValue({
+      data: { messages: [{ id: 'gap-mail' }, { id: 'recent-mail' }] },
+    });
+    mocks.get.mockImplementation(async ({ id }: { id: string }) => ({
+      data: {
+        id,
+        internalDate: String(now - (id === 'gap-mail' ? 4 * 86400_000 : 3600_000)),
+        labelIds: ['INBOX'],
+      },
+    }));
+    await GmailSyncService.syncUser(userId);
+    expect(
+      (await prisma.email.findMany({ where: { userId }, orderBy: { gmailMessageId: 'asc' } })).map(
+        (e) => e.gmailMessageId,
+      ),
+    ).toEqual(['gap-mail', 'recent-mail']);
+    expect(mocks.list).toHaveBeenCalledWith(
+      expect.objectContaining({ q: 'newer_than:6d' }),
+      expect.anything(),
+    );
+  });
+});
+
+describe('capped and failed scan persistence', () => {
+  it('caps at 30 days, keeps the notice across uncapped runs, and replaces it on a later capped run', async () => {
+    const now = Date.now();
+    const old = new Date(now - 45 * 86400_000);
+    await prisma.gmailConnection.update({
+      where: { userId },
+      data: { lastHistoryId: 'old', lastSyncedAt: old },
+    });
+    mocks.list.mockResolvedValue({ data: { messages: [{ id: 'twenty' }, { id: 'forty' }] } });
+    mocks.get.mockImplementation(async ({ id }: { id: string }) => ({
+      data: {
+        id,
+        internalDate: String(now - (id === 'twenty' ? 20 : 40) * 86400_000),
+        labelIds: ['INBOX'],
+      },
+    }));
+    await GmailSyncService.syncUser(userId);
+    expect(mocks.list).toHaveBeenCalledWith(
+      expect.objectContaining({ q: 'newer_than:30d' }),
+      expect.anything(),
+    );
+    expect(
+      (await prisma.email.findMany({ where: { userId } })).map((e) => e.gmailMessageId),
+    ).toEqual(['twenty']);
+    const capped = await prisma.gmailConnection.findUniqueOrThrow({ where: { userId } });
+    expect(capped.unscannedFrom).toEqual(new Date(old.getTime() - 3600_000));
+    expect(Math.abs(capped.unscannedUntil!.getTime() - (now - 30 * 86400_000))).toBeLessThan(2000);
+    await GmailSyncService.syncUser(userId);
+    const next = await prisma.gmailConnection.findUniqueOrThrow({ where: { userId } });
+    expect(next.unscannedFrom).toEqual(capped.unscannedFrom);
+    expect(next.unscannedUntil).toEqual(capped.unscannedUntil);
+    const older = new Date(now - 60 * 86400_000);
+    await prisma.gmailConnection.update({ where: { userId }, data: { lastSyncedAt: older } });
+    await GmailSyncService.syncUser(userId);
+    expect(
+      (await prisma.gmailConnection.findUniqueOrThrow({ where: { userId } })).unscannedFrom,
+    ).toEqual(new Date(older.getTime() - 3600_000));
+  });
+
+  it('keeps checkpoints and gap metadata on failure, then retries the full gap', async () => {
+    const lastSyncedAt = new Date(Date.now() - 5 * 86400_000);
+    const unscannedFrom = new Date('2026-01-01');
+    const unscannedUntil = new Date('2026-01-15');
+    await prisma.gmailConnection.update({
+      where: { userId },
+      data: { lastSyncedAt, lastHistoryId: 'old', unscannedFrom, unscannedUntil },
+    });
+    mocks.list.mockRejectedValueOnce({ status: 503 });
+    await expect(GmailSyncService.syncUser(userId)).rejects.toThrow();
+    expect(await prisma.gmailConnection.findUnique({ where: { userId } })).toMatchObject({
+      lastSyncedAt,
+      lastHistoryId: 'old',
+      unscannedFrom,
+      unscannedUntil,
+    });
+    await GmailSyncService.syncUser(userId);
+    expect(mocks.list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ q: 'newer_than:6d' }),
+      expect.anything(),
+    );
+  });
+
+  it('keeps first sync at the configured window and preserves completed decisions across owners', async () => {
+    await prisma.gmailConnection.update({ where: { userId }, data: { syncLookbackDays: 7 } });
+    const other = await prisma.user.create({ data: { email: 'other-gap@fixture.test' } });
+    try {
+      const app = await prisma.application.create({ data: { userId, companyName: 'Existing' } });
+      const email = await prisma.email.create({
+        data: {
+          userId,
+          gmailMessageId: 'message-a',
+          processingState: 'COMPLETED',
+          matchState: 'MATCHED',
+          matchConfirmedBy: 'USER_CONFIRMED',
+          applicationId: app.id,
+        },
+      });
+      const foreign = await prisma.email.create({
+        data: { userId: other.id, gmailMessageId: 'message-a' },
+      });
+      await GmailSyncService.syncUser(userId);
+      expect(mocks.list).toHaveBeenCalledWith(
+        expect.objectContaining({ q: 'newer_than:7d' }),
+        expect.anything(),
+      );
+      expect(enqueueEmailProcessingJob).not.toHaveBeenCalled();
+      expect(await prisma.email.findUnique({ where: { id: email.id } })).toEqual(email);
+      expect(await prisma.email.findUnique({ where: { id: foreign.id } })).toEqual(foreign);
+      expect(
+        (await prisma.gmailConnection.findUniqueOrThrow({ where: { userId } })).unscannedFrom,
+      ).toBeNull();
+      await prisma.application.delete({ where: { id: app.id } });
+    } finally {
+      await prisma.user.delete({ where: { id: other.id } });
+    }
+  });
+});

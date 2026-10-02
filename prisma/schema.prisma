@@ -146,6 +146,8 @@ model GmailConnection {
   syncLeaseUntil         DateTime?
   syncError              String?
   syncLookbackDays       Int                   @default(1)
+  unscannedFrom          DateTime?
+  unscannedUntil         DateTime?
   lastSyncedLookbackDays Int?
   createdAt              DateTime              @default(now())
   updatedAt              DateTime              @updatedAt

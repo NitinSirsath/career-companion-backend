@@ -75,6 +75,31 @@ export function extractHeaders(
   return { subject, sender, receivedAt };
 }
 
+export const MAX_SYNC_WINDOW_DAYS = 30;
+export const SYNC_GAP_MARGIN_MS = 60 * 60_000;
+const DAY_MS = 86400_000;
+
+/** One immutable cutoff per attempt; the overlap covers mail arriving during the prior scan. */
+export function syncWindow({
+  now,
+  lastSyncedAt,
+  lookbackDays,
+}: {
+  now: Date;
+  lastSyncedAt: Date | null;
+  lookbackDays: number;
+}) {
+  const gapStart = lastSyncedAt ? new Date(lastSyncedAt.getTime() - SYNC_GAP_MARGIN_MS) : null;
+  const requiredDays = gapStart
+    ? Math.ceil((now.getTime() - gapStart.getTime()) / DAY_MS)
+    : lookbackDays;
+  const windowDays = Math.min(MAX_SYNC_WINDOW_DAYS, Math.max(lookbackDays, requiredDays));
+  const windowStart = new Date(now.getTime() - windowDays * DAY_MS);
+  const unscanned =
+    gapStart && gapStart < windowStart ? { from: gapStart, until: windowStart } : null;
+  return { windowDays, windowStart, unscanned };
+}
+
 export class GmailSyncService {
   static async syncUser(userId: string, queuedClaim?: string) {
     const connection = await prisma.gmailConnection.findUnique({ where: { userId } });
@@ -83,6 +108,11 @@ export class GmailSyncService {
 
     const syncLookbackDays = connection.syncLookbackDays || 1;
     const lastSyncedLookbackDays = connection.lastSyncedLookbackDays;
+    const window = syncWindow({
+      now: new Date(),
+      lastSyncedAt: connection.lastSyncedAt,
+      lookbackDays: syncLookbackDays,
+    });
     const daysSinceLastSync = connection.lastSyncedAt
       ? (Date.now() - connection.lastSyncedAt.getTime()) / 86400000
       : Infinity;
@@ -160,8 +190,7 @@ export class GmailSyncService {
             }
             if (!message.labelIds?.includes('INBOX')) continue;
             const receivedAt = message.internalDate ? new Date(Number(message.internalDate)) : null;
-            if (receivedAt && receivedAt.getTime() < Date.now() - syncLookbackDays * 86400_000)
-              continue;
+            if (receivedAt && receivedAt < window.windowStart) continue;
             await heartbeat();
             const record = await prisma.email.upsert({
               where: { userId_gmailMessageId: { userId, gmailMessageId: id } },
@@ -191,7 +220,7 @@ export class GmailSyncService {
               {
                 userId: 'me',
                 labelIds: ['INBOX'],
-                q: `newer_than:${syncLookbackDays}d`,
+                q: `newer_than:${window.windowDays}d`,
                 maxResults: 100,
                 pageToken,
               },
@@ -248,11 +277,17 @@ export class GmailSyncService {
           lastHistoryId: historyId,
           lastSyncedAt,
           lastSyncedLookbackDays: syncLookbackDays,
+          ...(window.unscanned && {
+            unscannedFrom: window.unscanned.from,
+            unscannedUntil: window.unscanned.until,
+          }),
         },
       });
       console.log(
         JSON.stringify({
           event: 'gmail_sync_completed',
+          windowDays: window.windowDays,
+          gapCapped: window.unscanned !== null,
           userId,
           messagesIngested,
           messagesSkipped,

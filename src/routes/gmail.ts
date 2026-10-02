@@ -77,6 +77,8 @@ router.get('/status', async (req: Request, res: Response, next: NextFunction) =>
         status: true,
         syncStatus: true,
         lastSyncedAt: true,
+        unscannedFrom: true,
+        unscannedUntil: true,
         syncLeaseUntil: true,
         syncError: true,
         syncLookbackDays: true,
@@ -91,6 +93,7 @@ router.get('/status', async (req: Request, res: Response, next: NextFunction) =>
         status: null,
         syncStatus: null,
         lastSyncedAt: null,
+        unscannedGap: null,
         syncLookbackDays: 1,
       });
     }
@@ -106,6 +109,13 @@ router.get('/status', async (req: Request, res: Response, next: NextFunction) =>
           : connection.syncStatus,
       syncError: connection.syncError,
       lastSyncedAt: connection.lastSyncedAt,
+      unscannedGap:
+        connection.unscannedFrom && connection.unscannedUntil
+          ? {
+              from: connection.unscannedFrom.toISOString(),
+              until: connection.unscannedUntil.toISOString(),
+            }
+          : null,
       syncLookbackDays: connection.syncLookbackDays,
     });
   } catch (err) {
@@ -337,11 +347,9 @@ router.patch('/settings', async (req: Request, res: Response, next: NextFunction
     const { syncLookbackDays } = req.body;
 
     if (typeof syncLookbackDays !== 'number' || ![1, 7, 14, 30].includes(syncLookbackDays)) {
-      return res
-        .status(400)
-        .json({
-          error: { code: 'INVALID_LOOKBACK', message: 'syncLookbackDays must be 1, 7, 14, or 30' },
-        });
+      return res.status(400).json({
+        error: { code: 'INVALID_LOOKBACK', message: 'syncLookbackDays must be 1, 7, 14, or 30' },
+      });
     }
 
     const connection = await prisma.gmailConnection.update({
