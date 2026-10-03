@@ -128,3 +128,24 @@ describe('Gmail → user-provided AI → application pipeline', () => {
     expect(fixed.calls('job_extraction')).toHaveLength(1);
   });
 });
+
+it('runs extraction/v3 through the shared provider boundary and persists verified candidates once', async () => {
+  vi.stubEnv('AGENDA_EXTRACTION_V3_ENABLED', 'true');
+  try {
+    const provider = { generateStructured: vi.fn(async ({ contract }: { contract: { schemaName: string } }) => ({
+      data: contract.schemaName === 'email_relevance' ? relevant : { ...extraction, scheduleCandidates: [{ kind: 'INTERVIEW', change: 'SCHEDULED', date: '2026-10-04', time: '14:30', sourceTimeZone: '+05:30', rawWhen: '2026-10-04 14:30 +05:30', evidence: 'Invented quote' }] },
+      usage: { inputTokens: 1, outputTokens: 1 },
+    })), verifyModels: vi.fn() };
+    vi.mocked(createProviderClient).mockReturnValue(provider);
+    const emailId = await newEmail(ready);
+    await processEmailJob(job(ready, emailId));
+    const result = await prisma.aIProcessingResult.findUniqueOrThrow({where:{emailId}});
+    expect(result.contractVersion).toBe('extraction/v3');
+    expect(result.scheduleCandidates).toMatchObject({version:'agenda/v1', candidates:[{evidence:null,temporal:{precision:'DATETIME',instant:'2026-10-04T09:00:00.000Z'}}]});
+    const sent=provider.generateStructured.mock.calls[1][0] as unknown as {contract:{version:string},input:string};
+    expect(sent.contract.version).toBe('extraction/v3');expect(JSON.parse(sent.input).receivedAt).toBeNull();
+    expect(await prisma.agendaItem.count({where:{emailId}})).toBe(1);
+    vi.stubEnv('AGENDA_EXTRACTION_V3_ENABLED','false');
+    await processEmailJob(job(ready,emailId));expect(provider.generateStructured).toHaveBeenCalledTimes(2);
+  } finally { vi.unstubAllEnvs(); }
+});

@@ -15,6 +15,7 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  agendaItems         AgendaItem[]
   applications        Application[]
   gmailConnection     GmailConnection?
   emails              Email[]
@@ -37,6 +38,8 @@ enum ApplicationStatus {
 }
 
 model Application {
+  archivedAt         DateTime?
+  archiveRevision    Int                @default(0)
   id                 String             @id @default(uuid()) @db.Uuid
   userId             String             @db.Uuid
   companyName        String
@@ -52,6 +55,7 @@ model Application {
   updatedAt          DateTime           @updatedAt
 
   user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agendaItems         AgendaItem[]
   emails              Email[]
   events              ApplicationEvent[]
   actions             Action[]
@@ -106,6 +110,7 @@ model Email {
 
   user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   application Application?       @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  agendaItems AgendaItem[]
   events      ApplicationEvent[]
   actions     Action[]
 
@@ -220,6 +225,7 @@ model AIProcessingResult {
   followUpRequired   Boolean?
   followUpDate       String?
 
+  scheduleCandidates   Json?
   extractionConfidence Float?
   provenance           String?
 
@@ -242,8 +248,8 @@ enum RetiredReason {
 }
 
 model ApplicationEvent {
-  retiredAt DateTime?
-  retiredReason RetiredReason?
+  retiredAt            DateTime?
+  retiredReason        RetiredReason?
   id                   String             @id @default(uuid()) @db.Uuid
   applicationId        String             @db.Uuid
   emailId              String?            @db.Uuid // nullable to allow manual events later
@@ -273,16 +279,21 @@ enum DeadlinePrecision {
 }
 
 model Action {
-  retiredAt DateTime?
-  retiredReason RetiredReason?
-  deadlinePrecision DeadlinePrecision?
-  id            String    @id @default(uuid()) @db.Uuid
-  applicationId String    @db.Uuid
-  emailId       String?   @db.Uuid
-  type          String // e.g., 'ACTION_REQUIRED', 'FOLLOW_UP_REQUIRED'
-  description   String? // e.g. "Send thank you note"
-  deadline      DateTime?
-  status        String    @default("PENDING") // e.g., 'PENDING', 'COMPLETED', 'DISMISSED'
+  origin              String?
+  actionRevision      Int                @default(0)
+  clientRequestId     String?            @unique @db.Uuid
+  creationPayloadHash String?
+  snoozedUntil        DateTime?
+  retiredAt           DateTime?
+  retiredReason       RetiredReason?
+  deadlinePrecision   DeadlinePrecision?
+  id                  String             @id @default(uuid()) @db.Uuid
+  applicationId       String             @db.Uuid
+  emailId             String?            @db.Uuid
+  type                String // e.g., 'ACTION_REQUIRED', 'FOLLOW_UP_REQUIRED'
+  description         String? // e.g. "Send thank you note"
+  deadline            DateTime?
+  status              String             @default("PENDING") // e.g., 'PENDING', 'COMPLETED', 'DISMISSED'
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -514,4 +525,40 @@ model ExternalSubmission {
   @@index([userId, receivedAt])
   @@index([applicationId])
   @@map("external_submissions")
+}
+
+enum AgendaState {
+  TENTATIVE
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+model AgendaItem {
+  id                String         @id @default(uuid()) @db.Uuid
+  userId            String         @db.Uuid
+  applicationId     String         @db.Uuid
+  emailId           String         @db.Uuid
+  candidateKey      String
+  extractionVersion String
+  suggestion        Json
+  userTiming        Json?
+  // Materialized effective timing for bounded, database-side pagination.
+  precision         String
+  date              String?
+  instant           DateTime?
+  state             AgendaState    @default(TENTATIVE)
+  revision          Int            @default(0)
+  decisionSourceId  String?        @db.Uuid
+  retiredAt         DateTime?
+  retiredReason     RetiredReason?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application       Application    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  email             Email          @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, emailId, candidateKey])
+  @@index([userId, state, date])
+  @@map("agenda_items")
 }

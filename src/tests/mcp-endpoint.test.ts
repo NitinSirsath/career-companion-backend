@@ -12,6 +12,7 @@ import { createMcpRouter } from '../mcp/router';
 import { ADVERTISED_INPUT_SCHEMA } from '../mcp/server';
 import { RecordApplicationSubmissionInputSchema } from '../services/externalSubmission';
 import express from 'express';
+import { ApplicationResponseSchema, ListApplicationsResponseSchema, ListApplicationEventsResponseSchema } from '../contracts';
 
 const DOMAIN = '@mcp-endpoint.test';
 const OWNER = `owner${DOMAIN}`;
@@ -96,6 +97,91 @@ afterAll(async () => {
 });
 
 describe('official SDK client', () => {
+  it('flows from SDK intake through PostgreSQL into session-authenticated discovery, history and archive/restore', async () => {
+    const foreign = await prisma.user.create({ data: { email: `discovery-foreign${DOMAIN}` } });
+    const sessions: string[] = [];
+    const sessionCookie = async (userId: string) => {
+      const sid = crypto.randomUUID();
+      sessions.push(sid);
+      await prisma.session.create({ data: {
+        sid, sess: { cookie: { originalMaxAge: 86_400_000, httpOnly: true, path: '/' }, userId },
+        expire: new Date(Date.now() + 2 * 86_400_000),
+      } });
+      return `cc_session=${encodeURIComponent(`s:${signSid(sid, process.env.SESSION_SECRET!)}`)}`;
+    };
+    const ownCookie = await sessionCookie(owner);
+    const otherCookie = await sessionCookie(foreign.id);
+    const client = await connect();
+    const read = (path: string, cookie = ownCookie) => request(app).get(path).set('Cookie', cookie);
+    const filters = '?q=endpoint&submittedVia=AUTOMATION&sort=applied_desc';
+    try {
+      const first = await call(client, submission);
+      expect(first.structuredContent).toMatchObject({ result: 'created' });
+      expect((await call(client, submission)).structuredContent).toEqual({
+        ...(first.structuredContent as object), result: 'already_recorded',
+      });
+      const listing = await read('/api/applications' + filters + '&effectiveStatus=UNKNOWN');
+      expect(listing.status).toBe(200);
+      const [application] = ListApplicationsResponseSchema.parse(listing.body).items;
+      expect(listing.body.items).toHaveLength(1);
+      expect(application).toMatchObject({
+        companyName: submission.company, jobTitle: submission.jobTitle,
+        aiStatus: null, userStatus: null, effectiveStatus: null, submittedVia: 'AUTOMATION',
+        appliedAt: '2026-10-01T05:30:00.000Z',
+      });
+      expect((await read('/api/applications' + filters + '&effectiveStatus=APPLIED')).body.items).toEqual([]);
+      const detail = await read('/api/applications/' + application.id);
+      expect(detail.status).toBe(200);
+      expect(ApplicationResponseSchema.parse(detail.body)).toEqual(application);
+      const events = ListApplicationEventsResponseSchema.parse((await read(`/api/applications/${application.id}/events`)).body);
+      expect(events.items).toHaveLength(1);
+      expect(events.items[0]).toMatchObject({
+        type: 'AUTOMATION_SUBMITTED', sourceEmail: null, analyzedBy: null,
+        sourceSubmission: { confirmationText: submission.confirmationText, submittedAt: application.appliedAt },
+      });
+      expect(JSON.stringify(listing.body)).not.toMatch(/sourceRecordRef|tokenId|confirmationText.*ccmcp_/);
+      expect((await read('/api/applications' + filters, otherCookie)).body.items).toEqual([]);
+      expect((await read('/api/applications/' + application.id, otherCookie)).status).toBe(404);
+      expect((await read(`/api/applications/${application.id}/events`, otherCookie)).status).toBe(403);
+      expect((await request(app).get('/api/applications' + filters).set('Authorization', `Bearer ${token}`)).status).toBe(401);
+
+      const updated = await request(app).patch(`/api/applications/${application.id}/status`).set('Cookie', ownCookie)
+        .send({ userStatus: 'INTERVIEW', expectedUserStatusRevision: 0 });
+      expect(updated.status).toBe(200);
+      const linked = await call(client, { ...submission, sourceRecordRef: '2026-10-01/12:00:00', submittedAt: '2026-10-01T12:00:00+05:30' });
+      expect(linked.structuredContent).toMatchObject({ result: 'linked' });
+      const advanced = ListApplicationsResponseSchema.parse((await read('/api/applications' + filters + '&effectiveStatus=INTERVIEW')).body);
+      expect(advanced.items).toHaveLength(1);
+      expect(advanced.items[0]).toMatchObject({ id: application.id, appliedAt: application.appliedAt, userStatus: 'INTERVIEW', submittedVia: 'AUTOMATION' });
+
+      expect((await request(app).patch(`/api/applications/${application.id}/archive`).set('Cookie', ownCookie)
+        .send({ archived: true, expectedArchiveRevision: 0 })).status).toBe(200);
+      expect((await read('/api/applications' + filters)).body.items).toEqual([]);
+      expect((await read('/api/applications' + filters + '&archive=archived')).body.items).toHaveLength(1);
+      expect((await call(client, submission)).structuredContent).toEqual({
+        ...(first.structuredContent as object), result: 'already_recorded',
+      });
+      // A new archived-only candidate waits for review; it is not another application.
+      const pending = await call(client, { ...submission, sourceRecordRef: '2026-10-01/13:00:00' });
+      expect(pending.structuredContent).toMatchObject({ result: 'needs_review' });
+      expect((await read('/api/submissions/pending')).body.items).toHaveLength(1);
+      expect((await read('/api/applications' + filters + '&archive=all')).body.items).toHaveLength(1);
+      expect((await request(app).patch(`/api/applications/${application.id}/archive`).set('Cookie', ownCookie)
+        .send({ archived: false, expectedArchiveRevision: 1 })).status).toBe(200);
+      const receiptId = (pending.structuredContent as { recordId: string }).recordId;
+      expect((await request(app).post(`/api/submissions/${receiptId}/resolve`).set('Cookie', ownCookie)
+        .send({ action: 'link', applicationId: application.id })).status).toBe(200);
+      expect((await read('/api/submissions/pending')).body.items).toHaveLength(0);
+      expect((await read('/api/applications' + filters)).body.items).toHaveLength(1);
+      expect((await read(`/api/applications/${application.id}/events`)).body.items).toHaveLength(3);
+      expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(['record_application_submission']);
+    } finally {
+      await client.close();
+      await prisma.session.deleteMany({ where: { sid: { in: sessions } } });
+      await prisma.user.delete({ where: { id: foreign.id } });
+    }
+  });
+
   it('lists exactly one write-only, idempotent tool with a strict input schema', async () => {
     const client = await connect();
     const { tools } = await client.listTools();

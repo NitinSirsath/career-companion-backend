@@ -51,6 +51,7 @@ export const EvalCaseSchema = z.strictObject({
     labels: z.array(z.string()),
     snippet: z.string().optional(),
     body: z.string().min(1),
+    receivedAt: z.iso.datetime({ offset: true }).optional(),
   }),
   expect: z.strictObject({
     /** ANY marks a borderline case, excluded from relevance accuracy. */

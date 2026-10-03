@@ -1,3 +1,4 @@
+import { DomainError } from './agenda';
 /**
  * Automation submission intake and review (ADR-0002 decisions 5–8; MCP-03, MCP-05).
  *
@@ -203,10 +204,11 @@ async function createApplicationFrom(tx: Tx, userId: string, submission: Pick<Ex
 }
 
 /** Locks the owned application; false when it no longer exists for this user. Sets appliedAt only if empty. */
-async function linkApplication(tx: Tx, userId: string, applicationId: string, submittedAt: Date) {
-  const locked = await tx.$queryRaw<{ id: string }[]>`
-    SELECT id FROM applications WHERE id = ${applicationId}::uuid AND "userId" = ${userId}::uuid FOR UPDATE`;
+async function linkApplication(tx: Tx, userId: string, applicationId: string, submittedAt: Date, explicit = false) {
+  const locked = await tx.$queryRaw<{ id: string; archivedAt: Date | null }[]>`
+    SELECT id, "archivedAt" FROM applications WHERE id = ${applicationId}::uuid AND "userId" = ${userId}::uuid FOR UPDATE`;
   if (!locked.length) return false;
+  if (locked[0].archivedAt) { if (explicit) throw new DomainError('APPLICATION_ARCHIVED'); return false; }
   await tx.application.updateMany({ where: { id: applicationId, appliedAt: null }, data: { appliedAt: submittedAt } });
   return true;
 }
@@ -267,8 +269,11 @@ export async function recordSubmission(userId: string, tokenId: string | null, r
       const today = await tx.externalSubmission.count({ where: { userId, receivedAt: { gte: startOfUtcDay(now) } } });
       if (today >= limit) throw new SubmissionIntakeError('rate_limited', 'The daily submission limit is reached. Retry the next UTC day.');
 
-      const candidates = await tx.application.findMany({ where: { userId }, select: { id: true, companyName: true, jobTitle: true } });
-      let decision = decideMatch(submission, candidates);
+      const candidates = await tx.application.findMany({ where: { userId }, select: { id: true, companyName: true, jobTitle: true, archivedAt: true } });
+      const active = candidates.filter(app=>!app.archivedAt);
+      let decision = decideMatch(submission, active);
+      // An archived company candidate cannot become a silently duplicated new application.
+      if (decision.state === 'CREATED' && candidates.some(app=>app.archivedAt && companyKey(app.companyName)===companyKey(submission.company))) decision={state:'NEEDS_REVIEW'};
       let applicationId: string | null = null;
       if (decision.state === 'CREATED') applicationId = await createApplicationFrom(tx, userId, submission);
       if (decision.state === 'LINKED') {
@@ -329,7 +334,8 @@ export async function resolveSubmission(userId: string, submissionId: string, re
     let applicationId: string | null = null;
     if (resolution.action === 'create') applicationId = await createApplicationFrom(tx, userId, submission);
     if (resolution.action === 'link') {
-      if (!(await linkApplication(tx, userId, resolution.applicationId, submission.submittedAt)))
+      if (await tx.application.findFirst({where:{id:resolution.applicationId,userId,archivedAt:{not:null}}})) throw new DomainError('APPLICATION_ARCHIVED');
+      if (!(await linkApplication(tx, userId, resolution.applicationId, submission.submittedAt, true)))
         throw new SubmissionReviewError('APPLICATION_NOT_FOUND');
       applicationId = resolution.applicationId;
     }

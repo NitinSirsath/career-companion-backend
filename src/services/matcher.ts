@@ -1,3 +1,6 @@
+import { suppressNotifications } from './notificationSuppression';
+import { DomainError } from './agenda';
+import { projectAgenda } from './agenda';
 import { Prisma, Email, Application } from '@prisma/client';
 import type { CorrectEmailMatchRequest } from '../contracts/email';
 import { lockUser, LOCK_NAMESPACE } from '../utils/advisoryLock';
@@ -73,7 +76,7 @@ export class MatcherService {
 
     // Find candidate applications for this user
     const applications = await prisma.application.findMany({
-      where: { userId },
+      where: { userId, archivedAt: null },
     });
 
     const candidates = applications.filter((app) => {
@@ -159,8 +162,10 @@ export class MatcherService {
         if (email.matchState !== 'MATCHED') {
           const current = await threadDecision(tx, email);
           if (current.kind === 'STOP') return null;
-          if (current.kind === 'LINK') applicationId = current.applicationId;
-          else if (fromThread) return undefined;
+          if (current.kind === 'LINK') {
+            applicationId = current.applicationId;
+            fromThread = true;
+          } else if (fromThread) return undefined;
         }
       }
       await tx.$queryRaw`SELECT id FROM applications WHERE id = ${applicationId}::uuid AND "userId" = ${email.userId}::uuid FOR UPDATE`;
@@ -168,6 +173,10 @@ export class MatcherService {
         where: { id: applicationId, userId: email.userId },
       });
       if (!app) throw new Error('APPLICATION_NOT_FOUND');
+      if (app.archivedAt && email.applicationId !== app.id && !fromThread) {
+        if (source === 'USER_CONFIRMED') throw new DomainError('APPLICATION_ARCHIVED');
+        return null;
+      }
       // Fresh state check at the write boundary (S6-03). A user link is legal only for an email
       // that is still unresolved, or as a replay of the same confirmed link. A resolution whose
       // pre-lock read was overtaken by another decision (another user link, an ignore, or a
@@ -232,13 +241,31 @@ export class MatcherService {
       });
       const actions = await tx.action.findMany({
         where: { emailId, retiredAt: null, application: { userId } },
-        select: { applicationId: true, status: true },
+        select: { applicationId: true, status: true, snoozedUntil: true },
       });
+      const agenda = await tx.agendaItem.findMany({
+        where: { emailId, userId, retiredAt: null },
+        orderBy: { id: 'asc' },
+      });
+      const priorActions = actions.length
+        ? actions
+        : await tx.action.findMany({
+            where: { emailId, application: { userId }, retiredAt: { not: null } },
+            orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+            take: 1,
+          });
+      const priorAgenda = agenda.length
+        ? agenda
+        : await tx.agendaItem.findMany({
+            where: { emailId, userId },
+            orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+          });
       const affected = [
         ...new Set([
           ...(email.applicationId ? [email.applicationId] : []),
           ...events.map((e) => e.applicationId),
           ...actions.map((a) => a.applicationId),
+          ...agenda.map((a) => a.applicationId),
           ...(target ? [target] : []),
         ]),
       ].sort();
@@ -249,6 +276,7 @@ export class MatcherService {
         : [];
       const targetApp = apps.find((a) => a.id === target);
       if (target && !targetApp) throw new MatchCorrectionError('APPLICATION_NOT_FOUND');
+      if (targetApp?.archivedAt) throw new DomainError('APPLICATION_ARCHIVED');
       if (target && !email.aiProcessingResult)
         throw new MatchCorrectionError('MATCH_NOT_CORRECTABLE');
       const sources = apps.filter((a) => a.id !== target).map((a) => a.id);
@@ -268,7 +296,11 @@ export class MatcherService {
       });
       const retiredActions = await tx.action.updateMany({
         where: { emailId, applicationId: { in: sources }, retiredAt: null },
-        data: retirement,
+        data: { ...retirement, actionRevision: { increment: 1 } },
+      });
+      await tx.agendaItem.updateMany({
+        where: { emailId, userId, applicationId: { in: sources }, retiredAt: null },
+        data: { ...retirement, revision: { increment: 1 } },
       });
       const updated = await tx.email.update({
         where: { id: emailId },
@@ -280,12 +312,21 @@ export class MatcherService {
         select: { id: true, matchState: true, matchConfirmedBy: true, applicationId: true },
       });
       if (targetApp && email.aiProcessingResult) {
-        const carried = actions.some((a) => a.status === 'COMPLETED')
+        const carried = priorActions.some((a) => a.status === 'COMPLETED')
           ? 'COMPLETED'
-          : actions.some((a) => a.status === 'DISMISSED')
+          : priorActions.some((a) => a.status === 'DISMISSED')
             ? 'DISMISSED'
             : 'PENDING';
-        await applyEffects(tx, email, targetApp, email.aiProcessingResult, true, carried);
+        await applyEffects(
+          tx,
+          email,
+          targetApp,
+          email.aiProcessingResult,
+          true,
+          carried,
+          priorActions.find((a) => a.status === 'PENDING' && a.snoozedUntil)?.snoozedUntil ?? null,
+        );
+        await projectAgenda(tx, email, targetApp, email.aiProcessingResult, true, priorAgenda);
       }
       for (const id of sources) {
         const remaining = await tx.aIProcessingResult.findMany({
@@ -496,6 +537,7 @@ async function applyEffects(
   aiResult: AIProcessingResult,
   reactivate = false,
   actionStatus = 'PENDING',
+  snoozedUntil: Date | null = null,
 ) {
   const emailId = email.id,
     applicationId = app.id;
@@ -528,14 +570,22 @@ async function applyEffects(
         provenance: aiResult.provenance,
       },
     });
+  if (!reactivate) await projectAgenda(tx, email, app, aiResult);
   if (!aiResult.actionRequired && !aiResult.followUpRequired) return null;
   const existingAction = await tx.action.findFirst({ where: { applicationId, emailId } });
   if (existingAction) {
     if (existingAction.retiredAt && reactivate)
       await tx.action.update({
         where: { id: existingAction.id },
-        data: { retiredAt: null, retiredReason: null },
+        data: { retiredAt: null, retiredReason: null, actionRevision: { increment: 1 } },
       });
+    if (
+      app.archivedAt ||
+      (existingAction.snoozedUntil && existingAction.snoozedUntil > new Date())
+    ) {
+      await suppressNotifications(tx, [existingAction.id]);
+      return null;
+    }
     return existingAction.retiredAt && !reactivate ? null : existingAction.id;
   }
   const deadlineText = aiResult.actionRequired ? aiResult.actionDeadline : aiResult.followUpDate;
@@ -549,6 +599,8 @@ async function applyEffects(
       applicationId,
       emailId,
       status: actionStatus,
+      origin: 'EMAIL',
+      snoozedUntil: actionStatus === 'PENDING' ? snoozedUntil : null,
       type: aiResult.actionRequired ? 'ACTION_REQUIRED' : 'FOLLOW_UP_REQUIRED',
       description: aiResult.actionRequired
         ? aiResult.requestedAction || 'Action required'
@@ -557,5 +609,9 @@ async function applyEffects(
       deadlinePrecision: parsed.precision,
     },
   });
+  if (app.archivedAt || (snoozedUntil && snoozedUntil > new Date())) {
+    await suppressNotifications(tx, [action.id]);
+    return null;
+  }
   return action.id;
 }

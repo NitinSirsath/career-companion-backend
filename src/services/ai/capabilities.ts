@@ -5,6 +5,7 @@ import {
   AIRole,
   CLASSIFICATION_CONTRACT,
   EXTRACTION_CONTRACT,
+  EXTRACTION_V3_CONTRACT,
   EmailAnalyzer,
   RelevanceClassifier,
 } from './contracts';
@@ -40,11 +41,23 @@ export function bindCapabilities(client: ProviderClient, models: BoundModels): A
   return {
     classifier: {
       classifyRelevance: (input) =>
-        run(client, CLASSIFICATION_CONTRACT, models[CLASSIFICATION_CONTRACT.role], JSON.stringify(input)),
+        run(
+          client,
+          CLASSIFICATION_CONTRACT,
+          models[CLASSIFICATION_CONTRACT.role],
+          JSON.stringify(input),
+        ),
     },
     analyzer: {
-      extractJobData: (body) =>
-        run(client, EXTRACTION_CONTRACT, models[EXTRACTION_CONTRACT.role], body),
+      extractJobData: (body, options) =>
+        options?.version === 'extraction/v3'
+          ? run(
+              client,
+              EXTRACTION_V3_CONTRACT,
+              models.detailed,
+              JSON.stringify({ receivedAt: options.receivedAt, body }),
+            )
+          : run(client, EXTRACTION_CONTRACT, models[EXTRACTION_CONTRACT.role], body),
     },
   };
 }

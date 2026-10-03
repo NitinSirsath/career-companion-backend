@@ -1,7 +1,9 @@
+import { DomainError } from './agenda';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import {
   CreateApplicationRequest,
+  ApplicationFilters,
   ApplicationResponse,
   ApplicationEventResponse,
   ApplicationActionResponse,
@@ -211,12 +213,51 @@ export class ApplicationService {
     userId: string,
     limit: number = 20,
     offset: number = 0,
+    filters: ApplicationFilters = {},
   ): Promise<ApplicationResponse[]> {
+    // Prisma's PostgreSQL contains operator uses LIKE: preserve literal %, _ and backslash.
+    const search = filters.q?.replace(/[\\%_]/g, '\\$&');
+    const orderBy: Prisma.ApplicationOrderByWithRelationInput[] =
+      filters.sort === 'applied_desc' || filters.sort === 'applied_asc'
+        ? [{ appliedAt: { sort: filters.sort === 'applied_desc' ? 'desc' : 'asc', nulls: 'last' } }, { id: 'desc' }]
+        : filters.sort === 'company_asc'
+          ? [{ companyName: 'asc' }, { id: 'desc' }]
+          : [{ createdAt: 'desc' }, { id: 'desc' }];
     const applications = await prisma.application.findMany({
-      where: { userId },
+      where: {
+        userId,
+        ...(filters.archive === 'all' ? {} : { archivedAt: filters.archive === 'archived' ? { not: null } : null }),
+        ...(filters.submittedVia ? {
+          externalSubmissions: { some: { userId, matchState: { in: ['LINKED', 'CREATED'] } } },
+        } : {}),
+        AND: [
+          ...(search
+            ? [
+                {
+                  OR: [
+                    { companyName: { contains: search, mode: 'insensitive' as const } },
+                    { jobTitle: { contains: search, mode: 'insensitive' as const } },
+                  ],
+                },
+              ]
+            : []),
+          ...(filters.effectiveStatus
+            ? filters.effectiveStatus === 'UNKNOWN'
+              ? [{ userStatus: null, aiStatus: null }]
+              : [
+                {
+                  OR: [
+                    { userStatus: filters.effectiveStatus },
+                    { userStatus: null, aiStatus: filters.effectiveStatus },
+                  ],
+                },
+              ]
+            : []),
+        ],
+      },
       take: limit + 1,
       skip: offset,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      orderBy,
       include: enrichment,
     });
 
@@ -251,13 +292,14 @@ export class ApplicationService {
   ): Promise<{ application: ApplicationResponse; changed: boolean }> {
     return prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<
-        { userStatus: string | null; userStatusRevision: number }[]
+        { userStatus: string | null; userStatusRevision: number; archivedAt: Date | null }[]
       >`
-        SELECT "userStatus", "userStatusRevision" FROM applications
+        SELECT "userStatus", "userStatusRevision", "archivedAt" FROM applications
         WHERE id = ${id}::uuid AND "userId" = ${userId}::uuid
         FOR UPDATE`;
       if (!locked.length) throw new ApplicationNotFoundError();
       const current = locked[0];
+      if (current.archivedAt) throw new DomainError('APPLICATION_ARCHIVED');
       if (current.userStatusRevision !== request.expectedUserStatusRevision)
         throw new StatusConflictError();
 
@@ -399,6 +441,7 @@ export class ApplicationService {
         description: true,
         deadline: true,
         deadlinePrecision: true,
+        origin: true, actionRevision: true, clientRequestId: true, snoozedUntil: true,
         status: true,
         createdAt: true,
       },
@@ -412,6 +455,7 @@ export class ApplicationService {
       description: a.description,
       deadline: a.deadline,
       deadlinePrecision: a.deadlinePrecision,
+      origin: a.origin === 'USER' ? 'USER' : a.emailId ? 'EMAIL' : null, actionRevision: a.actionRevision, clientRequestId: a.clientRequestId, snoozedUntil: a.snoozedUntil?.toISOString() ?? null,
       status: a.status,
       createdAt: a.createdAt,
     }));
@@ -427,6 +471,8 @@ export class ApplicationService {
     const userStatus = app.userStatus as ApplicationResponse['userStatus'];
     return {
       id: app.id,
+      archivedAt: app.archivedAt?.toISOString() ?? null,
+      archiveRevision: app.archiveRevision,
       companyName: app.companyName,
       jobTitle: app.jobTitle,
       location: app.location,

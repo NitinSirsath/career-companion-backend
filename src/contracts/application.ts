@@ -12,6 +12,23 @@ export const ApplicationStatusSchema = z.enum([
   'CLOSED',
 ]);
 
+export const ApplicationSortSchema = z.enum([
+  'added_desc',
+  'applied_desc',
+  'applied_asc',
+  'company_asc',
+]);
+
+export const ApplicationFiltersSchema = z.object({
+  archive: z.enum(['active', 'archived', 'all']).optional(),
+  q: z.string().trim().max(100).optional(),
+  // Query sentinel only: UNKNOWN is never an application status.
+  effectiveStatus: z.union([ApplicationStatusSchema, z.literal('UNKNOWN')]).optional(),
+  submittedVia: SubmittedViaSchema.optional(),
+  sort: ApplicationSortSchema.optional(),
+});
+export type ApplicationFilters = z.infer<typeof ApplicationFiltersSchema>;
+
 export type ApplicationStatus = z.infer<typeof ApplicationStatusSchema>;
 
 export const CreateApplicationRequestSchema = z.object({
@@ -72,6 +89,8 @@ export function deriveStatus(
 // ─── ApplicationResponse (create + list + detail + status PATCH) ───────────
 
 const ApplicationResponseObjectSchema = z.object({
+  archivedAt: z.iso.datetime().nullable(),
+  archiveRevision: z.number().int().nonnegative(),
   id: z.string(),
   companyName: z.string(),
   jobTitle: z.string().nullable(),
@@ -151,6 +170,10 @@ export type ListApplicationEventsResponse = PaginatedResponse<ApplicationEventRe
 // ─── Action ─────────────────────────────────────────────────────────────────
 
 export const ApplicationActionResponseSchema = z.object({
+  origin: z.enum(['EMAIL', 'USER']).nullable(),
+  actionRevision: z.number().int().nonnegative(),
+  clientRequestId: z.uuid().nullable(),
+  snoozedUntil: z.iso.datetime().nullable(),
   id: z.string(),
   applicationId: z.string(),
   emailId: z.string().nullable(),
@@ -164,3 +187,9 @@ export const ApplicationActionResponseSchema = z.object({
 
 export type ApplicationActionResponse = z.infer<typeof ApplicationActionResponseSchema>;
 export type ListApplicationActionsResponse = PaginatedResponse<ApplicationActionResponse>;
+
+export const ArchiveApplicationSchema = z.strictObject({
+  archived: z.boolean(),
+  expectedArchiveRevision: z.number().int().nonnegative(),
+});
+export type ArchiveApplication = z.infer<typeof ArchiveApplicationSchema>;

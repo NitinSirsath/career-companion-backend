@@ -1,3 +1,4 @@
+import { temporalCases, scoreTemporal } from './temporal';
 /**
  * Manual provider/model evaluation (BYO AI plan §7). Runs the synthetic dataset through the same
  * contracts, adapters and validation as production. No database, ledger, queue or Gmail access.
@@ -64,7 +65,9 @@ async function main() {
     ? baselineMetrics(JSON.parse(fs.readFileSync(baselineFile, 'utf8')))
     : undefined;
 
-  const cases = loadDataset();
+  const extractionVersion = option('extraction-version') ?? 'extraction/v2';
+  if (!['extraction/v2', 'extraction/v3'].includes(extractionVersion)) throw new Error('Unsupported extraction version');
+  const cases = [...loadDataset(), ...(extractionVersion === 'extraction/v3' ? temporalCases : [])];
   const models = { fast: catalogModel('fast', fast), detailed: catalogModel('detailed', detailed) };
   const ai = bindCapabilities(createProviderClient(provider, apiKey), models);
   const results: CaseRun[] = [];
@@ -102,7 +105,7 @@ async function main() {
       // Extraction quality is measured independently of the classification outcome.
       if (c.expect.relevance !== 'IRRELEVANT') {
         const extracted = await timed(() =>
-          ai.analyzer.extractJobData(c.input.body.slice(0, EXTRACTION_BODY_LIMIT)),
+          ai.analyzer.extractJobData(c.input.body.slice(0, EXTRACTION_BODY_LIMIT), { version: extractionVersion, receivedAt: c.input.receivedAt ?? null }),
         );
         result.extraction = {
           valid: !!extracted.value,
@@ -125,7 +128,9 @@ async function main() {
 
   const metrics = score(cases, results);
   const failed = failures(metrics, baseline);
-  const outcome = evaluationOutcome(metrics, baseline);
+  const temporal = extractionVersion === 'extraction/v3' ? scoreTemporal(results, runs) : null;
+  const baseOutcome = evaluationOutcome(metrics, baseline);
+  const outcome = baseOutcome === 'INCONCLUSIVE' || temporal?.outcome === 'INCONCLUSIVE' ? 'INCONCLUSIVE' : baseOutcome === 'FAIL' || temporal?.outcome === 'FAIL' ? 'FAIL' : 'PASS';
   const createdAt = new Date().toISOString();
   const report = {
     createdAt,
@@ -133,7 +138,8 @@ async function main() {
     models: { fast: models.fast.id, detailed: models.detailed.id },
     runs,
     cases: cases.length,
-    contractVersions: AI_CONTRACT_VERSIONS,
+    contractVersions: { ...AI_CONTRACT_VERSIONS, EXTRACTION: extractionVersion },
+    temporal,
     thresholds: THRESHOLDS,
     baseline: baselineFile ? path.basename(baselineFile) : null,
     metrics,

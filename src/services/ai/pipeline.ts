@@ -1,3 +1,4 @@
+import { candidateEnvelope, verifiedCandidates } from './temporal';
 import { prisma } from '../../db/prisma';
 import { GmailFetcherService } from '../gmailFetcher';
 import { MatcherService } from '../matcher';
@@ -8,6 +9,11 @@ import {
   CLASSIFICATION_INPUT_LIMITS as LIMITS,
   EXTRACTION_BODY_LIMIT,
   EXTRACTION_CONTRACT,
+  EXTRACTION_V3_CONTRACT,
+  JobExtractionSchema,
+  JobExtractionV3Schema,
+  AIContract,
+  JobExtractionResult,
 } from './contracts';
 import { TerminalAIError } from './errors';
 import { runOperation } from './operations';
@@ -24,7 +30,11 @@ function provenance(
 }
 
 export class EmailAIPipeline {
-  static async processEmail(userId: string, emailId: string, options: { signal?: AbortSignal } = {}): Promise<void> {
+  static async processEmail(
+    userId: string,
+    emailId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
     const email = await prisma.email.findUnique({
       where: { id: emailId, userId },
       include: { aiProcessingResult: true },
@@ -32,7 +42,7 @@ export class EmailAIPipeline {
     if (!email) throw new TerminalAIError('Email unavailable');
     const result = email.aiProcessingResult;
     // Adopt existing completed work; neither a deployment nor a sync is reprocessing consent.
-    const extracted = result?.contractVersion === AI_CONTRACT_VERSIONS.EXTRACTION;
+    const extracted = ['extraction/v2', 'extraction/v3'].includes(result?.contractVersion ?? '');
     if (result && (result.processingStatus === 'COMPLETED' || extracted)) {
       await this.finish(userId, emailId, result.relevanceDecision);
       return;
@@ -42,7 +52,11 @@ export class EmailAIPipeline {
       throw new TerminalAIError('Legacy partial AI result requires reconciliation');
 
     // Metadata/body are transient and fetched before reserving a provider call.
-    const gmail = await GmailFetcherService.fetchMessageMetadata(userId, email.gmailMessageId, options);
+    const gmail = await GmailFetcherService.fetchMessageMetadata(
+      userId,
+      email.gmailMessageId,
+      options,
+    );
     const labels = gmail.labelIds ?? [];
     const deterministic = labels.some((label) =>
       ['CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'SPAM'].includes(label),
@@ -55,7 +69,11 @@ export class EmailAIPipeline {
     let resolved: Promise<AIAccess> | undefined;
     const access = () => (resolved ??= resolveAIAccess(userId));
     const relevance = deterministic
-      ? { data: { decision: 'IRRELEVANT' as const, confidence: 1, category: undefined }, provider: 'deterministic', model: 'none' }
+      ? {
+          data: { decision: 'IRRELEVANT' as const, confidence: 1, category: undefined },
+          provider: 'deterministic',
+          model: 'none',
+        }
       : await runOperation({
           userId,
           emailId,
@@ -91,21 +109,50 @@ export class EmailAIPipeline {
       update: data,
     });
     if (decision !== 'IRRELEVANT') {
-      const body = await GmailFetcherService.fetchMessageBody(userId, email.gmailMessageId, options);
+      const body = await GmailFetcherService.fetchMessageBody(
+        userId,
+        email.gmailMessageId,
+        options,
+      );
+      const contract = await selectExtractionContract(userId, emailId);
       const extraction = await runOperation({
         userId,
         emailId,
         operation: 'extraction',
-        contract: EXTRACTION_CONTRACT,
+        contract,
         access,
-        call: (ai) => ai.analyzer.extractJobData(body.slice(0, EXTRACTION_BODY_LIMIT)),
+        call: async (ai) => {
+          const bounded = body.slice(0, EXTRACTION_BODY_LIMIT);
+          const output = await ai.analyzer.extractJobData(bounded, {
+            version: contract.version,
+            receivedAt: email.receivedAt?.toISOString() ?? null,
+          });
+          if (contract.version === 'extraction/v3') {
+            const parsed = JobExtractionV3Schema.parse(output.data);
+            return {
+              ...output,
+              data: {
+                ...parsed,
+                scheduleCandidates: verifiedCandidates(parsed.scheduleCandidates, bounded),
+              },
+            };
+          }
+          return output;
+        },
       });
       await prisma.aIProcessingResult.update({
         where: { emailId },
         data: {
-          ...extraction.data,
+          ...JobExtractionSchema.parse(extraction.data),
+          ...(contract.version === 'extraction/v3'
+            ? {
+                scheduleCandidates: candidateEnvelope(
+                  JobExtractionV3Schema.parse(extraction.data).scheduleCandidates,
+                ),
+              }
+            : {}),
           ...provenance(extraction, result),
-          contractVersion: AI_CONTRACT_VERSIONS.EXTRACTION,
+          contractVersion: contract.version,
           processingStatus: 'COMPLETED',
         },
       });
@@ -129,4 +176,29 @@ export class EmailAIPipeline {
       },
     });
   }
+}
+
+/** Pin the version with the first durable extraction row, under the email lock. Existing held,
+ * pending or completed rows win over enable/disable changes and concurrent workers. */
+export async function selectExtractionContract(
+  userId: string,
+  emailId: string,
+): Promise<AIContract<JobExtractionResult>> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM emails WHERE id = ${emailId}::uuid AND "userId" = ${userId}::uuid FOR UPDATE`;
+    if (!(await tx.email.findFirst({ where: { id: emailId, userId } })))
+      throw new TerminalAIError('Email unavailable');
+    const rows = await tx.aIOperation.findMany({ where: { emailId, operation: 'extraction' } });
+    if (
+      rows.length > 1 ||
+      rows.some((row) => !['extraction/v2', 'extraction/v3'].includes(row.version))
+    )
+      throw new TerminalAIError('Extraction version requires reconciliation');
+    const version =
+      rows[0]?.version ??
+      (process.env.AGENDA_EXTRACTION_V3_ENABLED === 'true' ? 'extraction/v3' : 'extraction/v2');
+    if (!rows.length)
+      await tx.aIOperation.create({ data: { emailId, operation: 'extraction', version } });
+    return version === 'extraction/v3' ? EXTRACTION_V3_CONTRACT : EXTRACTION_CONTRACT;
+  });
 }

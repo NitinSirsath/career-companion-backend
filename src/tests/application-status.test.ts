@@ -100,6 +100,7 @@ describe('canonical status (64 combinations)', () => {
 
   it('rejects responses with missing or inconsistent canonical fields', () => {
     const valid = {
+      archivedAt: null, archiveRevision: 0,
       id: 'a', companyName: 'C', jobTitle: null, location: null, aiStatus: 'OFFER', userStatus: null,
       userStatusSetAt: null, userStatusRevision: 0, effectiveStatus: 'OFFER', statusSource: 'AI',
       hasStatusConflict: false, appliedAt: null, createdAt: 'x', updatedAt: 'x', recentEvent: null,

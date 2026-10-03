@@ -1,6 +1,13 @@
+import { archiveApplication } from '../services/archive';
+import { ActionService } from '../services/action';
+import { CreateFollowUpSchema, ArchiveApplicationSchema } from '../contracts';
 import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
-import { CreateApplicationRequestSchema, UpdateApplicationStatusRequestSchema } from '../contracts';
+import {
+  ApplicationFiltersSchema,
+  CreateApplicationRequestSchema,
+  UpdateApplicationStatusRequestSchema,
+} from '../contracts';
 import {
   ApplicationService,
   ApplicationNotFoundError,
@@ -31,7 +38,12 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.auth!.user.id;
     const { limit, offset } = getPaginationParams(req.query);
 
-    const applications = await ApplicationService.listApplications(userId, limit, offset);
+    const applications = await ApplicationService.listApplications(
+      userId,
+      limit,
+      offset,
+      ApplicationFiltersSchema.parse(req.query),
+    );
     res.status(200).json(createPaginatedResponse(applications, limit, offset));
   } catch (err) {
     next(err);
@@ -127,6 +139,34 @@ router.patch('/:id/status', async (req: Request, res: Response, next: NextFuncti
   }
 });
 
+router.post('/:id/actions', async (req, res, next) => {
+  try {
+    res
+      .status(201)
+      .json(
+        await ActionService.createFollowUp(
+          req.auth!.user.id,
+          z.uuid().parse(req.params.id),
+          CreateFollowUpSchema.parse(req.body),
+        ),
+      );
+  } catch (error) {
+    next(error);
+  }
+});
+router.patch('/:id/archive', async (req, res, next) => {
+  try {
+    res.json(
+      await archiveApplication(
+        req.auth!.user.id,
+        z.uuid().parse(req.params.id),
+        ArchiveApplicationSchema.parse(req.body),
+      ),
+    );
+  } catch (error) {
+    next(error);
+  }
+});
 router.get('/:id', async (req, res, next) => {
   try {
     const application = await ApplicationService.getApplication(

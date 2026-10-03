@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { ActionService } from '../services/action';
-import { UpdateActionRequestSchema } from '../contracts';
+import { EditFollowUpSchema, SnoozeActionSchema, UpdateActionRequestSchema } from '../contracts';
 
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
 
@@ -26,6 +26,42 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
+router.get('/by-request/:clientRequestId', async (req, res, next) => {
+  try {
+    res.json(
+      await ActionService.byRequest(req.auth!.user.id, z.uuid().parse(req.params.clientRequestId)),
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+router.patch('/:id/personal', async (req, res, next) => {
+  try {
+    res.json(
+      await ActionService.editFollowUp(
+        req.auth!.user.id,
+        z.uuid().parse(req.params.id),
+        EditFollowUpSchema.parse(req.body),
+      ),
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+router.patch('/:id/snooze', async (req, res, next) => {
+  try {
+    res.json(
+      await ActionService.snooze(
+        req.auth!.user.id,
+        z.uuid().parse(req.params.id),
+        SnoozeActionSchema.parse(req.body),
+      ),
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
 /**
  * PATCH /api/actions/:id
  * Updates an action (e.g. status completion/dismissal).
@@ -36,7 +72,12 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => 
     const actionId = z.uuid().parse(req.params.id);
     const data = UpdateActionRequestSchema.parse(req.body);
 
-    const updated = await ActionService.updateActionStatus(userId, actionId, data.status);
+    const updated = await ActionService.updateActionStatus(
+      userId,
+      actionId,
+      data.status,
+      data.expectedActionRevision,
+    );
 
     if (!updated) {
       return res.status(403).json({
@@ -50,14 +91,12 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => 
     res.status(200).json(updated);
   } catch (err) {
     if (err instanceof Error && err.message === 'ACTION_RETIRED')
-      return res
-        .status(409)
-        .json({
-          error: {
-            code: 'ACTION_RETIRED',
-            message: 'This action belongs to a corrected email link. Refresh the list.',
-          },
-        });
+      return res.status(409).json({
+        error: {
+          code: 'ACTION_RETIRED',
+          message: 'This action belongs to a corrected email link. Refresh the list.',
+        },
+      });
     next(err);
   }
 });
