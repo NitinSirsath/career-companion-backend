@@ -63,6 +63,8 @@ jobs:
           umask 077
           printf 'DATABASE_URL=%s\nTEST_DATABASE_URL=%s\n' "$TEST_DATABASE_URL" "$TEST_DATABASE_URL" > .env.crash.test
           node scripts/test-gmail-crash.cjs
+          docker exec "$POSTGRES_CONTAINER" dropdb -U cc_ci career_companion_ci_crash_test
+          docker exec "$POSTGRES_CONTAINER" createdb -U cc_ci career_companion_ci_crash_test
           node scripts/test-gmail-crash.cjs
   migration-lanes:
     runs-on: ubuntu-latest

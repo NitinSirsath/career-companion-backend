@@ -203,7 +203,7 @@ async function main() {
     await db.end();
   }
 }
-(process.argv.includes('--worker') ? worker() : main()).catch(() => {
-  console.error('Crash fixture failed; inspect the dedicated database before reuse.');
+(process.argv.includes('--worker') ? worker() : main()).catch((err) => {
+  console.error('Crash fixture failed:', err);
   process.exit(1);
 });
