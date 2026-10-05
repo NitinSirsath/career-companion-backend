@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../db/prisma';
-import { AIAccessError, ProviderFailure, RetryableAIError, TerminalAIError } from '../services/ai/errors';
+import { AIAccessError, AIOutcomeUnknownError, ProviderFailure, RetryableAIError, SchemaValidationFailure, TerminalAIError } from '../services/ai/errors';
 import { buildRelevanceBatchInput, mapBatchResults, RelevanceBatchItemSchema } from '../services/ai/contracts';
 import { triageBatchEnabled, triageBatchSize, relevanceThreshold, classifyBatch, runTriage } from '../services/ai/triage';
 import { relevanceTriageJobOptions, RELEVANCE_TRIAGE_WORKER_OPTIONS } from '../jobs/relevanceTriageJob';
@@ -195,13 +195,13 @@ describe('COM-125 relevance batch pure behavior', () => {
   it('23 unknown outcome holds every item', async () => {
     const email = await prisma.email.create({ data: { userId, gmailMessageId: 'unknown-1' } });
     classify.mockRejectedValue(new ProviderFailure('OUTCOME_UNKNOWN'));
-    await expect(classifyBatch(userId, [{ emailId: email.id, input: { key: '', sender: null, subject: 'x', labels: [], snippet: null } }], provider)).rejects.toBeInstanceOf(ProviderFailure);
+    await expect(classifyBatch(userId, [{ emailId: email.id, input: { key: '', sender: null, subject: 'x', labels: [], snippet: null } }], provider)).rejects.toBeInstanceOf(AIOutcomeUnknownError);
     expect(await prisma.aIOperation.findUnique({ where: { emailId_operation_version: { emailId: email.id, operation: 'classification', version: 'relevance-batch/v1' } } })).toMatchObject({ status: 'UNKNOWN' });
   });
   it('24 invalid envelope is held', async () => {
     const email = await prisma.email.create({ data: { userId, gmailMessageId: 'invalid-1' } });
     classify.mockRejectedValue(new ProviderFailure('INVALID_OUTPUT'));
-    await expect(classifyBatch(userId, [{ emailId: email.id, input: { key: '', sender: null, subject: 'x', labels: [], snippet: null } }], provider)).rejects.toBeInstanceOf(ProviderFailure);
+    await expect(classifyBatch(userId, [{ emailId: email.id, input: { key: '', sender: null, subject: 'x', labels: [], snippet: null } }], provider)).rejects.toBeInstanceOf(SchemaValidationFailure);
     expect(await prisma.aIOperation.findUnique({ where: { emailId_operation_version: { emailId: email.id, operation: 'classification', version: 'relevance-batch/v1' } } })).toMatchObject({ status: 'FAILED' });
   });
   it('25 safety limit prevents a batch claim', async () => {
