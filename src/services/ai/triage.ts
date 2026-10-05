@@ -121,6 +121,7 @@ export async function classifyBatch(
       data: { processingState: 'PROCESSING' },
     });
     await tx.aIBatch.update({ where: { id: batch.id }, data: { itemCount: claimed.length } });
+    console.log(JSON.stringify({ event: 'ai_batch_claimed', batchId: batch.id, userId, itemCount: claimed.length, provider: access.provider, model: model.id }));
   }).catch((err) => {
     if (err instanceof AIAccessError) throw err;
     throw err;
@@ -179,6 +180,7 @@ export async function classifyBatch(
       }
     });
     await noteProviderSuccess(access);
+    console.log(JSON.stringify({ event: 'ai_batch_completed', batchId, userId, itemCount: claimed.length, decided: mapped.decided.size, undecided: mapped.undecided.length, ignored: mapped.ignored }));
     return { ...mapped, batchId };
   } catch (err) {
     const failure = failureKind(err);
@@ -206,6 +208,7 @@ export async function classifyBatch(
         await noteProviderFailure(tx, access, 'OUTCOME_UNKNOWN', now);
       }
     });
+    console.warn(JSON.stringify({ event: 'ai_batch_failed', batchId, userId, itemCount: claimed.length, kind: kind ?? 'OutcomeUnknown' }));
     if (failure) throw failure;
     throw err;
   }
@@ -296,5 +299,7 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
     }
     if (candidates.length === 0) break;
   }
-  return { batches, emails: processed, stoppedBy: 'time_limit' as const };
+  const stoppedBy = Date.now() - started >= TRIAGE_RUN_LIMIT_MS ? 'time_limit' as const : 'no_progress' as const;
+  console.log(JSON.stringify({ event: 'triage_run', userId, batches, emails: processed, stoppedBy }));
+  return { batches, emails: processed, stoppedBy };
 }
