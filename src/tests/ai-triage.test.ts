@@ -20,14 +20,15 @@ vi.mock('../services/queue', () => ({
 vi.mock('../services/gmailFetcher');
 vi.mock('../services/ai/access', () => ({ getAccessState: vi.fn(), resolveAIAccess: vi.fn() }));
 
-const provider = {
+const providerFixture = {
   provider: 'fixture',
   userId: '',
   revision: 0,
   models: { fast: { id: 'fixture-fast' }, detailed: { id: 'fixture-detailed' } },
   classifier: { classifyRelevanceBatch: classify },
   analyzer: {},
-} as never;
+};
+const provider = providerFixture as never;
 
 let userId = '';
 async function reset() {
@@ -40,7 +41,7 @@ async function reset() {
 beforeAll(async () => {
   const user = await prisma.user.create({ data: { email: `com125-${Date.now()}@fixture.test` } });
   userId = user.id;
-  provider.userId = userId;
+  providerFixture.userId = userId;
   await prisma.aIConfiguration.create({
     data: {
       userId,
