@@ -222,3 +222,10 @@ Old effects are retired, not deleted; user status overrides stay intact. Retired
 action updates return ACTION_RETIRED (409). Gmail message responses expose the
 owned application link/source and a computed processingStuck flag; timestamps and
 credentials remain private. Unlink keeps future thread mail for manual review.
+
+
+### Batched initial relevance triage (COM-125)
+
+AI_TRIAGE_BATCH_ENABLED is **off by default**. Unset, empty, or false means off; exactly true enables batched relevance triage. Any other value is rejected at startup. AI_TRIAGE_BATCH_SIZE defaults to 20 and accepts 1–25.
+
+When enabled, new unclassified emails are grouped into per-user triage jobs. The batch contract only sends bounded sender, subject, labels and preview metadata plus per-batch keys; no Gmail or database IDs are sent to the provider. The existing per-email extraction and matching path remains unchanged.
