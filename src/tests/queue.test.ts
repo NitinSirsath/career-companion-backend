@@ -63,7 +63,7 @@ it('deduplicates triage jobs per user across queued and active states', async ()
 
   try {
     await prisma.$executeRawUnsafe(
-      'UPDATE pgboss.job SET start_after = now() WHERE name = $1 AND id = $2',
+      'UPDATE pgboss.job SET start_after = now() WHERE name = $1 AND id = $2::uuid',
       'relevance-triage-job',
       firstA,
     );
