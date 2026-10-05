@@ -80,11 +80,16 @@ export class EmailAIPipeline {
     if (result && !operations)
       throw new TerminalAIError('Legacy partial AI result requires reconciliation');
 
+    let resolved: Promise<AIAccess> | undefined;
+    const access = () => (resolved ??= resolveAIAccess(userId));
+    let decision: 'RELEVANT' | 'IRRELEVANT' | 'UNCERTAIN';
+
     let relevance: RelevanceOutcome;
     if (batchClassified) {
+      decision = result!.relevanceDecision!;
       relevance = {
         data: {
-          decision: result!.relevanceDecision!,
+          decision,
           confidence: result!.confidence ?? 0,
           category: result!.category ?? null,
         },
@@ -104,10 +109,6 @@ export class EmailAIPipeline {
         ['CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'SPAM'].includes(label),
       );
       const threshold = relevanceThreshold();
-      // The user's own AI access is resolved lazily, at most once per job, and only when a provider
-      // call is about to be claimed: promotions and reused results need no key.
-      let resolved: Promise<AIAccess> | undefined;
-      const access = () => (resolved ??= resolveAIAccess(userId));
       const boundedInput = {
         sender: email.sender?.slice(0, LIMITS.sender) ?? null,
         subject: email.subject?.slice(0, LIMITS.subject) ?? null,
@@ -157,7 +158,7 @@ export class EmailAIPipeline {
         };
       }
 
-      const decision = relevance.data.confidence < threshold ? 'UNCERTAIN' : relevance.data.decision;
+      decision = relevance.data.confidence < threshold ? 'UNCERTAIN' : relevance.data.decision;
       const data = {
         // Provenance comes from the operation that produced the result, so a result reused after a
         // provider switch keeps its own provider and model.
@@ -177,10 +178,55 @@ export class EmailAIPipeline {
         create: { emailId, ...data },
         update: data,
       });
-      relevance = {
-        ...relevance,
-        data: { ...relevance.data, decision },
-      };
+    }
+    if (decision !== 'IRRELEVANT') {
+      const body = await GmailFetcherService.fetchMessageBody(
+        userId,
+        email.gmailMessageId,
+        options,
+      );
+      const contract = await selectExtractionContract(userId, emailId);
+      const extraction = await runOperation({
+        userId,
+        emailId,
+        operation: 'extraction',
+        contract,
+        access,
+        call: async (ai) => {
+          const bounded = body.slice(0, EXTRACTION_BODY_LIMIT);
+          const output = await ai.analyzer.extractJobData(bounded, {
+            version: contract.version,
+            receivedAt: email.receivedAt?.toISOString() ?? null,
+          });
+          if (contract.version === 'extraction/v3') {
+            const parsed = JobExtractionV3Schema.parse(output.data);
+            return {
+              ...output,
+              data: {
+                ...parsed,
+                scheduleCandidates: verifiedCandidates(parsed.scheduleCandidates, bounded),
+              },
+            };
+          }
+          return output;
+        },
+      });
+      await prisma.aIProcessingResult.update({
+        where: { emailId },
+        data: {
+          ...JobExtractionSchema.parse(extraction.data),
+          ...(contract.version === 'extraction/v3'
+            ? {
+                scheduleCandidates: candidateEnvelope(
+                  JobExtractionV3Schema.parse(extraction.data).scheduleCandidates,
+                ),
+              }
+            : {}),
+          ...provenance(extraction, result),
+          contractVersion: contract.version,
+          processingStatus: 'COMPLETED',
+        },
+      });
     }
     await this.finish(userId, emailId, decision);
   }
