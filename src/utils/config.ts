@@ -1,6 +1,21 @@
 import { parseGmailSchedule } from '../services/gmailSchedule';
 import { validateMcpProductionConfig } from '../mcp/config';
 
+export function parseAI_TRIAGE_BATCH_ENABLED(value: string | undefined): boolean {
+  if (value === undefined || value === '' || value === 'false') return false;
+  if (value === 'true') return true;
+  throw new Error('AI_TRIAGE_BATCH_ENABLED must be empty, false, or true');
+}
+
+export function parseAI_TRIAGE_BATCH_SIZE(value: string | undefined): number {
+  if (value === undefined || value === '') return 20;
+  if (!/^\d+$/.test(value)) throw new Error('AI_TRIAGE_BATCH_SIZE must be an integer from 1 to 25');
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 25)
+    throw new Error('AI_TRIAGE_BATCH_SIZE must be an integer from 1 to 25');
+  return parsed;
+}
+
 export function validateProductionConfig(env: NodeJS.ProcessEnv) {
   if (
     env.TRUST_PROXY_HOPS &&
@@ -10,6 +25,8 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv) {
     throw new Error('TRUST_PROXY_HOPS must be a positive integer');
   }
   parseGmailSchedule(env);
+  parseAI_TRIAGE_BATCH_ENABLED(env.AI_TRIAGE_BATCH_ENABLED);
+  parseAI_TRIAGE_BATCH_SIZE(env.AI_TRIAGE_BATCH_SIZE);
   if (env.NODE_ENV !== 'production') return;
   if (env.ENABLE_DEV_AUTH === 'true')
     throw new Error('Development authentication is forbidden in production');

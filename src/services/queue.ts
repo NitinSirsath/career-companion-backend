@@ -6,6 +6,7 @@ export const QUEUE_NAMES = [
   'email-processing-job',
   'discord-notification-job',
   'gmail-sync-job',
+  'relevance-triage-job',
 ] as const;
 let started: PgBoss | undefined;
 export const getStartedQueue = () => started;
