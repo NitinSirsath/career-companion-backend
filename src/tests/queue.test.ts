@@ -54,7 +54,7 @@ it('deduplicates triage jobs per user across queued and active states', async ()
   let release!: () => void;
   const hold = new Promise<void>((resolve) => { release = resolve; });
 
-  const workerId = await queue.work('relevance-triage-job', { batchSize: 1 }, async (jobs) => {
+  const workerId = await queue.work<{ userId: string }>('relevance-triage-job', { batchSize: 1 }, async (jobs) => {
     if (jobs[0].data.userId === userA) {
       active();
       await hold;
@@ -75,6 +75,10 @@ it('deduplicates triage jobs per user across queued and active states', async ()
     expect(await enqueueRelevanceTriage(userA)).toBeTruthy();
   } finally {
     release();
-    await queue.offWork({ id: workerId });
+    await queue.offWork('relevance-triage-job', { id: workerId });
+    await prisma.$executeRawUnsafe(
+      "DELETE FROM pgboss.job WHERE name = 'relevance-triage-job' AND data->>'userId' = ANY($1::text[])",
+      [userA, userB],
+    );
   }
 });
