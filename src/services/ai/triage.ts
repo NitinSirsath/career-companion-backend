@@ -220,7 +220,7 @@ export async function classifyOne(
   const row = await prisma.aIOperation.findUnique({ where: { emailId_operation_version: { emailId, operation: 'classification', version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH } } });
   if (row?.status === 'COMPLETED') {
     const data = row.result as RelevanceBatchItem;
-    return { decision: data.decision, confidence: data.confidence, category: data.category, provider: row.provider, model: row.model };
+    return { decision: data.decision, confidence: data.confidence, category: data.category, provider: row.provider, model: row.model, version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH };
   }
   if (row?.status === 'PROCESSING' && row.startedAt && Date.now() - row.startedAt.getTime() < TRIAGE_STALE_PROCESSING_MS)
     throw new RetryableAIError('AI operation not ready');
@@ -231,7 +231,7 @@ export async function classifyOne(
   if (result.undecided.length) throw new RetryableAIError('AI answer missing');
   const item = result.decided.get('e1') ?? [...result.decided.values()][0];
   if (!item) throw new RetryableAIError('AI answer missing');
-  return { decision: item.confidence < relevanceThreshold() ? 'UNCERTAIN' : item.decision, confidence: item.confidence, category: item.category, provider: access.provider, model: access.models.fast.id };
+  return { decision: item.confidence < relevanceThreshold() ? 'UNCERTAIN' : item.decision, confidence: item.confidence, category: item.category, provider: access.provider, model: access.models.fast.id, version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH };
 }
 
 async function markDeterministicIrrelevant(userId: string, emailId: string) {

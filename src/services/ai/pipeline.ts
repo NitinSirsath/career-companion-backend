@@ -17,6 +17,7 @@ import {
 } from './contracts';
 import { TerminalAIError } from './errors';
 import { runOperation } from './operations';
+import { classifyOne, triageBatchEnabled, relevanceThreshold } from './triage';
 
 /** Ledger rows from before provenance was recorded carry no model; keep the stored one. */
 function provenance(
@@ -43,6 +44,7 @@ export class EmailAIPipeline {
     const result = email.aiProcessingResult;
     // Adopt existing completed work; neither a deployment nor a sync is reprocessing consent.
     const extracted = ['extraction/v2', 'extraction/v3'].includes(result?.contractVersion ?? '');
+    const batched = result?.contractVersion === AI_CONTRACT_VERSIONS.RELEVANCE_BATCH && result.relevanceDecision;
     if (result && (result.processingStatus === 'COMPLETED' || extracted)) {
       await this.finish(userId, emailId, result.relevanceDecision);
       return;
@@ -61,39 +63,33 @@ export class EmailAIPipeline {
     const deterministic = labels.some((label) =>
       ['CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'SPAM'].includes(label),
     );
-    const threshold = Number(process.env.RELEVANCE_CONFIDENCE_THRESHOLD ?? 0.7);
-    if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1)
-      throw new TerminalAIError('Invalid relevance threshold');
+    const threshold = relevanceThreshold();
     // The user's own AI access is resolved lazily, at most once per job, and only when a provider
     // call is about to be claimed: promotions and reused results need no key.
     let resolved: Promise<AIAccess> | undefined;
     const access = () => (resolved ??= resolveAIAccess(userId));
+    const boundedInput = {
+      sender: email.sender?.slice(0, LIMITS.sender) ?? null,
+      subject: email.subject?.slice(0, LIMITS.subject) ?? null,
+      labels: labels.slice(0, LIMITS.labels),
+      snippet: gmail.snippet?.slice(0, LIMITS.snippet) ?? null,
+    };
     const relevance = deterministic
-      ? {
-          data: { decision: 'IRRELEVANT' as const, confidence: 1, category: undefined },
-          provider: 'deterministic',
-          model: 'none',
-        }
-      : await runOperation({
-          userId,
-          emailId,
-          operation: 'classification',
-          contract: CLASSIFICATION_CONTRACT,
-          access,
-          call: (ai) =>
-            ai.classifier.classifyRelevance({
-              sender: email.sender?.slice(0, LIMITS.sender),
-              subject: email.subject?.slice(0, LIMITS.subject),
-              labels: labels.slice(0, LIMITS.labels),
-              snippet: gmail.snippet?.slice(0, LIMITS.snippet),
-            }),
-        });
+      ? { data: { decision: 'IRRELEVANT' as const, confidence: 1, category: undefined }, provider: 'deterministic', model: 'none', version: 'deterministic/v1' }
+      : batched
+        ? { data: { decision: result!.relevanceDecision!, confidence: result!.confidence ?? 0, category: result!.category ?? null }, provider: result!.provider, model: result!.model, version: result!.contractVersion }
+        : triageBatchEnabled()
+          ? await classifyOne(userId, emailId, boundedInput, { signal: options.signal })
+          : await runOperation({
+              userId, emailId, operation: 'classification', contract: CLASSIFICATION_CONTRACT, access,
+              call: (ai) => ai.classifier.classifyRelevance(boundedInput),
+            });
     const decision = relevance.data.confidence < threshold ? 'UNCERTAIN' : relevance.data.decision;
     const data = {
       // Provenance comes from the operation that produced the result, so a result reused after a
       // provider switch keeps its own provider and model.
       ...provenance(relevance, result),
-      contractVersion: deterministic ? 'deterministic/v1' : AI_CONTRACT_VERSIONS.CLASSIFICATION,
+      contractVersion: relevance.version,
       relevanceDecision: decision,
       confidence: relevance.data.confidence,
       category: relevance.data.category ?? null,
