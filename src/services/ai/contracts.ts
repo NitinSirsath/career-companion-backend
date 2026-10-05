@@ -143,7 +143,11 @@ export function mapBatchResults(sentKeys: string[], raw: unknown[]) {
   let ignored = 0;
   for (const value of raw) {
     const parsed = RelevanceBatchItemSchema.safeParse(value);
-    if (!parsed.success || !sent.has(parsed.data?.key ?? '')) {
+    if (!parsed.success) {
+      ignored++;
+      continue;
+    }
+    if (!sent.has(parsed.data.key)) {
       ignored++;
       continue;
     }
