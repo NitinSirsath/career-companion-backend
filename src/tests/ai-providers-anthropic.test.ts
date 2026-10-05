@@ -157,3 +157,22 @@ describe('Anthropic content-free verification', () => {
     expect(await client().verifyModels(['claude-sonnet-5-5'])).toEqual(expected);
   });
 });
+
+
+describe('Anthropic batch relevance contract', () => {
+  it('uses the batch schema and accepts nullable category', async () => {
+    create.mockResolvedValue(toolReply({ results: [{ key: 'e1', decision: 'UNCERTAIN', confidence: 0.5, category: null }] }));
+    const result = await bindCapabilities(client(), { fast: haiku, detailed: haiku }).classifier.classifyRelevanceBatch({ items: [{ key: 'e1', sender: null, subject: 's', labels: [], snippet: null }] });
+    expect(result.data.results).toHaveLength(1);
+    expect(create.mock.calls[0][0]).toMatchObject({
+      max_tokens: 4096,
+      tools: [{ name: 'email_relevance_batch' }],
+    });
+  });
+
+  it('treats max_tokens batch output as INVALID_OUTPUT', async () => {
+    create.mockResolvedValue(toolReply({ results: [] }, { stop_reason: 'max_tokens' }));
+    const error = await failure(bindCapabilities(client(), { fast: haiku, detailed: haiku }).classifier.classifyRelevanceBatch({ items: [] }));
+    expect(error.kind).toBe('INVALID_OUTPUT');
+  });
+});

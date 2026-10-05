@@ -4,6 +4,7 @@ import {
   AIResult,
   AIRole,
   CLASSIFICATION_CONTRACT,
+  RELEVANCE_BATCH_CONTRACT,
   EXTRACTION_CONTRACT,
   EXTRACTION_V3_CONTRACT,
   EmailAnalyzer,
@@ -40,6 +41,8 @@ async function run<T>(
 export function bindCapabilities(client: ProviderClient, models: BoundModels): AICapabilities {
   return {
     classifier: {
+      classifyRelevanceBatch: (inputs) =>
+        run(client, RELEVANCE_BATCH_CONTRACT, models[RELEVANCE_BATCH_CONTRACT.role], JSON.stringify(inputs)),
       classifyRelevance: (input) =>
         run(
           client,

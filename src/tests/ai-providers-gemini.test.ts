@@ -195,3 +195,24 @@ describe('Gemini content-free verification', () => {
     expect(await client().verifyModels(['gemini-2.5-flash-lite'])).toEqual(expected);
   });
 });
+
+
+describe('Gemini batch relevance contract', () => {
+  it('supports a nullable category inside array items and uses the batch contract', async () => {
+    mockGenerateContent.mockResolvedValue({
+      text: JSON.stringify({ results: [{ key: 'e1', decision: 'RELEVANT', confidence: 0.9, category: 'INTERVIEW' }] }),
+    });
+    const result = await capabilities().classifier.classifyRelevanceBatch({ items: [{ key: 'e1', sender: 'a', subject: 'Interview', labels: [], snippet: null }] });
+    expect(result.data.results).toHaveLength(1);
+    expect(mockGenerateContent).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gemini-2.5-flash-lite',
+      config: expect.objectContaining({ maxOutputTokens: 4096 }),
+    }));
+  });
+
+  it('treats truncated batch JSON as INVALID_OUTPUT', async () => {
+    mockGenerateContent.mockResolvedValue({ text: '{"results":[' });
+    const error = await failure(capabilities().classifier.classifyRelevanceBatch({ items: [] }));
+    expect(error.kind).toBe('INVALID_OUTPUT');
+  });
+});
