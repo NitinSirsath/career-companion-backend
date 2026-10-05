@@ -22,6 +22,8 @@ vi.mock('../services/ai/access', () => ({ getAccessState: vi.fn(), resolveAIAcce
 
 const provider = {
   provider: 'fixture',
+  userId: '',
+  revision: 0,
   models: { fast: { id: 'fixture-fast' }, detailed: { id: 'fixture-detailed' } },
   classifier: { classifyRelevanceBatch: classify },
   analyzer: {},
@@ -38,6 +40,7 @@ async function reset() {
 beforeAll(async () => {
   const user = await prisma.user.create({ data: { email: `com125-${Date.now()}@fixture.test` } });
   userId = user.id;
+  provider.userId = userId;
   await prisma.aIConfiguration.create({
     data: {
       userId,
@@ -55,6 +58,7 @@ beforeEach(async () => {
   process.env.AI_TRIAGE_BATCH_ENABLED = 'true';
   process.env.AI_TRIAGE_BATCH_SIZE = '20';
   process.env.RELEVANCE_CONFIDENCE_THRESHOLD = '0.7';
+  await prisma.aIConfiguration.update({ where: { userId }, data: { cooldownUntil: null, accessIssue: null, accessIssueModel: null, consecutiveFailures: 0 } });
   vi.mocked(GmailFetcherService.fetchMessageMetadata).mockResolvedValue({ labelIds: ['INBOX'], snippet: 'fixture' });
 });
 afterAll(async () => {
@@ -205,10 +209,13 @@ describe('COM-125 relevance batch pure behavior', () => {
   });
   it('25 safety limit prevents a batch claim', async () => {
     process.env.AI_USER_DAILY_CALL_LIMIT = '0';
-    const email = await prisma.email.create({ data: { userId, gmailMessageId: 'limit-1' } });
-    await expect(classifyBatch(userId, [{ emailId: email.id, input: { sender: null, subject: 'x', labels: [], snippet: null } }], provider)).rejects.toBeInstanceOf(AIAccessError);
-    expect(await prisma.aIOperation.count({ where: { emailId: email.id } })).toBe(0);
-    process.env.AI_USER_DAILY_CALL_LIMIT = '100';
+    try {
+      const email = await prisma.email.create({ data: { userId, gmailMessageId: 'limit-1' } });
+      await expect(classifyBatch(userId, [{ emailId: email.id, input: { sender: null, subject: 'x', labels: [], snippet: null } }], provider)).rejects.toBeInstanceOf(AIAccessError);
+      expect(await prisma.aIOperation.count({ where: { emailId: email.id } })).toBe(0);
+    } finally {
+      process.env.AI_USER_DAILY_CALL_LIMIT = '100';
+    }
   });
   it('16 pipeline routing follows the classification ledger over the feature flag', async () => {
     const perEmail = await prisma.email.create({ data: { userId, gmailMessageId: 'routing-v2' } });
@@ -218,7 +225,7 @@ describe('COM-125 relevance batch pure behavior', () => {
         operation: 'classification',
         version: 'classification/v2',
         status: 'COMPLETED',
-        result: { decision: 'IRRELEVANT', confidence: 1, category: null },
+        result: { decision: 'IRRELEVANT', confidence: 1, reasoning: 'fixture' },
         provider: 'fixture',
         model: 'fixture-fast',
         completedAt: new Date(),
