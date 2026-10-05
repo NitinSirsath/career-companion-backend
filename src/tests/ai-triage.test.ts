@@ -7,6 +7,7 @@ import { relevanceTriageJobOptions, RELEVANCE_TRIAGE_WORKER_OPTIONS } from '../j
 import { QUEUE_NAMES } from '../services/queue';
 import { parseAI_TRIAGE_BATCH_ENABLED, parseAI_TRIAGE_BATCH_SIZE } from '../utils/config';
 import { GmailFetcherService } from '../services/gmailFetcher';
+import { getAccessState, resolveAIAccess } from '../services/ai/access';
 
 const send = vi.fn();
 const classify = vi.fn();
@@ -16,6 +17,7 @@ vi.mock('../services/queue', () => ({
   getQueue: vi.fn(),
 }));
 vi.mock('../services/gmailFetcher');
+vi.mock('../services/ai/access', () => ({ getAccessState: vi.fn(), resolveAIAccess: vi.fn() }));
 
 const provider = {
   provider: 'fixture',
@@ -168,8 +170,8 @@ describe('COM-125 relevance batch pure behavior', () => {
       { key: 'e2', decision: 'UNCERTAIN', confidence: 0.5, category: null },
       { key: 'e3', decision: 'IRRELEVANT', confidence: 0.9, category: null },
     ] }, usage: { inputTokens: 3, outputTokens: 3 }, version: 'relevance-batch/v1', model: 'fixture-fast' });
-    vi.mocked(require('../services/ai/access').getAccessState).mockResolvedValue({ state: 'READY', reason: null, modelId: null, resumesAt: null });
-    vi.mocked(require('../services/ai/access').resolveAIAccess).mockResolvedValue(provider);
+    vi.mocked(getAccessState).mockResolvedValue({ state: 'READY', reason: null, modelId: null, resumesAt: null });
+    vi.mocked(resolveAIAccess).mockResolvedValue(provider);
     await runTriage(userId);
     expect(classify).toHaveBeenCalledTimes(1);
     expect(await prisma.aIUsageDay.findUnique({ where: { userId_day: { userId, day: new Date().toISOString().slice(0, 10) } } })).toMatchObject({ calls: 1 });
