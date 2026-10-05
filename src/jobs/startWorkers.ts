@@ -3,6 +3,7 @@ import { GMAIL_SCHEDULE_QUEUE } from '../services/gmailSchedule';
 import { startGmailSyncWorker } from './gmailSyncJob';
 import { startEmailProcessingWorker } from './emailProcessingJob';
 import { startNotificationWorker } from './notificationJob';
+import { startRelevanceTriageWorker } from './relevanceTriageJob';
 import { stopQueue, QUEUE_NAMES } from '../services/queue';
 import { errorCategory } from '../utils/errorCategory';
 
@@ -32,6 +33,11 @@ export function defaultWorkers(): WorkerRegistration[] {
       queue: QUEUE_NAMES[1],
       start: startNotificationWorker,
       failureEvent: 'notification_worker_start_failed',
+    },
+    {
+      queue: QUEUE_NAMES[3],
+      start: startRelevanceTriageWorker,
+      failureEvent: 'relevance_triage_worker_start_failed',
     },
   ];
 }

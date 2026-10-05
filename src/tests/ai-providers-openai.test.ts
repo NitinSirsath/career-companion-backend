@@ -159,3 +159,22 @@ describe('OpenAI content-free verification', () => {
     expect(await client().verifyModels(['gpt-5-nano'])).toEqual(expected);
   });
 });
+
+
+describe('OpenAI batch relevance contract', () => {
+  it('uses the batch schema and validates a nullable category', async () => {
+    create.mockResolvedValue(completion(JSON.stringify({ results: [{ key: 'e1', decision: 'IRRELEVANT', confidence: 0.9, category: null }] })));
+    const result = await capabilities().classifier.classifyRelevanceBatch({ items: [{ key: 'e1', sender: null, subject: 's', labels: [], snippet: null }] });
+    expect(result.data.results).toHaveLength(1);
+    expect(create.mock.calls[0][0]).toMatchObject({
+      response_format: { json_schema: { name: 'email_relevance_batch', strict: true } },
+      max_completion_tokens: 4096,
+    });
+  });
+
+  it('treats non-stop batch output as INVALID_OUTPUT', async () => {
+    create.mockResolvedValue(completion('{"results":[]}', { finish_reason: 'length' }));
+    const error = await failure(capabilities().classifier.classifyRelevanceBatch({ items: [] }));
+    expect(error.kind).toBe('INVALID_OUTPUT');
+  });
+});

@@ -4,6 +4,8 @@ import {
   AIResult,
   AIRole,
   CLASSIFICATION_CONTRACT,
+  RELEVANCE_BATCH_CONTRACT,
+  RelevanceBatchEnvelopeSchema,
   EXTRACTION_CONTRACT,
   EXTRACTION_V3_CONTRACT,
   EmailAnalyzer,
@@ -40,6 +42,19 @@ async function run<T>(
 export function bindCapabilities(client: ProviderClient, models: BoundModels): AICapabilities {
   return {
     classifier: {
+      classifyRelevanceBatch: async (inputs) => {
+        const model = models[RELEVANCE_BATCH_CONTRACT.role];
+        const { data, usage } = await client.generateStructured({
+          contract: RELEVANCE_BATCH_CONTRACT as AIContract<unknown>,
+          model,
+          input: JSON.stringify(inputs),
+        });
+        // The provider is held to the strict item schema. Only the envelope is checked here; each
+        // item is checked by mapBatchResults, so one bad item never fails the whole batch.
+        const parsed = RelevanceBatchEnvelopeSchema.safeParse(data);
+        if (!parsed.success) throw new ProviderFailure('INVALID_OUTPUT', { usage });
+        return { version: RELEVANCE_BATCH_CONTRACT.version, data: parsed.data, model: model.id, usage };
+      },
       classifyRelevance: (input) =>
         run(
           client,

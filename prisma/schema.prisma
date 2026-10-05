@@ -20,6 +20,7 @@ model User {
   gmailConnection     GmailConnection?
   emails              Email[]
   aiConfiguration     AIConfiguration?
+  aiBatches           AIBatch[]
   aiUsageDays         AIUsageDay[]
   integrationTokens   IntegrationToken[]
   externalSubmissions ExternalSubmission[]
@@ -349,6 +350,38 @@ enum AIOperationStatus {
 
 // A claim is committed BEFORE the external effect. A lost/uncertain response
 // is never automatically reclaimed: an operator must reconcile it first.
+enum AIBatchStatus {
+  PROCESSING
+  COMPLETED
+  REFUSED
+  FAILED
+  UNKNOWN
+}
+
+model AIBatch {
+  id           String        @id @default(uuid()) @db.Uuid
+  userId       String        @db.Uuid
+  operation    String
+  version      String
+  status       AIBatchStatus
+  itemCount    Int
+  provider     String?
+  model        String?
+  inputTokens  Int?
+  outputTokens Int?
+  errorCode    String?
+  startedAt    DateTime
+  completedAt  DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  operations AIOperation[]
+
+  @@index([userId, createdAt])
+  @@map("ai_batches")
+}
+
 model AIOperation {
   id              String            @id @default(uuid()) @db.Uuid
   emailId         String            @db.Uuid
@@ -362,6 +395,7 @@ model AIOperation {
   model           String?
   /// Each explicit user approval permits exactly one more call (ADR-0001 decision 10).
   approvedRetries Int               @default(0)
+  batchId         String?           @db.Uuid
   result          Json?
   errorCode       String?
   retryAfter      DateTime?
@@ -370,9 +404,11 @@ model AIOperation {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   email           Email             @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  batch           AIBatch?          @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
   @@unique([emailId, operation, version])
   @@index([status, retryAfter])
+  @@index([batchId])
   @@map("ai_operations")
 }
 

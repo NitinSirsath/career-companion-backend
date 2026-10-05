@@ -6,6 +6,7 @@ export const QUEUE_NAMES = [
   'email-processing-job',
   'discord-notification-job',
   'gmail-sync-job',
+  'relevance-triage-job',
 ] as const;
 let started: PgBoss | undefined;
 export const getStartedQueue = () => started;
@@ -21,7 +22,11 @@ export function getQueue(): Promise<PgBoss> {
       );
       try {
         await boss.start();
-        for (const name of [...QUEUE_NAMES, GMAIL_SCHEDULE_QUEUE]) await boss.createQueue(name);
+        for (const name of QUEUE_NAMES) {
+          if (name === 'relevance-triage-job') await boss.createQueue(name, { policy: 'stately' });
+          else await boss.createQueue(name);
+        }
+        await boss.createQueue(GMAIL_SCHEDULE_QUEUE);
         started = boss;
         return boss;
       } catch (error) {

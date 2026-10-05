@@ -164,6 +164,17 @@ export async function runOperation<T>(request: OperationRequest<T>): Promise<Ope
   return { data, provider: access.provider, model: model.id };
 }
 
+export function failureKind(err: unknown): ProviderFailure | null {
+  return err instanceof ProviderFailure ? err : null;
+}
+
+export function failureError(kind: ProviderFailure['kind'], message: string): AIProviderError {
+  if (kind === 'INVALID_OUTPUT') return new SchemaValidationFailure(message, 'Structured response failed validation');
+  if (kind === 'INVALID_REQUEST') return new TerminalAIError(message);
+  if (kind === 'OUTCOME_UNKNOWN') return new AIOutcomeUnknownError();
+  return new TerminalAIError(message);
+}
+
 /**
  * Records a failed call on the ledger and the user's access state, and returns the error the
  * caller sees. Refusals restore the claim; uncertain and unusable outcomes are held.

@@ -28,9 +28,9 @@ const claude = getCatalogProvider('anthropic')!;
 const [haiku, sonnet] = claude.models;
 const client = () => createAnthropicClient(claude, 'sk-ant-test-key');
 const usage = { input_tokens: 30, output_tokens: 12 };
-const toolReply = (input: unknown, extra: object = {}) => ({
+const toolReply = (input: unknown, extra: object = {}, name = 'email_relevance') => ({
   stop_reason: 'tool_use',
-  content: [{ type: 'tool_use', id: 't', name: 'email_relevance', input }],
+  content: [{ type: 'tool_use', id: 't', name, input }],
   usage,
   ...extra,
 });
@@ -155,5 +155,24 @@ describe('Anthropic content-free verification', () => {
   ])('maps a lookup failure (%#) without throwing', async (err, expected) => {
     retrieve.mockRejectedValue(err);
     expect(await client().verifyModels(['claude-sonnet-5-5'])).toEqual(expected);
+  });
+});
+
+
+describe('Anthropic batch relevance contract', () => {
+  it('uses the batch schema and accepts nullable category', async () => {
+    create.mockResolvedValue(toolReply({ results: [{ key: 'e1', decision: 'UNCERTAIN', confidence: 0.5, category: null }] }, {}, 'email_relevance_batch'));
+    const result = await bindCapabilities(client(), { fast: haiku, detailed: haiku }).classifier.classifyRelevanceBatch({ items: [{ key: 'e1', sender: null, subject: 's', labels: [], snippet: null }] });
+    expect(result.data.results).toHaveLength(1);
+    expect(create.mock.calls[0][0]).toMatchObject({
+      max_tokens: 4096,
+      tools: [{ name: 'email_relevance_batch' }],
+    });
+  });
+
+  it('treats max_tokens batch output as INVALID_OUTPUT', async () => {
+    create.mockResolvedValue(toolReply({ results: [] }, { stop_reason: 'max_tokens' }, 'email_relevance_batch'));
+    const error = await failure(bindCapabilities(client(), { fast: haiku, detailed: haiku }).classifier.classifyRelevanceBatch({ items: [] }));
+    expect(error.kind).toBe('INVALID_OUTPUT');
   });
 });
