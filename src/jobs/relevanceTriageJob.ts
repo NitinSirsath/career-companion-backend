@@ -21,7 +21,12 @@ export async function enqueueRelevanceTriage(userId: string): Promise<string | n
 export const RELEVANCE_TRIAGE_WORKER_OPTIONS = { includeMetadata: true, batchSize: 1 } as const;
 export async function handleRelevanceTriageJobs(jobs: JobWithMetadata<RelevanceTriageJobData>[]) {
   if (jobs.length !== 1) throw new Error('UNEXPECTED_RELEVANCE_TRIAGE_JOB_BATCH');
-  await runTriage(jobs[0].data.userId, jobs[0].signal);
+  const { userId } = jobs[0].data;
+  const run = await runTriage(userId, jobs[0].signal);
+  // The run stops starting batches after 180 seconds; queue the rest now instead of waiting for
+  // the next sync. If the per-user singleton suppresses it, the next sync re-offers them.
+  if (run.stoppedBy === 'time_limit' && !(await enqueueRelevanceTriage(userId)))
+    console.log(JSON.stringify({ event: 'triage_followup_suppressed', userId }));
 }
 export async function startRelevanceTriageWorker() {
   await (await getQueue()).work(RELEVANCE_TRIAGE_JOB, RELEVANCE_TRIAGE_WORKER_OPTIONS, handleRelevanceTriageJobs);

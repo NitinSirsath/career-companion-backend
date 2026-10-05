@@ -3,7 +3,7 @@ import { getAccessState, resolveAIAccess } from './access';
 import { prisma } from '../../db/prisma';
 import { GmailFetcherService } from '../gmailFetcher';
 import { enqueueEmailProcessingJob } from '../../jobs/emailProcessingJob';
-import { AIAccessError, AIOutcomeUnknownError, ProviderFailure, RetryableAIError, TerminalAIError } from './errors';
+import { AIAccessError, AIProviderError, RetryableAIError, TerminalAIError } from './errors';
 import {
   AI_CONTRACT_VERSIONS,
   AIResult,
@@ -64,12 +64,16 @@ export async function classifyBatch(
   userId: string,
   items: Candidate[],
   access: AIAccess,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; updateEmails?: boolean } = {},
 ) {
+  // false when called from classifyOne: the per-email job owns the email's state there.
+  const updateEmails = options.updateEmails ?? true;
   if (!items.length) return { decided: new Map<string, RelevanceBatchItem>(), undecided: [], ignored: 0, batchId: null, byEmail: new Map<string, BatchOutcome>() };
   const size = triageBatchSize();
   if (items.length > size || items.length > 25) throw new TerminalAIError('Invalid relevance batch size');
   const threshold = relevanceThreshold();
+  // Checked before claiming: an abort here leaves nothing claimed and nothing sent.
+  options.signal?.throwIfAborted();
   const now = new Date();
   const model = access.models.fast;
   const operationKeys = items.map((item) => ({ emailId: item.emailId, operation: 'classification', version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH }));
@@ -117,10 +121,11 @@ export async function classifyBatch(
     }
     if (!claimed.length) throw new RetryableAIError('AI operation not ready');
     await reserveUserCall(tx, userId, now);
-    await tx.email.updateMany({
-      where: { userId, id: { in: claimed.map((item) => item.emailId) }, processingState: 'PENDING' },
-      data: { processingState: 'PROCESSING' },
-    });
+    if (updateEmails)
+      await tx.email.updateMany({
+        where: { userId, id: { in: claimed.map((item) => item.emailId) }, processingState: 'PENDING' },
+        data: { processingState: 'PROCESSING' },
+      });
     await tx.aIBatch.update({ where: { id: batch.id }, data: { itemCount: claimed.length } });
     console.log(JSON.stringify({ event: 'ai_batch_claimed', batchId: batch.id, userId, itemCount: claimed.length, provider: access.provider, model: model.id }));
   });
@@ -128,97 +133,124 @@ export async function classifyBatch(
   const sent = buildRelevanceBatchInput(claimed.map((item) => item.input));
   let result: AIResult<{ results: unknown[] }>;
   try {
-    options.signal?.throwIfAborted();
     result = await access.classifier.classifyRelevanceBatch(sent);
-    await recordTokens(userId, now, result.usage);
-    const mapped = mapBatchResults(sent.items.map((item) => item.key!), result.data.results);
-    const byEmail = new Map<string, BatchOutcome>();
-    await prisma.$transaction(async (tx) => {
-      const batch = await tx.aIBatch.update({
-        where: { id: batchId! },
-        data: {
-          status: 'COMPLETED',
-          completedAt: new Date(),
-          inputTokens: result.usage.inputTokens,
-          outputTokens: result.usage.outputTokens,
-          errorCode: null,
+  } catch (err) {
+    throw await failBatch(err, { userId, access, batchId: batchId!, claimed, now, modelId: model.id, updateEmails });
+  }
+
+  // Deliberately outside the catch (same rule as runOperation): if saving fails after the provider
+  // answered, the rows stay PROCESSING, later become held for approval, and are never resent.
+  await recordTokens(userId, now, result.usage);
+  const mapped = mapBatchResults(sent.items.map((item) => item.key!), result.data.results);
+  const byEmail = new Map<string, BatchOutcome>();
+  const cleared = { processingErrorCategory: null, processingErrorDetails: null, processingErrorStage: null, processingRetryable: null, processingFailedAt: null };
+  await prisma.$transaction(async (tx) => {
+    const batch = await tx.aIBatch.update({
+      where: { id: batchId! },
+      data: {
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+        errorCode: null,
+      },
+    });
+    for (let index = 0; index < claimed.length; index++) {
+      const item = claimed[index];
+      const decision = mapped.decided.get(sent.items[index].key!);
+      const op = await tx.aIOperation.findUniqueOrThrow({ where: { emailId_operation_version: { emailId: item.emailId, operation: 'classification', version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH } } });
+      if (!decision) {
+        // Stays RETRYABLE even when its attempts are used up: holdOf then offers the user an approval.
+        await tx.aIOperation.update({ where: { id: op.id }, data: { status: 'RETRYABLE', errorCode: 'BATCH_ITEM_MISSING', retryAfter: null } });
+        if (updateEmails) {
+          const exhausted = op.attempts >= MAX_ATTEMPTS + op.approvedRetries;
+          await tx.email.updateMany({
+            where: { id: item.emailId, userId },
+            data: exhausted
+              ? { processingState: 'FAILED', processingErrorCategory: 'BatchItemMissing', processingErrorDetails: null, processingErrorStage: 'classification', processingRetryable: false, processingFailedAt: new Date() }
+              : { processingState: 'PENDING', ...cleared },
+          });
+        }
+        byEmail.set(item.emailId, 'UNDECIDED');
+        continue;
+      }
+      const decisionState = decision.confidence < threshold ? 'UNCERTAIN' : decision.decision;
+      byEmail.set(item.emailId, decisionState);
+      await tx.aIOperation.update({ where: { id: op.id }, data: { status: 'COMPLETED', result: { decision: decisionState, confidence: decision.confidence, category: decision.category }, completedAt: new Date(), retryAfter: null } });
+      await tx.aIProcessingResult.upsert({
+        where: { emailId: item.emailId },
+        create: {
+          emailId: item.emailId, provider: batch.provider!, model: batch.model!, contractVersion: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH,
+          relevanceDecision: decisionState, confidence: decision.confidence, category: decision.category, deterministic: false,
+          processingStatus: decisionState === 'IRRELEVANT' ? 'COMPLETED' : 'PROCESSING',
+        },
+        update: {
+          provider: batch.provider!, model: batch.model!, contractVersion: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH,
+          relevanceDecision: decisionState, confidence: decision.confidence, category: decision.category, deterministic: false,
+          processingStatus: decisionState === 'IRRELEVANT' ? 'COMPLETED' : 'PROCESSING',
+          errorCategory: null, errorDetails: null,
         },
       });
-      for (const item of claimed) {
-        const key = sent.items.find((candidate) => candidate.key === sent.items[claimed.indexOf(item)]?.key)?.key;
-        const decision = key ? mapped.decided.get(key) : undefined;
-        const op = await tx.aIOperation.findUniqueOrThrow({ where: { emailId_operation_version: { emailId: item.emailId, operation: 'classification', version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH } } });
-        if (!decision) {
-          const held = op.attempts >= MAX_ATTEMPTS + op.approvedRetries;
-          await tx.aIOperation.update({ where: { id: op.id }, data: { status: held ? 'FAILED' : 'RETRYABLE', errorCode: 'BATCH_ITEM_MISSING', retryAfter: null } });
-          await tx.email.updateMany({ where: { id: item.emailId, userId }, data: held ? { processingState: 'FAILED', processingErrorCategory: 'BatchItemMissing', processingErrorStage: 'classification', processingRetryable: false, processingFailedAt: new Date() } : { processingState: 'PENDING', processingErrorCategory: null, processingErrorDetails: null, processingErrorStage: null, processingRetryable: null, processingFailedAt: null } });
-          byEmail.set(item.emailId, 'UNDECIDED');
-          continue;
-        }
-        const decisionState = decision.confidence < threshold ? 'UNCERTAIN' : decision.decision;
-        byEmail.set(item.emailId, decisionState);
-        await tx.aIOperation.update({ where: { id: op.id }, data: { status: 'COMPLETED', result: { decision: decisionState, confidence: decision.confidence, category: decision.category }, completedAt: new Date(), retryAfter: null } });
-        await tx.aIProcessingResult.upsert({
-          where: { emailId: item.emailId },
-          create: {
-            emailId: item.emailId, provider: batch.provider!, model: batch.model!, contractVersion: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH,
-            relevanceDecision: decisionState, confidence: decision.confidence, category: decision.category, deterministic: false,
-            processingStatus: decisionState === 'IRRELEVANT' ? 'COMPLETED' : 'PROCESSING',
-          },
-          update: {
-            provider: batch.provider!, model: batch.model!, contractVersion: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH,
-            relevanceDecision: decisionState, confidence: decision.confidence, category: decision.category, deterministic: false,
-            processingStatus: decisionState === 'IRRELEVANT' ? 'COMPLETED' : 'PROCESSING',
-            errorCategory: null, errorDetails: null,
-          },
-        });
+      if (updateEmails)
         await tx.email.updateMany({
           where: { id: item.emailId, userId },
+          // relevanceState of job-related email is set by the pipeline's finish(), after extraction.
           data: decisionState === 'IRRELEVANT'
-            ? { processingState: 'COMPLETED', relevanceState: 'IRRELEVANT', processingErrorCategory: null, processingErrorDetails: null, processingErrorStage: null, processingRetryable: null, processingFailedAt: null }
-            : { processingState: 'PENDING', relevanceState: 'RELEVANT', processingErrorCategory: null, processingErrorDetails: null, processingErrorStage: null, processingRetryable: null, processingFailedAt: null },
+            ? { processingState: 'COMPLETED', relevanceState: 'IRRELEVANT', ...cleared }
+            : { processingState: 'PENDING', ...cleared },
         });
-      }
-    });
-    await noteProviderSuccess(access);
-    console.log(JSON.stringify({ event: 'ai_batch_completed', batchId, userId, itemCount: claimed.length, decided: mapped.decided.size, undecided: mapped.undecided.length, ignored: mapped.ignored }));
-    return { ...mapped, batchId, byEmail };
-  } catch (err) {
-    const failure = failureKind(err);
-    const kind = failure?.kind;
-    await prisma.$transaction(async (tx) => {
-      const opStatus = kind === 'KEY_REJECTED' || kind === 'ACCOUNT_OR_BILLING' || kind === 'MODEL_UNAVAILABLE' || kind === 'RATE_LIMITED' ? 'REFUSED' : kind === 'OUTCOME_UNKNOWN' ? 'UNKNOWN' : 'FAILED';
-      await tx.aIBatch.update({ where: { id: batchId! }, data: { status: opStatus, errorCode: kind ?? 'OutcomeUnknown', completedAt: kind === 'OUTCOME_UNKNOWN' ? null : new Date() } });
-      for (const item of claimed) {
-        const op = await tx.aIOperation.findUniqueOrThrow({ where: { emailId_operation_version: { emailId: item.emailId, operation: 'classification', version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH } } });
-        if (opStatus === 'REFUSED') {
-          await tx.aIOperation.update({ where: { id: op.id }, data: { status: 'PENDING', attempts: { decrement: 1 }, errorCode: kind, batchId: null, startedAt: null } });
-        } else {
-          await tx.aIOperation.update({ where: { id: op.id }, data: { status: opStatus === 'UNKNOWN' ? 'UNKNOWN' : 'FAILED', errorCode: kind ?? 'OutcomeUnknown' } });
-        }
-        await tx.email.updateMany({
-          where: { id: item.emailId, userId },
-          data: opStatus === 'REFUSED'
-            ? { processingState: 'PENDING', processingErrorCategory: null, processingErrorDetails: null, processingErrorStage: null, processingRetryable: null, processingFailedAt: null }
-            : { processingState: 'FAILED', processingErrorCategory: kind === 'INVALID_OUTPUT' ? 'SchemaValidationFailure' : 'ProcessingError', processingErrorDetails: null, processingErrorStage: 'classification', processingRetryable: false, processingFailedAt: new Date() },
-        });
-      }
-      if (kind === 'RATE_LIMITED' || kind === 'KEY_REJECTED' || kind === 'ACCOUNT_OR_BILLING' || kind === 'MODEL_UNAVAILABLE') {
-        await noteProviderFailure(tx, access, kind, now, { modelId: model.id, retryAfterMs: failure?.retryAfterMs });
-      } else if (kind === 'OUTCOME_UNKNOWN') {
-        await noteProviderFailure(tx, access, 'OUTCOME_UNKNOWN', now);
-      }
-    });
-    console.warn(JSON.stringify({ event: 'ai_batch_failed', batchId, userId, itemCount: claimed.length, kind: kind ?? 'OutcomeUnknown' }));
-    if (failure) {
-      if (kind === 'INVALID_OUTPUT' || kind === 'INVALID_REQUEST' || kind === 'OUTCOME_UNKNOWN')
-        throw failureError(kind, failure.message);
-      if (kind === 'KEY_REJECTED' || kind === 'ACCOUNT_OR_BILLING' || kind === 'MODEL_UNAVAILABLE' || kind === 'RATE_LIMITED')
-        throw new AIAccessError(kind, null);
-      throw failure;
     }
-    throw err;
-  }
+  });
+  await noteProviderSuccess(access);
+  console.log(JSON.stringify({ event: 'ai_batch_completed', batchId, userId, itemCount: claimed.length, decided: mapped.decided.size, undecided: mapped.undecided.length, ignored: mapped.ignored }));
+  return { ...mapped, batchId, byEmail };
+}
+
+const REFUSALS = ['KEY_REJECTED', 'ACCOUNT_OR_BILLING', 'MODEL_UNAVAILABLE', 'RATE_LIMITED'] as const;
+type Refusal = (typeof REFUSALS)[number];
+const isRefusal = (kind: string | undefined): kind is Refusal =>
+  kind !== undefined && (REFUSALS as readonly string[]).includes(kind);
+
+/**
+ * Records a failed batch call on every claimed row (and, from the triage job, on the emails) and
+ * returns the error to throw. Same rules as runOperation: a refusal releases the claim; invalid
+ * output or request is FAILED; anything else may have been charged and is held as UNKNOWN.
+ */
+async function failBatch(
+  err: unknown,
+  ctx: { userId: string; access: AIAccess; batchId: string; claimed: Candidate[]; now: Date; modelId: string; updateEmails: boolean },
+): Promise<unknown> {
+  const failure = failureKind(err);
+  const kind = failure?.kind;
+  const refusal = isRefusal(kind) ? kind : null;
+  const status = refusal ? 'REFUSED' : kind === 'INVALID_OUTPUT' || kind === 'INVALID_REQUEST' ? 'FAILED' : 'UNKNOWN';
+  const thrown: unknown = refusal ? null : failure ? failureError(failure.kind, failure.message) : err;
+  const resumesAt = await prisma.$transaction(async (tx) => {
+    await tx.aIBatch.update({
+      where: { id: ctx.batchId },
+      data: { status, errorCode: kind ?? 'OutcomeUnknown', completedAt: status === 'UNKNOWN' ? null : new Date() },
+    });
+    for (const item of ctx.claimed) {
+      const where = { emailId_operation_version: { emailId: item.emailId, operation: 'classification', version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH } };
+      if (refusal)
+        await tx.aIOperation.update({ where, data: { status: 'PENDING', attempts: { decrement: 1 }, errorCode: refusal, batchId: null, startedAt: null } });
+      else
+        await tx.aIOperation.update({ where, data: { status: status === 'UNKNOWN' ? 'UNKNOWN' : 'FAILED', errorCode: kind ?? 'OutcomeUnknown' } });
+      if (!ctx.updateEmails) continue;
+      await tx.email.updateMany({
+        where: { id: item.emailId, userId: ctx.userId },
+        data: refusal
+          ? { processingState: 'PENDING', processingErrorCategory: null, processingErrorDetails: null, processingErrorStage: null, processingRetryable: null, processingFailedAt: null }
+          : { processingState: 'FAILED', processingErrorCategory: thrown instanceof AIProviderError ? thrown.name : 'ProcessingError', processingErrorDetails: null, processingErrorStage: 'classification', processingRetryable: false, processingFailedAt: new Date() },
+      });
+    }
+    if (refusal)
+      return noteProviderFailure(tx, ctx.access, refusal, ctx.now, { modelId: ctx.modelId, retryAfterMs: failure?.retryAfterMs });
+    if (kind === 'OUTCOME_UNKNOWN') await noteProviderFailure(tx, ctx.access, 'OUTCOME_UNKNOWN', ctx.now);
+    return null;
+  });
+  console.warn(JSON.stringify({ event: 'ai_batch_failed', batchId: ctx.batchId, userId: ctx.userId, itemCount: ctx.claimed.length, kind: kind ?? 'OutcomeUnknown' }));
+  return refusal ? new AIAccessError(refusal, resumesAt) : thrown;
 }
 
 export async function classifyOne(
@@ -237,7 +269,7 @@ export async function classifyOne(
   if (row && (row.status === 'UNKNOWN' || row.status === 'FAILED' || row.attempts >= MAX_ATTEMPTS + row.approvedRetries || row.status === 'PROCESSING'))
     throw new TerminalAIError(`AI operation requires review: ${row.status}`);
   const access = await resolveAIAccess(userId);
-  const result = await classifyBatch(userId, [{ emailId, input }], access, options);
+  const result = await classifyBatch(userId, [{ emailId, input }], access, { ...options, updateEmails: false });
   if (result.undecided.length) throw new RetryableAIError('AI answer missing');
   const item = result.decided.get('e1') ?? [...result.decided.values()][0];
   if (!item) throw new RetryableAIError('AI answer missing');
@@ -258,6 +290,7 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
   const started = Date.now();
   const handled = new Set<string>();
   let batches = 0, processed = 0;
+  let stoppedBy: 'time_limit' | 'ai_failure' = 'time_limit';
   while (Date.now() - started < TRIAGE_RUN_LIMIT_MS) {
     const ids = (await batchCandidates(userId, triageBatchSize())).filter((id) => !handled.has(id));
     if (!ids.length) return { batches, emails: processed, stoppedBy: 'no_candidates' as const };
@@ -294,12 +327,16 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
       }
     } catch (err) {
       candidates.forEach((candidate) => handled.add(candidate.emailId));
-      if (err instanceof AIAccessError || err instanceof AIOutcomeUnknownError || err instanceof ProviderFailure) break;
+      // Nothing was claimed: another run or job holds these emails. Skip them and continue.
+      if (err instanceof RetryableAIError) continue;
+      // Every other AI outcome is already recorded on the ledger and the emails: stop this run.
+      if (err instanceof AIProviderError) {
+        stoppedBy = 'ai_failure';
+        break;
+      }
       throw err;
     }
-    if (candidates.length === 0) break;
   }
-  const stoppedBy = Date.now() - started >= TRIAGE_RUN_LIMIT_MS ? 'time_limit' as const : 'no_progress' as const;
   console.log(JSON.stringify({ event: 'triage_run', userId, batches, emails: processed, stoppedBy }));
   return { batches, emails: processed, stoppedBy };
 }

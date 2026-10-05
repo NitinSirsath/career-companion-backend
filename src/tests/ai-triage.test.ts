@@ -1,14 +1,18 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../db/prisma';
 import { AIAccessError, AIOutcomeUnknownError, ProviderFailure, SchemaValidationFailure, TerminalAIError } from '../services/ai/errors';
-import { buildRelevanceBatchInput, mapBatchResults, RelevanceBatchItemSchema } from '../services/ai/contracts';
-import { triageBatchSize, relevanceThreshold, classifyBatch, runTriage } from '../services/ai/triage';
+import { buildRelevanceBatchInput, mapBatchResults, RelevanceBatchItemSchema, RelevanceBatchSchema } from '../services/ai/contracts';
+import { triageBatchSize, relevanceThreshold, classifyBatch, classifyOne, runTriage } from '../services/ai/triage';
 import { relevanceTriageJobOptions, RELEVANCE_TRIAGE_WORKER_OPTIONS } from '../jobs/relevanceTriageJob';
-import { QUEUE_NAMES } from '../services/queue';
+import { getQueue, QUEUE_NAMES } from '../services/queue';
 import { parseAI_TRIAGE_BATCH_ENABLED, parseAI_TRIAGE_BATCH_SIZE } from '../utils/config';
 import { GmailFetcherService } from '../services/gmailFetcher';
 import { getAccessState, resolveAIAccess } from '../services/ai/access';
 import { EmailAIPipeline } from '../services/ai/pipeline';
+import { holdOf } from '../services/ai/heldOperations';
+import { bindCapabilities } from '../services/ai/capabilities';
+import { strictJsonSchema } from '../services/ai/providers/jsonSchema';
+import { reofferPendingEmails } from '../services/gmailSync';
 
 const send = vi.fn();
 const classify = vi.fn();
@@ -304,6 +308,99 @@ describe('COM-125 relevance batch pure behavior', () => {
     await runTriage(userId);
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(userId, email.id);
+  });
+
+  const one = { sender: null, subject: 'x', labels: [], snippet: null };
+  const ok = (results: unknown[]) => ({ data: { results }, usage: { inputTokens: 1, outputTokens: 1 }, version: 'relevance-batch/v1', model: 'fixture-fast' });
+  const opWhere = (emailId: string) => ({ emailId_operation_version: { emailId, operation: 'classification', version: 'relevance-batch/v1' } });
+  const ready = () => {
+    vi.mocked(getAccessState).mockResolvedValue({ state: 'READY', reason: null, modelId: null, resumesAt: null });
+    vi.mocked(resolveAIAccess).mockResolvedValue(provider);
+  };
+
+  it('29 a missing answer at the attempt limit stays RETRYABLE and approvable', async () => {
+    const email = await prisma.email.create({ data: { userId, gmailMessageId: 'exhausted-1' } });
+    await prisma.aIOperation.create({ data: { emailId: email.id, operation: 'classification', version: 'relevance-batch/v1', status: 'RETRYABLE', attempts: 2 } });
+    classify.mockResolvedValue(ok([]));
+    await classifyBatch(userId, [{ emailId: email.id, input: one }], provider);
+    const row = await prisma.aIOperation.findUniqueOrThrow({ where: opWhere(email.id) });
+    expect(row).toMatchObject({ status: 'RETRYABLE', attempts: 3 });
+    expect(holdOf(row, new Date())).toEqual({ approvable: 'ATTEMPTS_EXHAUSTED' });
+    expect(await prisma.email.findUniqueOrThrow({ where: { id: email.id } })).toMatchObject({ processingState: 'FAILED', processingErrorCategory: 'BatchItemMissing' });
+  });
+
+  it('30 a save failure after the AI answered leaves rows PROCESSING, never FAILED', async () => {
+    const email = await prisma.email.create({ data: { userId, gmailMessageId: 'save-fail-1' } });
+    classify.mockImplementation(async () => {
+      await prisma.aIBatch.deleteMany({ where: { userId } });
+      return ok([{ key: 'e1', decision: 'RELEVANT', confidence: 0.9, category: null }]);
+    });
+    await expect(classifyBatch(userId, [{ emailId: email.id, input: one }], provider)).rejects.toThrow();
+    expect(await prisma.aIOperation.findUniqueOrThrow({ where: opWhere(email.id) })).toMatchObject({ status: 'PROCESSING' });
+  });
+
+  it('31 an unclassified call error is held as UNKNOWN', async () => {
+    const email = await prisma.email.create({ data: { userId, gmailMessageId: 'unclassified-1' } });
+    classify.mockRejectedValue(new Error('adapter bug'));
+    await expect(classifyBatch(userId, [{ emailId: email.id, input: one }], provider)).rejects.toThrow('adapter bug');
+    expect(await prisma.aIOperation.findUniqueOrThrow({ where: opWhere(email.id) })).toMatchObject({ status: 'UNKNOWN' });
+  });
+
+  it('32 a triage run stops on an AI error instead of failing the job', async () => {
+    await prisma.email.create({ data: { userId, gmailMessageId: 'stop-1' } });
+    ready();
+    classify.mockRejectedValue(new ProviderFailure('INVALID_OUTPUT'));
+    await expect(runTriage(userId)).resolves.toMatchObject({ stoppedBy: 'ai_failure' });
+  });
+
+  it('33 classifyOne never changes the email state', async () => {
+    const email = await prisma.email.create({ data: { userId, gmailMessageId: 'one-1', processingState: 'PROCESSING' } });
+    ready();
+    classify.mockResolvedValue(ok([{ key: 'e1', decision: 'RELEVANT', confidence: 0.9, category: 'RECRUITER' }]));
+    const out = await classifyOne(userId, email.id, one);
+    expect(out.decision).toBe('RELEVANT');
+    expect(await prisma.email.findUniqueOrThrow({ where: { id: email.id } })).toMatchObject({ processingState: 'PROCESSING', relevanceState: 'UNPROCESSED' });
+  });
+
+  it('34 triage leaves relevanceState UNPROCESSED for job-related email', async () => {
+    const email = await prisma.email.create({ data: { userId, gmailMessageId: 'state-1' } });
+    ready();
+    classify.mockResolvedValue(ok([{ key: 'e1', decision: 'RELEVANT', confidence: 0.9, category: 'RECRUITER' }]));
+    await runTriage(userId);
+    expect(await prisma.email.findUniqueOrThrow({ where: { id: email.id } })).toMatchObject({ processingState: 'PENDING', relevanceState: 'UNPROCESSED' });
+    expect(send).toHaveBeenCalledWith(userId, email.id);
+  });
+
+  it('35 the batch capability sends the item schema and checks only the envelope', async () => {
+    const calls: unknown[] = [];
+    const client = {
+      generateStructured: async (request: unknown) => {
+        calls.push(request);
+        return { data: { results: [{ key: 'e1', decision: 'RELEVANT', confidence: 0.9, category: null }, { key: 'e2', decision: 'BAD' }] }, usage: { inputTokens: 1, outputTokens: 1 } };
+      },
+      verifyModels: async () => ({ result: 'VERIFIED' as const }),
+    };
+    const model = { id: 'fixture-fast' };
+    const ai = bindCapabilities(client as never, { fast: model, detailed: model } as never);
+    const out = await ai.classifier.classifyRelevanceBatch({ items: [] });
+    expect(out.data.results).toHaveLength(2);
+    expect((calls[0] as { contract: { schema: unknown } }).contract.schema).toBe(RelevanceBatchSchema);
+    const json = JSON.stringify(strictJsonSchema(RelevanceBatchSchema));
+    for (const field of ['key', 'decision', 'confidence', 'category']) expect(json).toContain(`"${field}"`);
+  });
+
+  it('36 re-offer sends unclassified email to triage and the rest to the per-email job', async () => {
+    const fresh = await prisma.email.create({ data: { userId, gmailMessageId: 'reoffer-fresh' } });
+    const legacy = await prisma.email.create({ data: { userId, gmailMessageId: 'reoffer-v2' } });
+    await prisma.aIOperation.create({ data: { emailId: legacy.id, operation: 'classification', version: 'classification/v2', status: 'PENDING' } });
+    ready();
+    const queueSend = vi.fn(async () => 'triage-job');
+    vi.mocked(getQueue).mockResolvedValue({ send: queueSend } as never);
+    await reofferPendingEmails(userId);
+    expect(queueSend).toHaveBeenCalledTimes(1);
+    expect(queueSend).toHaveBeenCalledWith('relevance-triage-job', { userId }, expect.anything());
+    expect(send).toHaveBeenCalledWith(userId, legacy.id);
+    expect(send).not.toHaveBeenCalledWith(userId, fresh.id);
   });
 
   it('26 redaction logs contain no provider input fields', () => {

@@ -64,37 +64,25 @@ export async function reofferPendingEmails(
     take: REOFFER_LIMIT,
     select: {
       id: true,
-      aiProcessingResult: { select: { contractVersion: true, relevanceDecision: true } },
-      aiOperations: {
-        where: { operation: 'classification', version: 'relevance-batch/v1' },
-        select: { status: true, attempts: true, approvedRetries: true, retryAfter: true },
-      },
+      aiProcessingResult: { select: { id: true } },
+      aiOperations: { where: { operation: 'classification' }, select: { id: true } },
     },
   });
   let triageQueued = false;
-  let count = 0;
   for (const email of pending) {
     await guard?.();
-    if (triageBatchEnabled() && !email.aiProcessingResult) {
+    // With batching on, an email with no result and no classification row goes to the batched
+    // check; every other email continues on the per-email job, which reuses or resumes its row.
+    if (triageBatchEnabled() && !email.aiProcessingResult && !email.aiOperations.length) {
       if (!triageQueued) {
         await enqueueRelevanceTriage(userId);
         triageQueued = true;
       }
-      count++;
       continue;
     }
-    if (email.aiProcessingResult?.contractVersion === 'relevance-batch/v1' &&
-        (email.aiProcessingResult.relevanceDecision === 'RELEVANT' || email.aiProcessingResult.relevanceDecision === 'UNCERTAIN')) {
-      await enqueueEmailProcessingJob(userId, email.id);
-      count++;
-      continue;
-    }
-    if (!triageBatchEnabled()) {
-      await enqueueEmailProcessingJob(userId, email.id);
-      count++;
-    }
+    await enqueueEmailProcessingJob(userId, email.id);
   }
-  return count;
+  return pending.length;
 }
 
 const LEASE_MS = 5 * 60_000;

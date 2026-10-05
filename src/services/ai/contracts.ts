@@ -228,7 +228,7 @@ Return your decision as a structured JSON object according to the schema.
   maxOutputTokens: 2048,
 };
 
-export const RELEVANCE_BATCH_CONTRACT: AIContract<{ results: unknown[] }> = {
+export const RELEVANCE_BATCH_CONTRACT: AIContract<z.infer<typeof RelevanceBatchSchema>> = {
   version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH,
   role: 'fast',
   schemaName: 'email_relevance_batch',
@@ -247,7 +247,7 @@ IMPORTANT DECISION RULES:
 - OTPs (e.g. Upstox OTP), banking/security notifications, generic newsletters, and personal/transactional noise MUST be classified as IRRELEVANT.
 - Do not classify something as IRRELEVANT merely because it is not an explicit job application. Job alerts and opportunities are RELEVANT.
 `.trim(),
-  schema: RelevanceBatchEnvelopeSchema,
+  schema: RelevanceBatchSchema,
   maxOutputTokens: 4096,
 };
 
