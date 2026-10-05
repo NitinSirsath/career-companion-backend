@@ -26,7 +26,7 @@ export function fakeAccess(userId: string, revision = 0): AIAccess {
     provider: 'gemini',
     models: { fast: recommendedModel(gemini, 'fast'), detailed: recommendedModel(gemini, 'detailed') },
     revision,
-    classifier: { classifyRelevance: vi.fn() },
+    classifier: { classifyRelevance: vi.fn(), classifyRelevanceBatch: vi.fn() },
     analyzer: { extractJobData: vi.fn() },
   };
 }

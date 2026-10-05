@@ -1,4 +1,5 @@
 import { candidateEnvelope, verifiedCandidates } from './temporal';
+import type { EmailCategory } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { GmailFetcherService } from '../gmailFetcher';
 import { MatcherService } from '../matcher';
@@ -17,6 +18,18 @@ import {
 } from './contracts';
 import { TerminalAIError } from './errors';
 import { runOperation } from './operations';
+import { classifyOne, triageBatchEnabled, relevanceThreshold } from './triage';
+
+type RelevanceOutcome = {
+  data: {
+    decision: 'RELEVANT' | 'IRRELEVANT' | 'UNCERTAIN';
+    confidence: number;
+    category: EmailCategory | null;
+  };
+  provider: string | null;
+  model: string | null;
+  version: string;
+};
 
 /** Ledger rows from before provenance was recorded carry no model; keep the stored one. */
 function provenance(
@@ -43,71 +56,119 @@ export class EmailAIPipeline {
     const result = email.aiProcessingResult;
     // Adopt existing completed work; neither a deployment nor a sync is reprocessing consent.
     const extracted = ['extraction/v2', 'extraction/v3'].includes(result?.contractVersion ?? '');
+    const batched = result?.contractVersion === AI_CONTRACT_VERSIONS.RELEVANCE_BATCH && result.relevanceDecision !== null;
     if (result && (result.processingStatus === 'COMPLETED' || extracted)) {
       await this.finish(userId, emailId, result.relevanceDecision);
       return;
     }
+    const classificationLedger = await prisma.aIOperation.findMany({
+      where: { emailId, operation: 'classification' },
+      select: { version: true },
+    });
+    const hasBatchClassification = classificationLedger.some(
+      (row) => row.version === AI_CONTRACT_VERSIONS.RELEVANCE_BATCH,
+    );
+    const hasPerEmailClassification = classificationLedger.some(
+      (row) => row.version === AI_CONTRACT_VERSIONS.CLASSIFICATION,
+    );
+    const useBatch =
+      hasBatchClassification ||
+      (triageBatchEnabled() && !hasPerEmailClassification);
+    const batchClassified = batched && hasBatchClassification;
+
     const operations = await prisma.aIOperation.count({ where: { emailId } });
     if (result && !operations)
       throw new TerminalAIError('Legacy partial AI result requires reconciliation');
 
-    // Metadata/body are transient and fetched before reserving a provider call.
-    const gmail = await GmailFetcherService.fetchMessageMetadata(
-      userId,
-      email.gmailMessageId,
-      options,
-    );
-    const labels = gmail.labelIds ?? [];
-    const deterministic = labels.some((label) =>
-      ['CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'SPAM'].includes(label),
-    );
-    const threshold = Number(process.env.RELEVANCE_CONFIDENCE_THRESHOLD ?? 0.7);
-    if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1)
-      throw new TerminalAIError('Invalid relevance threshold');
-    // The user's own AI access is resolved lazily, at most once per job, and only when a provider
-    // call is about to be claimed: promotions and reused results need no key.
     let resolved: Promise<AIAccess> | undefined;
     const access = () => (resolved ??= resolveAIAccess(userId));
-    const relevance = deterministic
-      ? {
-          data: { decision: 'IRRELEVANT' as const, confidence: 1, category: undefined },
+    let decision: 'RELEVANT' | 'IRRELEVANT' | 'UNCERTAIN';
+
+    let relevance: RelevanceOutcome;
+    if (batchClassified) {
+      decision = result!.relevanceDecision!;
+    } else {
+      // Metadata/body are transient and fetched before reserving a provider call.
+      const gmail = await GmailFetcherService.fetchMessageMetadata(
+        userId,
+        email.gmailMessageId,
+        options,
+      );
+      const labels = gmail.labelIds ?? [];
+      const deterministic = labels.some((label) =>
+        ['CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'SPAM'].includes(label),
+      );
+      const threshold = relevanceThreshold();
+      const boundedInput = {
+        sender: email.sender?.slice(0, LIMITS.sender) ?? null,
+        subject: email.subject?.slice(0, LIMITS.subject) ?? null,
+        labels: labels.slice(0, LIMITS.labels),
+        snippet: gmail.snippet?.slice(0, LIMITS.snippet) ?? null,
+      };
+
+      if (deterministic) {
+        relevance = {
+          data: { decision: 'IRRELEVANT', confidence: 1, category: null },
           provider: 'deterministic',
           model: 'none',
-        }
-      : await runOperation({
+          version: 'deterministic/v1',
+        };
+      } else if (useBatch) {
+        const one = await classifyOne(userId, emailId, boundedInput, {
+          signal: options.signal,
+        });
+        relevance = {
+          data: {
+            decision: one.decision,
+            confidence: one.confidence,
+            category: (one.category ?? null) as EmailCategory | null,
+          },
+          provider: one.provider,
+          model: one.model,
+          version: one.version,
+        };
+      } else {
+        const r = await runOperation({
           userId,
           emailId,
           operation: 'classification',
           contract: CLASSIFICATION_CONTRACT,
           access,
-          call: (ai) =>
-            ai.classifier.classifyRelevance({
-              sender: email.sender?.slice(0, LIMITS.sender),
-              subject: email.subject?.slice(0, LIMITS.subject),
-              labels: labels.slice(0, LIMITS.labels),
-              snippet: gmail.snippet?.slice(0, LIMITS.snippet),
-            }),
+          call: (ai) => ai.classifier.classifyRelevance(boundedInput),
         });
-    const decision = relevance.data.confidence < threshold ? 'UNCERTAIN' : relevance.data.decision;
-    const data = {
-      // Provenance comes from the operation that produced the result, so a result reused after a
-      // provider switch keeps its own provider and model.
-      ...provenance(relevance, result),
-      contractVersion: deterministic ? 'deterministic/v1' : AI_CONTRACT_VERSIONS.CLASSIFICATION,
-      relevanceDecision: decision,
-      confidence: relevance.data.confidence,
-      category: relevance.data.category ?? null,
-      deterministic,
-      processingStatus:
-        decision === 'IRRELEVANT' ? ('COMPLETED' as const) : ('PROCESSING' as const),
-      errorCategory: null,
-      errorDetails: null,
-    };
-    await prisma.aIProcessingResult.upsert({
-      where: { emailId },
-      create: { emailId, ...data },
-      update: data,
-    });
+        relevance = {
+          data: {
+            decision: r.data.decision,
+            confidence: r.data.confidence,
+            category: r.data.category ?? null,
+          },
+          provider: r.provider,
+          model: r.model,
+          version: AI_CONTRACT_VERSIONS.CLASSIFICATION,
+        };
+      }
+
+      decision = relevance.data.confidence < threshold ? 'UNCERTAIN' : relevance.data.decision;
+      const data = {
+        // Provenance comes from the operation that produced the result, so a result reused after a
+        // provider switch keeps its own provider and model.
+        ...provenance(relevance, result),
+        contractVersion: relevance.version,
+        relevanceDecision: decision,
+        confidence: relevance.data.confidence,
+        category: relevance.data.category ?? null,
+        deterministic,
+        processingStatus:
+          decision === 'IRRELEVANT' ? ('COMPLETED' as const) : ('PROCESSING' as const),
+        errorCategory: null,
+        errorDetails: null,
+      };
+      await prisma.aIProcessingResult.upsert({
+        where: { emailId },
+        create: { emailId, ...data },
+        update: data,
+      });
+    }
     if (decision !== 'IRRELEVANT') {
       const body = await GmailFetcherService.fetchMessageBody(
         userId,

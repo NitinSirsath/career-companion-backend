@@ -1,6 +1,8 @@
 import { afterAll, expect, it } from 'vitest';
+import { prisma } from '../db/prisma';
 import { randomUUID } from 'crypto';
-import { getQueue, getStartedQueue, stopQueue } from '../services/queue';
+import { getQueue, getStartedQueue, stopQueue, QUEUE_NAMES } from '../services/queue';
+import { enqueueRelevanceTriage, relevanceTriageJobOptions } from '../jobs/relevanceTriageJob';
 it('shares initialization and throttles duplicate jobs using PostgreSQL', async () => {
   const [a, b] = await Promise.all([getQueue(), getQueue()]);
   expect(a).toBe(b);
@@ -28,4 +30,55 @@ it('discards failed queue initialization and starts afresh on recovery', async (
   }
   const queue = await getQueue();
   expect(getStartedQueue()).toBe(queue);
+});
+
+it('keeps existing queue positions and configures triage as a ten-second per-user singleton', () => {
+  expect(QUEUE_NAMES.slice(0, 3)).toEqual(['email-processing-job', 'discord-notification-job', 'gmail-sync-job']);
+  expect(QUEUE_NAMES[3]).toBe('relevance-triage-job');
+  expect(relevanceTriageJobOptions('user-1')).toMatchObject({ singletonKey: 'triage:user-1', startAfter: 10 });
+});
+
+
+it('deduplicates triage jobs per user across queued and active states', async () => {
+  const queue = await getQueue();
+  const userA = `test-triage-a-${randomUUID()}`;
+  const userB = `test-triage-b-${randomUUID()}`;
+
+  const firstA = await enqueueRelevanceTriage(userA);
+  expect(firstA).toBeTruthy();
+  expect(await enqueueRelevanceTriage(userA)).toBeNull();
+  expect(await enqueueRelevanceTriage(userB)).toBeTruthy();
+
+  let active!: () => void;
+  const activeReached = new Promise<void>((resolve) => { active = resolve; });
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => { release = resolve; });
+
+  const workerId = await queue.work<{ userId: string }>('relevance-triage-job', { batchSize: 1 }, async (jobs) => {
+    if (jobs[0].data.userId === userA) {
+      active();
+      await hold;
+    }
+  });
+
+  try {
+    await prisma.$executeRawUnsafe(
+      'UPDATE pgboss.job SET start_after = now() WHERE name = $1 AND id = $2::uuid',
+      'relevance-triage-job',
+      firstA,
+    );
+    queue.notifyWorker(workerId);
+    await Promise.race([
+      activeReached,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('triage job did not become active')), 10_000)),
+    ]);
+    expect(await enqueueRelevanceTriage(userA)).toBeTruthy();
+  } finally {
+    release();
+    await queue.offWork('relevance-triage-job', { id: workerId });
+    await prisma.$executeRawUnsafe(
+      "DELETE FROM pgboss.job WHERE name = 'relevance-triage-job' AND data->>'userId' = ANY($1::text[])",
+      [userA, userB],
+    );
+  }
 });

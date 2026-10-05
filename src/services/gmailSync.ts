@@ -4,6 +4,8 @@ import { gmail_v1 } from 'googleapis';
 import { prisma } from '../db/prisma';
 import { withGmail, googleStatus, googleAuthFailure } from './gmailClient';
 import { enqueueEmailProcessingJob } from '../jobs/emailProcessingJob';
+import { enqueueRelevanceTriage } from '../jobs/relevanceTriageJob';
+import { triageBatchEnabled } from './ai/triage';
 import { getAccessState } from './ai/access';
 
 import {
@@ -60,10 +62,24 @@ export async function reofferPendingEmails(
     where: { userId, processingState: 'PENDING' },
     orderBy: [{ receivedAt: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
     take: REOFFER_LIMIT,
-    select: { id: true },
+    select: {
+      id: true,
+      aiProcessingResult: { select: { id: true } },
+      aiOperations: { where: { operation: 'classification' }, select: { id: true } },
+    },
   });
+  let triageQueued = false;
   for (const email of pending) {
     await guard?.();
+    // With batching on, an email with no result and no classification row goes to the batched
+    // check; every other email continues on the per-email job, which reuses or resumes its row.
+    if (triageBatchEnabled() && !email.aiProcessingResult && !email.aiOperations.length) {
+      if (!triageQueued) {
+        await enqueueRelevanceTriage(userId);
+        triageQueued = true;
+      }
+      continue;
+    }
     await enqueueEmailProcessingJob(userId, email.id);
   }
   return pending.length;
@@ -193,7 +209,7 @@ export class GmailSyncService {
               if (existing) {
                 if (existing.processingState === 'PENDING') {
                   await heartbeat();
-                  await enqueueEmailProcessingJob(userId, existing.id);
+                  if (triageBatchEnabled()) await enqueueRelevanceTriage(userId); else await enqueueEmailProcessingJob(userId, existing.id);
                 }
                 messagesSkipped++;
                 continue;
@@ -237,7 +253,7 @@ export class GmailSyncService {
               });
               if (record.processingState === 'PENDING') {
                 await heartbeat();
-                await enqueueEmailProcessingJob(userId, record.id);
+                if (triageBatchEnabled()) await enqueueRelevanceTriage(userId); else await enqueueEmailProcessingJob(userId, record.id);
               }
               messagesIngested++;
             }
