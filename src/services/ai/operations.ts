@@ -164,10 +164,6 @@ export async function runOperation<T>(request: OperationRequest<T>): Promise<Ope
   return { data, provider: access.provider, model: model.id };
 }
 
-/**
- * Records a failed call on the ledger and the user's access state, and returns the error the
- * caller sees. Refusals restore the claim; uncertain and unusable outcomes are held.
- */
 export function failureKind(err: unknown): ProviderFailure | null {
   return err instanceof ProviderFailure ? err : null;
 }
@@ -179,6 +175,10 @@ export function failureError(kind: ProviderFailure['kind'], message: string): AI
   return new TerminalAIError(message);
 }
 
+/**
+ * Records a failed call on the ledger and the user's access state, and returns the error the
+ * caller sees. Refusals restore the claim; uncertain and unusable outcomes are held.
+ */
 async function recordFailure(
   err: unknown,
   context: {

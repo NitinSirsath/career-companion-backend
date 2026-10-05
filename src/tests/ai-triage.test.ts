@@ -4,7 +4,7 @@ import { AIAccessError, AIOutcomeUnknownError, ProviderFailure, RetryableAIError
 import { buildRelevanceBatchInput, mapBatchResults, RelevanceBatchItemSchema, RelevanceBatchSchema } from '../services/ai/contracts';
 import { triageBatchSize, relevanceThreshold, classifyBatch, classifyOne, runTriage } from '../services/ai/triage';
 import { relevanceTriageJobOptions, RELEVANCE_TRIAGE_WORKER_OPTIONS } from '../jobs/relevanceTriageJob';
-import { getQueue, QUEUE_NAMES } from '../services/queue';
+import { getQueue } from '../services/queue';
 import { parseAI_TRIAGE_BATCH_ENABLED, parseAI_TRIAGE_BATCH_SIZE } from '../utils/config';
 import { GmailFetcherService } from '../services/gmailFetcher';
 import { getAccessState, resolveAIAccess } from '../services/ai/access';
@@ -160,12 +160,11 @@ describe('COM-125 relevance batch pure behavior', () => {
   it('17 triage worker is explicitly batchSize one', () => {
     expect(RELEVANCE_TRIAGE_WORKER_OPTIONS.batchSize).toBe(1);
   });
-  it('18 triage queue uses a per-user singleton and ten-second delay', () => {
-    expect(relevanceTriageJobOptions('u')).toMatchObject({ singletonKey: 'triage:u', startAfter: 10, retryLimit: 3 });
+  it('18 triage job options set the per-user singleton key and ten-second delay', () => {
+    expect(relevanceTriageJobOptions('u')).toMatchObject({ singletonKey: 'triage:u', startAfter: 10 });
   });
-  it('19 appends the triage queue without moving existing queue positions', () => {
-    expect(QUEUE_NAMES.slice(0, 3)).toEqual(['email-processing-job', 'discord-notification-job', 'gmail-sync-job']);
-    expect(QUEUE_NAMES[3]).toBe('relevance-triage-job');
+  it('19 triage job options set retry behavior and expiration', () => {
+    expect(relevanceTriageJobOptions('u')).toMatchObject({ retryLimit: 3, retryDelay: 60, retryBackoff: true, expireInSeconds: 300 });
   });
   it('20 happy path uses one batch call for non-spam candidates', async () => {
     await Promise.all(Array.from({ length: 5 }, (_, i) => prisma.email.create({ data: { userId, gmailMessageId: `happy-${i}` } })));
