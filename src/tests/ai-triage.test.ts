@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../db/prisma';
-import { AIAccessError, AIOutcomeUnknownError, ProviderFailure, SchemaValidationFailure, TerminalAIError } from '../services/ai/errors';
+import { AIAccessError, AIOutcomeUnknownError, ProviderFailure, RetryableAIError, SchemaValidationFailure, TerminalAIError } from '../services/ai/errors';
 import { buildRelevanceBatchInput, mapBatchResults, RelevanceBatchItemSchema, RelevanceBatchSchema } from '../services/ai/contracts';
 import { triageBatchSize, relevanceThreshold, classifyBatch, classifyOne, runTriage } from '../services/ai/triage';
 import { relevanceTriageJobOptions, RELEVANCE_TRIAGE_WORKER_OPTIONS } from '../jobs/relevanceTriageJob';
@@ -401,6 +401,67 @@ describe('COM-125 relevance batch pure behavior', () => {
     expect(queueSend).toHaveBeenCalledWith('relevance-triage-job', { userId }, expect.anything());
     expect(send).toHaveBeenCalledWith(userId, legacy.id);
     expect(send).not.toHaveBeenCalledWith(userId, fresh.id);
+  });
+
+
+  it('37 two runs at the same time never claim the same email', async () => {
+    const [a, b, c] = await Promise.all(['par-a', 'par-b', 'par-c'].map((gmailMessageId) => prisma.email.create({ data: { userId, gmailMessageId } })));
+    classify.mockImplementation(async (input: { items: { key?: string }[] }) => ok(input.items.map((item) => ({ key: item.key, decision: 'IRRELEVANT', confidence: 0.9, category: null }))));
+    await Promise.all([
+      classifyBatch(userId, [{ emailId: a.id, input: one }, { emailId: b.id, input: one }], provider),
+      classifyBatch(userId, [{ emailId: b.id, input: one }, { emailId: c.id, input: one }], provider),
+    ].map((run) => run.catch(() => undefined)));
+    const sentItems = classify.mock.calls.reduce((total, [arg]) => total + (arg as { items: unknown[] }).items.length, 0);
+    expect(sentItems).toBe(3);
+    const rows = await prisma.aIOperation.findMany({ where: { emailId: { in: [a.id, b.id, c.id] } } });
+    expect(rows.every((row) => row.attempts === 1)).toBe(true);
+  });
+
+  it('38 a Gmail failure hands that email to the per-email job', async () => {
+    const bad = await prisma.email.create({ data: { userId, gmailMessageId: 'gmail-bad' } });
+    await prisma.email.create({ data: { userId, gmailMessageId: 'gmail-good' } });
+    vi.mocked(GmailFetcherService.fetchMessageMetadata).mockImplementation(async (_u, id) => {
+      if (id === 'gmail-bad') throw new Error('Gmail request failed');
+      return { labelIds: ['INBOX'], snippet: 'fixture' };
+    });
+    ready();
+    classify.mockResolvedValue(ok([{ key: 'e1', decision: 'IRRELEVANT', confidence: 0.9, category: null }]));
+    await runTriage(userId);
+    expect(send).toHaveBeenCalledWith(userId, bad.id);
+    expect(classify).toHaveBeenCalledTimes(1);
+    expect((classify.mock.calls[0][0] as { items: unknown[] }).items).toHaveLength(1);
+  });
+
+  it('39 classifyOne waits for a live batch claim instead of failing', async () => {
+    const email = await prisma.email.create({ data: { userId, gmailMessageId: 'live-1', processingState: 'PROCESSING' } });
+    await prisma.aIOperation.create({ data: { emailId: email.id, operation: 'classification', version: 'relevance-batch/v1', status: 'PROCESSING', attempts: 1, startedAt: new Date() } });
+    await expect(classifyOne(userId, email.id, one)).rejects.toBeInstanceOf(RetryableAIError);
+    expect(classify).not.toHaveBeenCalled();
+  });
+
+  it('40 classifyOne reuses a completed batch result without a call', async () => {
+    const email = await prisma.email.create({ data: { userId, gmailMessageId: 'reuse-1' } });
+    await prisma.aIOperation.create({ data: { emailId: email.id, operation: 'classification', version: 'relevance-batch/v1', status: 'COMPLETED', attempts: 1, provider: 'fixture', model: 'fixture-fast', result: { decision: 'RELEVANT', confidence: 0.9, category: 'INTERVIEW' }, completedAt: new Date() } });
+    const out = await classifyOne(userId, email.id, one);
+    expect(out).toMatchObject({ decision: 'RELEVANT', category: 'INTERVIEW' });
+    expect(classify).not.toHaveBeenCalled();
+  });
+
+  it('41 an email with a missing answer is not picked again in the same run', async () => {
+    await prisma.email.create({ data: { userId, gmailMessageId: 'loop-1' } });
+    ready();
+    classify.mockResolvedValue(ok([]));
+    await runTriage(userId);
+    expect(classify).toHaveBeenCalledTimes(1);
+  });
+
+  it('42 a run with AI access not ready makes no Gmail calls and no claims', async () => {
+    const email = await prisma.email.create({ data: { userId, gmailMessageId: 'noaccess-1' } });
+    vi.mocked(GmailFetcherService.fetchMessageMetadata).mockClear();
+    vi.mocked(getAccessState).mockResolvedValue({ state: 'LIMITED', reason: 'RATE_LIMITED', modelId: null, resumesAt: null });
+    await expect(runTriage(userId)).resolves.toMatchObject({ stoppedBy: 'access_not_ready' });
+    expect(GmailFetcherService.fetchMessageMetadata).not.toHaveBeenCalled();
+    expect(await prisma.aIOperation.count({ where: { emailId: email.id } })).toBe(0);
   });
 
   it('26 redaction logs contain no provider input fields', () => {
