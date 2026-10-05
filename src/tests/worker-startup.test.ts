@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { startWorkers } from '../jobs/startWorkers';
 import { errorCategory } from '../utils/errorCategory';
+import { defaultWorkers } from '../jobs/startWorkers';
+import { QUEUE_NAMES } from '../services/queue';
 afterEach(() => vi.restoreAllMocks());
 describe('bounded worker registration', () => {
   it('registers once without waiting when ready', async () => {
@@ -84,4 +86,12 @@ describe('bounded worker registration', () => {
       code: '3D000',
     });
   });
+});
+
+it('registers triage without changing the existing queue positions', () => {
+  const queues = defaultWorkers().map((worker) => worker.queue);
+  expect(queues).toContain(QUEUE_NAMES[3]);
+  expect(queues).toContain(QUEUE_NAMES[0]);
+  expect(queues).toContain(QUEUE_NAMES[1]);
+  expect(queues).toContain(QUEUE_NAMES[2]);
 });

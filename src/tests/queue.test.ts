@@ -1,6 +1,7 @@
 import { afterAll, expect, it } from 'vitest';
 import { randomUUID } from 'crypto';
-import { getQueue, getStartedQueue, stopQueue } from '../services/queue';
+import { getQueue, getStartedQueue, stopQueue, QUEUE_NAMES } from '../services/queue';
+import { relevanceTriageJobOptions } from '../jobs/relevanceTriageJob';
 it('shares initialization and throttles duplicate jobs using PostgreSQL', async () => {
   const [a, b] = await Promise.all([getQueue(), getQueue()]);
   expect(a).toBe(b);
@@ -28,4 +29,10 @@ it('discards failed queue initialization and starts afresh on recovery', async (
   }
   const queue = await getQueue();
   expect(getStartedQueue()).toBe(queue);
+});
+
+it('keeps existing queue positions and configures triage as a ten-second per-user singleton', () => {
+  expect(QUEUE_NAMES.slice(0, 3)).toEqual(['email-processing-job', 'discord-notification-job', 'gmail-sync-job']);
+  expect(QUEUE_NAMES[3]).toBe('relevance-triage-job');
+  expect(relevanceTriageJobOptions('user-1')).toMatchObject({ singletonKey: 'triage:user-1', startAfter: 10 });
 });
