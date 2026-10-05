@@ -6,10 +6,8 @@ import { enqueueEmailProcessingJob } from '../../jobs/emailProcessingJob';
 import { AIAccessError, AIOutcomeUnknownError, ProviderFailure, RetryableAIError, TerminalAIError } from './errors';
 import {
   AI_CONTRACT_VERSIONS,
-  CLASSIFICATION_INPUT_LIMITS,
   AIResult,
   RelevanceClassifierInput,
-  RelevanceBatchInputItem,
   RelevanceBatchItem,
   buildRelevanceBatchInput,
   mapBatchResults,
@@ -74,7 +72,7 @@ export async function classifyBatch(
   const now = new Date();
   const model = access.models.fast;
   const operationKeys = items.map((item) => ({ emailId: item.emailId, operation: 'classification', version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH }));
-  let claimed: Candidate[] = [];
+  const claimed: Candidate[] = [];
   let batchId: string | null = null;
 
   await prisma.$transaction(async (tx) => {
@@ -124,7 +122,7 @@ export async function classifyBatch(
     });
     await tx.aIBatch.update({ where: { id: batch.id }, data: { itemCount: claimed.length } });
     console.log(JSON.stringify({ event: 'ai_batch_claimed', batchId: batch.id, userId, itemCount: claimed.length, provider: access.provider, model: model.id }));
-  }).catch((err) => {
+  }).catch(() => {
     if (err instanceof AIAccessError) throw err;
     throw err;
   });

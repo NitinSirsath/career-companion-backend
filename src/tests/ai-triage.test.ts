@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../db/prisma';
-import { AIAccessError, AIOutcomeUnknownError, ProviderFailure, RetryableAIError, SchemaValidationFailure, TerminalAIError } from '../services/ai/errors';
+import { AIAccessError, AIOutcomeUnknownError, ProviderFailure, SchemaValidationFailure, TerminalAIError } from '../services/ai/errors';
 import { buildRelevanceBatchInput, mapBatchResults, RelevanceBatchItemSchema } from '../services/ai/contracts';
-import { triageBatchEnabled, triageBatchSize, relevanceThreshold, classifyBatch, runTriage } from '../services/ai/triage';
+import { triageBatchSize, relevanceThreshold, classifyBatch, runTriage } from '../services/ai/triage';
 import { relevanceTriageJobOptions, RELEVANCE_TRIAGE_WORKER_OPTIONS } from '../jobs/relevanceTriageJob';
 import { QUEUE_NAMES } from '../services/queue';
 import { parseAI_TRIAGE_BATCH_ENABLED, parseAI_TRIAGE_BATCH_SIZE } from '../utils/config';
@@ -28,8 +28,6 @@ const provider = {
 } as never;
 
 let userId = '';
-const emailIds: string[] = [];
-
 async function reset() {
   await prisma.email.deleteMany({ where: { userId } });
   await prisma.aIOperation.deleteMany({ where: { email: { userId } } });
@@ -161,7 +159,7 @@ describe('COM-125 relevance batch pure behavior', () => {
     expect(QUEUE_NAMES[3]).toBe('relevance-triage-job');
   });
   it('20 happy path uses one batch call for non-spam candidates', async () => {
-    const emails = await Promise.all(Array.from({ length: 5 }, (_, i) => prisma.email.create({ data: { userId, gmailMessageId: `happy-${i}` } })));
+    await Promise.all(Array.from({ length: 5 }, (_, i) => prisma.email.create({ data: { userId, gmailMessageId: `happy-${i}` } })));
     vi.mocked(GmailFetcherService.fetchMessageMetadata).mockImplementation(async (_u, id) => ({
       labelIds: id.endsWith('0') || id.endsWith('1') ? ['INBOX', 'SPAM'] : ['INBOX'],
       snippet: 'fixture',

@@ -87,16 +87,6 @@ export class EmailAIPipeline {
     let relevance: RelevanceOutcome;
     if (batchClassified) {
       decision = result!.relevanceDecision!;
-      relevance = {
-        data: {
-          decision,
-          confidence: result!.confidence ?? 0,
-          category: result!.category ?? null,
-        },
-        provider: result!.provider,
-        model: result!.model,
-        version: result!.contractVersion,
-      };
     } else {
       // Metadata/body are transient and fetched before reserving a provider call.
       const gmail = await GmailFetcherService.fetchMessageMetadata(
