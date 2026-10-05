@@ -44,7 +44,7 @@ export class EmailAIPipeline {
     const result = email.aiProcessingResult;
     // Adopt existing completed work; neither a deployment nor a sync is reprocessing consent.
     const extracted = ['extraction/v2', 'extraction/v3'].includes(result?.contractVersion ?? '');
-    const batched = result?.contractVersion === AI_CONTRACT_VERSIONS.RELEVANCE_BATCH && result.relevanceDecision;
+    const batched = result?.contractVersion === AI_CONTRACT_VERSIONS.RELEVANCE_BATCH && result.relevanceDecision !== null;
     if (result && (result.processingStatus === 'COMPLETED' || extracted)) {
       await this.finish(userId, emailId, result.relevanceDecision);
       return;
@@ -74,8 +74,13 @@ export class EmailAIPipeline {
       labels: labels.slice(0, LIMITS.labels),
       snippet: gmail.snippet?.slice(0, LIMITS.snippet) ?? null,
     };
-    const relevance = deterministic
-      ? { data: { decision: 'IRRELEVANT' as const, confidence: 1, category: undefined }, provider: 'deterministic', model: 'none', version: 'deterministic/v1' }
+    const relevance: {
+      data: { decision: 'RELEVANT' | 'IRRELEVANT' | 'UNCERTAIN'; confidence: number; category: string | null | undefined };
+      provider: string | null;
+      model: string | null;
+      version: string;
+    } = deterministic
+      ? { data: { decision: 'IRRELEVANT', confidence: 1, category: null }, provider: 'deterministic', model: 'none', version: 'deterministic/v1' }
       : batched
         ? { data: { decision: result!.relevanceDecision!, confidence: result!.confidence ?? 0, category: result!.category ?? null }, provider: result!.provider, model: result!.model, version: result!.contractVersion }
         : triageBatchEnabled()

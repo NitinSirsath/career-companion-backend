@@ -7,6 +7,8 @@ import { AIAccessError, AIOutcomeUnknownError, ProviderFailure, RetryableAIError
 import {
   AI_CONTRACT_VERSIONS,
   CLASSIFICATION_INPUT_LIMITS,
+  AIResult,
+  RelevanceClassifierInput,
   RelevanceBatchInputItem,
   RelevanceBatchItem,
   buildRelevanceBatchInput,
@@ -38,7 +40,7 @@ export function relevanceThreshold(value = process.env.RELEVANCE_CONFIDENCE_THRE
 
 type Candidate = {
   emailId: string;
-  input: RelevanceBatchInputItem;
+  input: RelevanceClassifierInput;
 };
 
 async function batchCandidates(userId: string, limit: number): Promise<string[]> {
@@ -128,7 +130,7 @@ export async function classifyBatch(
   });
 
   const sent = buildRelevanceBatchInput(claimed.map((item) => item.input));
-  let result;
+  let result: AIResult<{ results: unknown[] }>;
   try {
     options.signal?.throwIfAborted();
     result = await access.classifier.classifyRelevanceBatch(sent);
@@ -223,12 +225,12 @@ export async function classifyBatch(
 export async function classifyOne(
   userId: string,
   emailId: string,
-  input: RelevanceBatchInputItem,
+  input: RelevanceClassifierInput,
   options: { signal?: AbortSignal } = {},
 ) {
   const row = await prisma.aIOperation.findUnique({ where: { emailId_operation_version: { emailId, operation: 'classification', version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH } } });
   if (row?.status === 'COMPLETED') {
-    const data = row.result as RelevanceBatchItem;
+    const data = row.result as unknown as RelevanceBatchItem;
     return { decision: data.decision, confidence: data.confidence, category: data.category, provider: row.provider, model: row.model, version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH };
   }
   if (row?.status === 'PROCESSING' && row.startedAt && Date.now() - row.startedAt.getTime() < TRIAGE_STALE_PROCESSING_MS)
@@ -280,7 +282,6 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
     }
     if (!candidates.length) continue;
     const inputs = buildRelevanceBatchInput(candidates.map((candidate) => candidate.input));
-    candidates.forEach((candidate, index) => { candidate.input.key = inputs.items[index].key; });
     try {
       const access = await resolveAIAccess(userId);
       const result = await classifyBatch(userId, candidates, access, { signal });
@@ -290,7 +291,8 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
         if (candidate) handled.add(candidate.emailId);
       });
       for (const candidate of candidates) {
-        const key = candidate.input.key;
+        const index = candidates.indexOf(candidate);
+        const key = inputs.items[index].key;
         const decided = result.decided.get(key);
         handled.add(candidate.emailId);
         if (decided && (decided.decision === 'RELEVANT' || decided.decision === 'UNCERTAIN')) {

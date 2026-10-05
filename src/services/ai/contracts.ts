@@ -116,7 +116,7 @@ export const RelevanceBatchEnvelopeSchema = z.object({
 });
 
 export interface RelevanceBatchInputItem {
-  key: string;
+  key?: string;
   sender: string | null;
   subject: string | null;
   labels: string[];
