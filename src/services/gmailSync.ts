@@ -4,6 +4,8 @@ import { gmail_v1 } from 'googleapis';
 import { prisma } from '../db/prisma';
 import { withGmail, googleStatus, googleAuthFailure } from './gmailClient';
 import { enqueueEmailProcessingJob } from '../jobs/emailProcessingJob';
+import { enqueueRelevanceTriage } from '../jobs/relevanceTriageJob';
+import { triageBatchEnabled } from './ai/triage';
 import { getAccessState } from './ai/access';
 
 import {
@@ -60,13 +62,39 @@ export async function reofferPendingEmails(
     where: { userId, processingState: 'PENDING' },
     orderBy: [{ receivedAt: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
     take: REOFFER_LIMIT,
-    select: { id: true },
+    select: {
+      id: true,
+      aiProcessingResult: { select: { contractVersion: true, relevanceDecision: true } },
+      aiOperations: {
+        where: { operation: 'classification', version: 'relevance-batch/v1' },
+        select: { status: true, attempts: true, approvedRetries: true, retryAfter: true },
+      },
+    },
   });
+  let triageQueued = false;
+  let count = 0;
   for (const email of pending) {
     await guard?.();
-    await enqueueEmailProcessingJob(userId, email.id);
+    if (triageBatchEnabled() && !email.aiProcessingResult) {
+      if (!triageQueued) {
+        await enqueueRelevanceTriage(userId);
+        triageQueued = true;
+      }
+      count++;
+      continue;
+    }
+    if (email.aiProcessingResult?.contractVersion === 'relevance-batch/v1' &&
+        (email.aiProcessingResult.relevanceDecision === 'RELEVANT' || email.aiProcessingResult.relevanceDecision === 'UNCERTAIN')) {
+      await enqueueEmailProcessingJob(userId, email.id);
+      count++;
+      continue;
+    }
+    if (!triageBatchEnabled()) {
+      await enqueueEmailProcessingJob(userId, email.id);
+      count++;
+    }
   }
-  return pending.length;
+  return count;
 }
 
 const LEASE_MS = 5 * 60_000;
@@ -193,7 +221,7 @@ export class GmailSyncService {
               if (existing) {
                 if (existing.processingState === 'PENDING') {
                   await heartbeat();
-                  await enqueueEmailProcessingJob(userId, existing.id);
+                  if (triageBatchEnabled()) await enqueueRelevanceTriage(userId); else await enqueueEmailProcessingJob(userId, existing.id);
                 }
                 messagesSkipped++;
                 continue;
@@ -237,7 +265,7 @@ export class GmailSyncService {
               });
               if (record.processingState === 'PENDING') {
                 await heartbeat();
-                await enqueueEmailProcessingJob(userId, record.id);
+                if (triageBatchEnabled()) await enqueueRelevanceTriage(userId); else await enqueueEmailProcessingJob(userId, record.id);
               }
               messagesIngested++;
             }
