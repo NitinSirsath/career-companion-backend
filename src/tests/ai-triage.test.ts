@@ -8,6 +8,7 @@ import { QUEUE_NAMES } from '../services/queue';
 import { parseAI_TRIAGE_BATCH_ENABLED, parseAI_TRIAGE_BATCH_SIZE } from '../utils/config';
 import { GmailFetcherService } from '../services/gmailFetcher';
 import { getAccessState, resolveAIAccess } from '../services/ai/access';
+import { EmailAIPipeline } from '../services/ai/pipeline';
 
 const send = vi.fn();
 const classify = vi.fn();
@@ -211,6 +212,51 @@ describe('COM-125 relevance batch pure behavior', () => {
     expect(await prisma.aIOperation.count({ where: { emailId: email.id } })).toBe(0);
     process.env.AI_USER_DAILY_CALL_LIMIT = '100';
   });
+  it('16 pipeline routing follows the classification ledger over the feature flag', async () => {
+    const perEmail = await prisma.email.create({ data: { userId, gmailMessageId: 'routing-v2' } });
+    await prisma.aIOperation.create({
+      data: {
+        emailId: perEmail.id,
+        operation: 'classification',
+        version: 'classification/v2',
+        status: 'COMPLETED',
+        result: { decision: 'IRRELEVANT', confidence: 1, category: null },
+        provider: 'fixture',
+        model: 'fixture-fast',
+        completedAt: new Date(),
+      },
+    });
+    process.env.AI_TRIAGE_BATCH_ENABLED = 'true';
+    await EmailAIPipeline.processEmail(userId, perEmail.id);
+    expect(GmailFetcherService.fetchMessageMetadata).toHaveBeenCalledTimes(1);
+    expect(await prisma.aIProcessingResult.findUnique({ where: { emailId: perEmail.id } })).toMatchObject({
+      contractVersion: 'classification/v2',
+      relevanceDecision: 'IRRELEVANT',
+    });
+
+    vi.clearAllMocks();
+    const batched = await prisma.email.create({ data: { userId, gmailMessageId: 'routing-batch' } });
+    await prisma.aIOperation.create({
+      data: {
+        emailId: batched.id,
+        operation: 'classification',
+        version: 'relevance-batch/v1',
+        status: 'COMPLETED',
+        result: { decision: 'IRRELEVANT', confidence: 1, category: null },
+        provider: 'fixture',
+        model: 'fixture-fast',
+        completedAt: new Date(),
+      },
+    });
+    process.env.AI_TRIAGE_BATCH_ENABLED = 'false';
+    await EmailAIPipeline.processEmail(userId, batched.id);
+    expect(GmailFetcherService.fetchMessageMetadata).toHaveBeenCalledTimes(1);
+    expect(await prisma.aIProcessingResult.findUnique({ where: { emailId: batched.id } })).toMatchObject({
+      contractVersion: 'relevance-batch/v1',
+      relevanceDecision: 'IRRELEVANT',
+    });
+  });
+
   it('26 redaction logs contain no provider input fields', () => {
     const log = JSON.stringify({ event: 'triage_run', userId, batchId: 'b', emails: 3, sender: undefined });
     expect(log).not.toContain('subject');
