@@ -146,6 +146,13 @@ async function main() {
       where: { userId: user.id },
       data: { syncLeaseUntil: new Date(0) },
     });
+    // supervise() expires jobs only when the queue's monitor gate is older than
+    // monitorIntervalSeconds (60 s by default), and that gate lives in pgboss.queue, which
+    // cleanup keeps. Move it back like started_on above, so a second run within a minute
+    // still exercises expiry.
+    await db.query(
+      "UPDATE pgboss.queue SET monitor_on=now()-interval '10 minutes', monitor_claim_on=now()-interval '10 minutes' WHERE name='gmail-sync-job'",
+    );
     await boss.supervise('gmail-sync-job');
     assert.equal(
       (await db.query('SELECT state FROM pgboss.job WHERE id=$1', [job.id])).rows[0].state,
@@ -203,7 +210,10 @@ async function main() {
     await db.end();
   }
 }
-(process.argv.includes('--worker') ? worker() : main()).catch(() => {
-  console.error('Crash fixture failed; inspect the dedicated database before reuse.');
+(process.argv.includes('--worker') ? worker() : main()).catch((error) => {
+  console.error(
+    'Crash fixture failed; inspect the dedicated database before reuse.',
+    error instanceof Error ? error.message : String(error),
+  );
   process.exit(1);
 });
