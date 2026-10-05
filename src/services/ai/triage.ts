@@ -13,7 +13,7 @@ import {
   mapBatchResults,
 } from './contracts';
 import { noteProviderFailure, noteProviderSuccess, recordTokens, reserveUserCall } from './usage';
-import { failureKind } from './operations';
+import { failureError, failureKind } from './operations';
 
 export const TRIAGE_STALE_PROCESSING_MS = 15 * 60_000;
 export const TRIAGE_RUN_LIMIT_MS = 180_000;
@@ -209,7 +209,13 @@ export async function classifyBatch(
       }
     });
     console.warn(JSON.stringify({ event: 'ai_batch_failed', batchId, userId, itemCount: claimed.length, kind: kind ?? 'OutcomeUnknown' }));
-    if (failure) throw failure;
+    if (failure) {
+      if (kind === 'INVALID_OUTPUT' || kind === 'INVALID_REQUEST' || kind === 'OUTCOME_UNKNOWN')
+        throw failureError(kind, failure.message);
+      if (kind === 'KEY_REJECTED' || kind === 'ACCOUNT_OR_BILLING' || kind === 'MODEL_UNAVAILABLE' || kind === 'RATE_LIMITED')
+        throw new AIAccessError(kind, null);
+      throw failure;
+    }
     throw err;
   }
 }
