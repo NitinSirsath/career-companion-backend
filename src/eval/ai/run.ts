@@ -15,6 +15,7 @@ import { bindCapabilities } from '../../services/ai/capabilities';
 import {
   AI_CONTRACT_VERSIONS,
   CLASSIFICATION_INPUT_LIMITS as LIMITS,
+  mapBatchResults,
   EXTRACTION_BODY_LIMIT,
 } from '../../services/ai/contracts';
 import { evaluateCall } from './call';
@@ -65,63 +66,112 @@ async function main() {
     ? baselineMetrics(JSON.parse(fs.readFileSync(baselineFile, 'utf8')))
     : undefined;
 
+  const triageMode = option('triage') ?? 'single';
+  if (!['single', 'batch'].includes(triageMode)) throw new Error('--triage must be single or batch');
+  const batchSize = Number(option('batch-size') ?? 20);
+  if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 25) throw new Error('--batch-size must be 1-25');
+
   const extractionVersion = option('extraction-version') ?? 'extraction/v2';
   if (!['extraction/v2', 'extraction/v3'].includes(extractionVersion)) throw new Error('Unsupported extraction version');
   const cases = [...loadDataset(), ...(extractionVersion === 'extraction/v3' ? temporalCases : [])];
   const models = { fast: catalogModel('fast', fast), detailed: catalogModel('detailed', detailed) };
   const ai = bindCapabilities(createProviderClient(provider, apiKey), models);
   const results: CaseRun[] = [];
-  evaluation: for (let run = 1; run <= runs; run++) {
-    for (const c of cases) {
-      const classified = await timed(() =>
-        ai.classifier.classifyRelevance({
+  if (triageMode === 'batch') {
+    evaluation: for (let run = 1; run <= runs; run++) {
+      const ordered = [...cases];
+      let seed = (125 + run) >>> 0;
+      for (let i = ordered.length - 1; i > 0; i--) {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        const j = seed % (i + 1);
+        [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
+      }
+      for (let offset = 0; offset < ordered.length; offset += batchSize) {
+        const group = ordered.slice(offset, offset + batchSize);
+        const classified = await timed(() => ai.classifier.classifyRelevanceBatch({
+          items: group.map((c, index) => ({
+            key: `e${index + 1}`,
+            sender: c.input.sender.slice(0, LIMITS.sender),
+            subject: c.input.subject.slice(0, LIMITS.subject),
+            labels: c.input.labels.slice(0, LIMITS.labels),
+            snippet: snippetOf(c).slice(0, LIMITS.snippet),
+          })),
+        }));
+        const mapped = classified.value
+          ? mapBatchResults(group.map((_c, index) => `e${index + 1}`), classified.value.data.results)
+          : null;
+        for (let index = 0; index < group.length; index++) {
+          const c = group[index];
+          const item = mapped?.decided.get(`e${index + 1}`);
+          results.push({
+            id: c.id,
+            run,
+            classification: {
+              valid: !!item,
+              error: classified.error,
+              status: classified.status,
+              providerCode: classified.providerCode,
+              retryAfterMs: classified.retryAfterMs,
+              latencyMs: classified.latencyMs,
+              inputTokens: classified.value?.usage.inputTokens ?? null,
+              outputTokens: classified.value?.usage.outputTokens ?? null,
+              decision: item?.decision,
+              category: item?.category ?? undefined,
+              confidence: item?.confidence,
+            },
+          });
+        }
+        if (classified.error) break evaluation;
+      }
+    }
+  } else {
+    evaluation: for (let run = 1; run <= runs; run++) {
+      for (const c of cases) {
+        const classified = await timed(() => ai.classifier.classifyRelevance({
           sender: c.input.sender.slice(0, LIMITS.sender),
           subject: c.input.subject.slice(0, LIMITS.subject),
           labels: c.input.labels.slice(0, LIMITS.labels),
           snippet: snippetOf(c).slice(0, LIMITS.snippet),
-        }),
-      );
-      const result: CaseRun = {
-        id: c.id,
-        run,
-        classification: {
-          valid: !!classified.value,
-          error: classified.error,
-          status: classified.status,
-          providerCode: classified.providerCode,
-          retryAfterMs: classified.retryAfterMs,
-          latencyMs: classified.latencyMs,
-          inputTokens: classified.value?.usage.inputTokens ?? null,
-          outputTokens: classified.value?.usage.outputTokens ?? null,
-          decision: classified.value?.data.decision,
-          category: classified.value?.data.category,
-          confidence: classified.value?.data.confidence,
-        },
-      };
-      if (isRefused(result.classification)) {
-        results.push(result);
-        break evaluation;
-      }
-      // Extraction quality is measured independently of the classification outcome.
-      if (c.expect.relevance !== 'IRRELEVANT') {
-        const extracted = await timed(() =>
-          ai.analyzer.extractJobData(c.input.body.slice(0, EXTRACTION_BODY_LIMIT), { version: extractionVersion, receivedAt: c.input.receivedAt ?? null }),
-        );
-        result.extraction = {
-          valid: !!extracted.value,
-          error: extracted.error,
-          status: extracted.status,
-          providerCode: extracted.providerCode,
-          retryAfterMs: extracted.retryAfterMs,
-          latencyMs: extracted.latencyMs,
-          inputTokens: extracted.value?.usage.inputTokens ?? null,
-          outputTokens: extracted.value?.usage.outputTokens ?? null,
-          data: extracted.value?.data,
+        }));
+        const result: CaseRun = {
+          id: c.id,
+          run,
+          classification: {
+            valid: !!classified.value,
+            error: classified.error,
+            status: classified.status,
+            providerCode: classified.providerCode,
+            retryAfterMs: classified.retryAfterMs,
+            latencyMs: classified.latencyMs,
+            inputTokens: classified.value?.usage.inputTokens ?? null,
+            outputTokens: classified.value?.usage.outputTokens ?? null,
+            decision: classified.value?.data.decision,
+            category: classified.value?.data.category,
+            confidence: classified.value?.data.confidence,
+          },
         };
+        if (isRefused(result.classification)) { results.push(result); break evaluation; }
+        if (c.expect.relevance !== 'IRRELEVANT') {
+          const extracted = await timed(() => ai.analyzer.extractJobData(
+            c.input.body.slice(0, EXTRACTION_BODY_LIMIT),
+            { version: extractionVersion, receivedAt: c.input.receivedAt ?? null },
+          ));
+          result.extraction = {
+            valid: !!extracted.value,
+            error: extracted.error,
+            status: extracted.status,
+            providerCode: extracted.providerCode,
+            retryAfterMs: extracted.retryAfterMs,
+            latencyMs: extracted.latencyMs,
+            inputTokens: extracted.value?.usage.inputTokens ?? null,
+            outputTokens: extracted.value?.usage.outputTokens ?? null,
+            data: extracted.value?.data,
+          };
+        }
+        results.push(result);
+        if (result.extraction && isRefused(result.extraction)) break evaluation;
+        process.stdout.write('.');
       }
-      results.push(result);
-      if (result.extraction && isRefused(result.extraction)) break evaluation;
-      process.stdout.write('.');
     }
   }
   process.stdout.write('\n');
