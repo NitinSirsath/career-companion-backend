@@ -122,9 +122,6 @@ export async function classifyBatch(
     });
     await tx.aIBatch.update({ where: { id: batch.id }, data: { itemCount: claimed.length } });
     console.log(JSON.stringify({ event: 'ai_batch_claimed', batchId: batch.id, userId, itemCount: claimed.length, provider: access.provider, model: model.id }));
-  }).catch(() => {
-    if (err instanceof AIAccessError) throw err;
-    throw err;
   });
 
   const sent = buildRelevanceBatchInput(claimed.map((item) => item.input));
@@ -272,7 +269,7 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
           handled.add(email.id); processed++; continue;
         }
         candidates.push({ emailId: email.id, input: { sender: email.sender, subject: email.subject, labels, snippet: gmail.snippet } });
-      } catch (err) {
+      } catch {
         handled.add(emailId);
         processed++;
         await enqueueEmailProcessingJob(userId, emailId);
