@@ -263,6 +263,49 @@ describe('COM-125 relevance batch pure behavior', () => {
     });
   });
 
+  it('27 classifyBatch maps outcomes by email id when a candidate is not claimed', async () => {
+    const [a, b, c] = await Promise.all([
+      prisma.email.create({ data: { userId, gmailMessageId: 'map-a' } }),
+      prisma.email.create({ data: { userId, gmailMessageId: 'map-b' } }),
+      prisma.email.create({ data: { userId, gmailMessageId: 'map-c' } }),
+    ]);
+    await prisma.aIOperation.create({
+      data: { emailId: b.id, operation: 'classification', version: 'relevance-batch/v1', status: 'PROCESSING', attempts: 1, startedAt: new Date() },
+    });
+    classify.mockResolvedValue({
+      data: { results: [
+        { key: 'e1', decision: 'RELEVANT', confidence: 0.9, category: 'RECRUITER' },
+        { key: 'e2', decision: 'IRRELEVANT', confidence: 0.5, category: null },
+      ] },
+      usage: { inputTokens: 2, outputTokens: 2 }, version: 'relevance-batch/v1', model: 'fixture-fast',
+    });
+    const result = await classifyBatch(userId, [
+      { emailId: a.id, input: { sender: null, subject: 'a', labels: [], snippet: null } },
+      { emailId: b.id, input: { sender: null, subject: 'b', labels: [], snippet: null } },
+      { emailId: c.id, input: { sender: null, subject: 'c', labels: [], snippet: null } },
+    ], provider);
+    expect(classify).toHaveBeenCalledTimes(1);
+    expect(classify.mock.calls[0][0].items).toHaveLength(2);
+    expect(result.byEmail.get(a.id)).toBe('RELEVANT');
+    expect(result.byEmail.get(c.id)).toBe('UNCERTAIN');
+    expect(result.byEmail.has(b.id)).toBe(false);
+    expect(await prisma.aIProcessingResult.findUnique({ where: { emailId: c.id } })).toMatchObject({ relevanceDecision: 'UNCERTAIN' });
+    expect(await prisma.aIOperation.findUnique({ where: { emailId_operation_version: { emailId: b.id, operation: 'classification', version: 'relevance-batch/v1' } } })).toMatchObject({ status: 'PROCESSING', attempts: 1 });
+  });
+
+  it('28 runTriage queues a low-confidence IRRELEVANT as UNCERTAIN', async () => {
+    const email = await prisma.email.create({ data: { userId, gmailMessageId: 'queue-uncertain' } });
+    vi.mocked(getAccessState).mockResolvedValue({ state: 'READY', reason: null, modelId: null, resumesAt: null });
+    vi.mocked(resolveAIAccess).mockResolvedValue(provider);
+    classify.mockResolvedValue({
+      data: { results: [{ key: 'e1', decision: 'IRRELEVANT', confidence: 0.5, category: null }] },
+      usage: { inputTokens: 1, outputTokens: 1 }, version: 'relevance-batch/v1', model: 'fixture-fast',
+    });
+    await runTriage(userId);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(userId, email.id);
+  });
+
   it('26 redaction logs contain no provider input fields', () => {
     const log = JSON.stringify({ event: 'triage_run', userId, batchId: 'b', emails: 3, sender: undefined });
     expect(log).not.toContain('subject');

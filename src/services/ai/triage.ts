@@ -40,6 +40,7 @@ type Candidate = {
   emailId: string;
   input: RelevanceClassifierInput;
 };
+type BatchOutcome = 'RELEVANT' | 'IRRELEVANT' | 'UNCERTAIN' | 'UNDECIDED';
 
 async function batchCandidates(userId: string, limit: number): Promise<string[]> {
   const emails = await prisma.email.findMany({
@@ -65,7 +66,7 @@ export async function classifyBatch(
   access: AIAccess,
   options: { signal?: AbortSignal } = {},
 ) {
-  if (!items.length) return { decided: new Map<string, RelevanceBatchItem>(), undecided: [], ignored: 0, batchId: null };
+  if (!items.length) return { decided: new Map<string, RelevanceBatchItem>(), undecided: [], ignored: 0, batchId: null, byEmail: new Map<string, BatchOutcome>() };
   const size = triageBatchSize();
   if (items.length > size || items.length > 25) throw new TerminalAIError('Invalid relevance batch size');
   const threshold = relevanceThreshold();
@@ -131,6 +132,7 @@ export async function classifyBatch(
     result = await access.classifier.classifyRelevanceBatch(sent);
     await recordTokens(userId, now, result.usage);
     const mapped = mapBatchResults(sent.items.map((item) => item.key!), result.data.results);
+    const byEmail = new Map<string, BatchOutcome>();
     await prisma.$transaction(async (tx) => {
       const batch = await tx.aIBatch.update({
         where: { id: batchId! },
@@ -150,9 +152,11 @@ export async function classifyBatch(
           const held = op.attempts >= MAX_ATTEMPTS + op.approvedRetries;
           await tx.aIOperation.update({ where: { id: op.id }, data: { status: held ? 'FAILED' : 'RETRYABLE', errorCode: 'BATCH_ITEM_MISSING', retryAfter: null } });
           await tx.email.updateMany({ where: { id: item.emailId, userId }, data: held ? { processingState: 'FAILED', processingErrorCategory: 'BatchItemMissing', processingErrorStage: 'classification', processingRetryable: false, processingFailedAt: new Date() } : { processingState: 'PENDING', processingErrorCategory: null, processingErrorDetails: null, processingErrorStage: null, processingRetryable: null, processingFailedAt: null } });
+          byEmail.set(item.emailId, 'UNDECIDED');
           continue;
         }
         const decisionState = decision.confidence < threshold ? 'UNCERTAIN' : decision.decision;
+        byEmail.set(item.emailId, decisionState);
         await tx.aIOperation.update({ where: { id: op.id }, data: { status: 'COMPLETED', result: { decision: decisionState, confidence: decision.confidence, category: decision.category }, completedAt: new Date(), retryAfter: null } });
         await tx.aIProcessingResult.upsert({
           where: { emailId: item.emailId },
@@ -178,7 +182,7 @@ export async function classifyBatch(
     });
     await noteProviderSuccess(access);
     console.log(JSON.stringify({ event: 'ai_batch_completed', batchId, userId, itemCount: claimed.length, decided: mapped.decided.size, undecided: mapped.undecided.length, ignored: mapped.ignored }));
-    return { ...mapped, batchId };
+    return { ...mapped, batchId, byEmail };
   } catch (err) {
     const failure = failureKind(err);
     const kind = failure?.kind;
@@ -276,21 +280,14 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
       }
     }
     if (!candidates.length) continue;
-    const inputs = buildRelevanceBatchInput(candidates.map((candidate) => candidate.input));
     try {
       const access = await resolveAIAccess(userId);
       const result = await classifyBatch(userId, candidates, access, { signal });
       batches++; processed += candidates.length;
-      result.undecided.forEach((key) => {
-        const candidate = candidates[inputs.items.findIndex((item) => item.key === key)];
-        if (candidate) handled.add(candidate.emailId);
-      });
       for (const candidate of candidates) {
-        const index = candidates.indexOf(candidate);
-        const key = inputs.items[index].key!;
-        const decided = result.decided.get(key);
         handled.add(candidate.emailId);
-        if (decided && (decided.decision === 'RELEVANT' || decided.decision === 'UNCERTAIN')) {
+        const outcome = result.byEmail.get(candidate.emailId);
+        if (outcome === 'RELEVANT' || outcome === 'UNCERTAIN') {
           const id = await enqueueEmailProcessingJob(userId, candidate.emailId);
           if (!id) console.log(JSON.stringify({ event: 'triage_email_queue_suppressed', emailId: candidate.emailId }));
         }
