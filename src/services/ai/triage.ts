@@ -135,7 +135,7 @@ export async function classifyBatch(
     options.signal?.throwIfAborted();
     result = await access.classifier.classifyRelevanceBatch(sent);
     await recordTokens(userId, now, result.usage);
-    const mapped = mapBatchResults(sent.items.map((item) => item.key), result.data.results);
+    const mapped = mapBatchResults(sent.items.map((item) => item.key!), result.data.results);
     await prisma.$transaction(async (tx) => {
       const batch = await tx.aIBatch.update({
         where: { id: batchId! },
@@ -273,7 +273,7 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
           await markDeterministicIrrelevant(userId, email.id);
           handled.add(email.id); processed++; continue;
         }
-        candidates.push({ emailId: email.id, input: { key: '', sender: email.sender, subject: email.subject, labels, snippet: gmail.snippet } });
+        candidates.push({ emailId: email.id, input: { sender: email.sender, subject: email.subject, labels, snippet: gmail.snippet } });
       } catch (err) {
         handled.add(emailId);
         processed++;
@@ -292,7 +292,7 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
       });
       for (const candidate of candidates) {
         const index = candidates.indexOf(candidate);
-        const key = inputs.items[index].key;
+        const key = inputs.items[index].key!;
         const decided = result.decided.get(key);
         handled.add(candidate.emailId);
         if (decided && (decided.decision === 'RELEVANT' || decided.decision === 'UNCERTAIN')) {

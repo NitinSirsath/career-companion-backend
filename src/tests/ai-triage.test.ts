@@ -182,32 +182,32 @@ describe('COM-125 relevance batch pure behavior', () => {
     const email = await prisma.email.create({ data: { userId, gmailMessageId: 'missing-1' } });
     const access = provider;
     classify.mockResolvedValue({ data: { results: [] }, usage: { inputTokens: 1, outputTokens: 1 }, version: 'relevance-batch/v1', model: 'fixture-fast' });
-    const result = await classifyBatch(userId, [{ emailId: email.id, input: { key: '', sender: null, subject: 'x', labels: [], snippet: null } }], access);
+    const result = await classifyBatch(userId, [{ emailId: email.id, input: { sender: null, subject: 'x', labels: [], snippet: null } }], access);
     expect(result.undecided).toEqual(['e1']);
     expect(await prisma.aIOperation.findUnique({ where: { emailId_operation_version: { emailId: email.id, operation: 'classification', version: 'relevance-batch/v1' } } })).toMatchObject({ status: 'RETRYABLE', attempts: 1 });
   });
   it('22 a refusal restores the attempt and leaves the email pending', async () => {
     const email = await prisma.email.create({ data: { userId, gmailMessageId: 'refused-1' } });
     classify.mockRejectedValue(new ProviderFailure('RATE_LIMITED'));
-    await expect(classifyBatch(userId, [{ emailId: email.id, input: { key: '', sender: null, subject: 'x', labels: [], snippet: null } }], provider)).rejects.toBeInstanceOf(AIAccessError);
+    await expect(classifyBatch(userId, [{ emailId: email.id, input: { sender: null, subject: 'x', labels: [], snippet: null } }], provider)).rejects.toBeInstanceOf(AIAccessError);
     expect(await prisma.aIOperation.findUnique({ where: { emailId_operation_version: { emailId: email.id, operation: 'classification', version: 'relevance-batch/v1' } } })).toMatchObject({ status: 'PENDING', attempts: 0 });
   });
   it('23 unknown outcome holds every item', async () => {
     const email = await prisma.email.create({ data: { userId, gmailMessageId: 'unknown-1' } });
     classify.mockRejectedValue(new ProviderFailure('OUTCOME_UNKNOWN'));
-    await expect(classifyBatch(userId, [{ emailId: email.id, input: { key: '', sender: null, subject: 'x', labels: [], snippet: null } }], provider)).rejects.toBeInstanceOf(AIOutcomeUnknownError);
+    await expect(classifyBatch(userId, [{ emailId: email.id, input: { sender: null, subject: 'x', labels: [], snippet: null } }], provider)).rejects.toBeInstanceOf(AIOutcomeUnknownError);
     expect(await prisma.aIOperation.findUnique({ where: { emailId_operation_version: { emailId: email.id, operation: 'classification', version: 'relevance-batch/v1' } } })).toMatchObject({ status: 'UNKNOWN' });
   });
   it('24 invalid envelope is held', async () => {
     const email = await prisma.email.create({ data: { userId, gmailMessageId: 'invalid-1' } });
     classify.mockRejectedValue(new ProviderFailure('INVALID_OUTPUT'));
-    await expect(classifyBatch(userId, [{ emailId: email.id, input: { key: '', sender: null, subject: 'x', labels: [], snippet: null } }], provider)).rejects.toBeInstanceOf(SchemaValidationFailure);
+    await expect(classifyBatch(userId, [{ emailId: email.id, input: { sender: null, subject: 'x', labels: [], snippet: null } }], provider)).rejects.toBeInstanceOf(SchemaValidationFailure);
     expect(await prisma.aIOperation.findUnique({ where: { emailId_operation_version: { emailId: email.id, operation: 'classification', version: 'relevance-batch/v1' } } })).toMatchObject({ status: 'FAILED' });
   });
   it('25 safety limit prevents a batch claim', async () => {
     process.env.AI_USER_DAILY_CALL_LIMIT = '0';
     const email = await prisma.email.create({ data: { userId, gmailMessageId: 'limit-1' } });
-    await expect(classifyBatch(userId, [{ emailId: email.id, input: { key: '', sender: null, subject: 'x', labels: [], snippet: null } }], provider)).rejects.toBeInstanceOf(AIAccessError);
+    await expect(classifyBatch(userId, [{ emailId: email.id, input: { sender: null, subject: 'x', labels: [], snippet: null } }], provider)).rejects.toBeInstanceOf(AIAccessError);
     expect(await prisma.aIOperation.count({ where: { emailId: email.id } })).toBe(0);
     process.env.AI_USER_DAILY_CALL_LIMIT = '100';
   });

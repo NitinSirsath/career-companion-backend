@@ -1,4 +1,5 @@
 import { candidateEnvelope, verifiedCandidates } from './temporal';
+import type { EmailCategory } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { GmailFetcherService } from '../gmailFetcher';
 import { MatcherService } from '../matcher';
@@ -85,10 +86,10 @@ export class EmailAIPipeline {
         ? { data: { decision: result!.relevanceDecision!, confidence: result!.confidence ?? 0, category: result!.category ?? null }, provider: result!.provider, model: result!.model, version: result!.contractVersion }
         : triageBatchEnabled()
           ? await classifyOne(userId, emailId, boundedInput, { signal: options.signal })
-          : await runOperation({
+          : (() => runOperation({
               userId, emailId, operation: 'classification', contract: CLASSIFICATION_CONTRACT, access,
               call: (ai) => ai.classifier.classifyRelevance(boundedInput),
-            });
+            }))();
     const decision = relevance.data.confidence < threshold ? 'UNCERTAIN' : relevance.data.decision;
     const data = {
       // Provenance comes from the operation that produced the result, so a result reused after a
