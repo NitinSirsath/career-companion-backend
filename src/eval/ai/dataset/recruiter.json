@@ -60,7 +60,7 @@
     "id": "recruiter-agency-outreach",
     "input": {
       "sender": "Marco Bianchi <marco@talentbridge.example.org>",
-      "subject": "Backend role at a Series B fintech \u2014 open to a chat?",
+      "subject": "Backend role at a Series B fintech — open to a chat?",
       "labels": [
         "INBOX",
         "CATEGORY_UPDATES"
