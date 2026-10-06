@@ -73,12 +73,26 @@ describe('AI provider and model catalog', () => {
       ...gemini,
       models: gemini.models.map((m) => (m.id === 'gemini-2.5-flash' ? { ...m, retiresOn: '2026-01-01' } : m)),
     };
-    expect(modelsForRole(retiring, 'fast', '2026-01-02').map((m) => m.id)).toEqual(['gemini-2.5-flash-lite']);
+    expect(modelsForRole(retiring, 'fast', '2026-01-02').map((m) => m.id)).toEqual([
+      'gemini-2.5-flash-lite',
+      'gemini-3.5-flash-lite',
+      'gemini-3.8-flash',
+    ]);
     expect(resolveModel(retiring, 'fast', 'gemini-2.5-flash', '2026-01-01').source).toBe('SELECTED');
     expect(resolveModel(retiring, 'fast', 'gemini-2.5-flash', '2026-01-02')).toMatchObject({
       model: { id: 'gemini-2.5-flash-lite' },
       source: 'REPLACED_RETIRED',
     });
+  });
+
+  it('offers Gemini 3 models for new keys without changing the recommended ones', () => {
+    const gemini = getCatalogProvider('gemini')!;
+    expect(recommendedModel(gemini, 'fast').id).toBe('gemini-2.5-flash-lite');
+    expect(recommendedModel(gemini, 'detailed').id).toBe('gemini-2.5-flash');
+    expect(resolveModel(gemini, 'fast', 'gemini-3.5-flash-lite', today).source).toBe('SELECTED');
+    expect(resolveModel(gemini, 'fast', 'gemini-3.8-flash', today).source).toBe('SELECTED');
+    expect(resolveModel(gemini, 'detailed', 'gemini-3.8-flash', today).source).toBe('SELECTED');
+    expect(resolveModel(gemini, 'detailed', 'gemini-3.5-flash-lite', today).source).toBe('REPLACED_RETIRED');
   });
 
   it('has no provider that is unknown to the catalog', () => {

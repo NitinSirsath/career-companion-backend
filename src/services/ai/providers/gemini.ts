@@ -1,8 +1,10 @@
-import { GoogleGenAI, Schema, Type } from '@google/genai';
+import { GoogleGenAI, Schema, ThinkingLevel, Type } from '@google/genai';
 import { z } from 'zod';
 import type { CatalogProvider } from '../../../contracts/aiCatalog';
 import { ACCESS_FAILURE_KINDS, ProviderFailure } from '../errors';
 import { ProviderClient, VERIFY_TIMEOUT_MS, VerifyResult } from './types';
+
+const THINKING_LEVELS = { minimal: ThinkingLevel.MINIMAL, low: ThinkingLevel.LOW } as const;
 
 const TYPES: Record<string, Type> = {
   object: Type.OBJECT,
@@ -113,6 +115,9 @@ export function createGeminiClient(provider: CatalogProvider, apiKey: string): P
             maxOutputTokens: contract.maxOutputTokens,
             ...(model.reasoning && 'thinkingBudget' in model.reasoning
               ? { thinkingConfig: { thinkingBudget: model.reasoning.thinkingBudget } }
+              : {}),
+            ...(model.reasoning && 'thinkingLevel' in model.reasoning
+              ? { thinkingConfig: { thinkingLevel: THINKING_LEVELS[model.reasoning.thinkingLevel] } }
               : {}),
             httpOptions: { timeout: model.timeoutMs },
           },

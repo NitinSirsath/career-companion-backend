@@ -33,8 +33,8 @@ jobs:
         run: >-
           npm run ai:eval --
           --provider gemini
-          --fast gemini-2.5-flash-lite
-          --detailed gemini-2.5-flash
+          --fast gemini-3.5-flash-lite
+          --detailed gemini-3.8-flash
           --triage batch
           --batch-size 22
           --runs 1
