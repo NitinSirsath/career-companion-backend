@@ -103,6 +103,23 @@ describe('Gemini adapter', () => {
     );
   });
 
+  it('sends a thinking level and no temperature for Gemini 3 models', async () => {
+    mockGenerateContent.mockResolvedValue({
+      text: JSON.stringify({ decision: 'IRRELEVANT', confidence: 1, reasoning: 'other' }),
+    });
+    const lite3 = gemini.models.find((m) => m.id === 'gemini-3.5-flash-lite')!;
+    const flash3 = gemini.models.find((m) => m.id === 'gemini-3.8-flash')!;
+    await bindCapabilities(client(), { fast: lite3, detailed: flash3 }).classifier.classifyRelevance({ subject: 'a' });
+    await bindCapabilities(client(), { fast: flash3, detailed: flash3 }).classifier.classifyRelevance({ subject: 'b' });
+    const [first, second] = mockGenerateContent.mock.calls.map(([request]) => request);
+    expect(first.model).toBe('gemini-3.5-flash-lite');
+    expect(first.config.thinkingConfig).toEqual({ thinkingLevel: 'MINIMAL' });
+    expect(first.config).not.toHaveProperty('temperature');
+    expect(second.model).toBe('gemini-3.8-flash');
+    expect(second.config.thinkingConfig).toEqual({ thinkingLevel: 'LOW' });
+    expect(second.config.httpOptions).toEqual({ timeout: 60_000 });
+  });
+
   it('turns SDK errors into sanitized provider failures', async () => {
     mockGenerateContent.mockRejectedValue(googleError(429, { status: 'RESOURCE_EXHAUSTED' }));
     const error = await failure(capabilities().classifier.classifyRelevance({ subject: 'private' }));
