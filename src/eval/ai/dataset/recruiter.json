@@ -181,7 +181,7 @@
         "INBOX",
         "CATEGORY_SOCIAL"
       ],
-      "body": "Hi Alex,\\n\\nYour profile caught our attention for the Software Developer Intern (New Initiatives) role at Tailspin Toys. We are excited about this position.\\n\\nTo help us understand your profile, please submit your information using the form linked below within 24 hours.\\n\\nPriya Raman\\nTalent Partner, Tailspin Toys"
+      "body": "Hi Alex,\n\nYour profile caught our attention for the Software Developer Intern (New Initiatives) role at Tailspin Toys. We are excited about this position.\n\nTo help us understand your profile, please submit your information using the form linked below within 24 hours.\n\nPriya Raman\nTalent Partner, Tailspin Toys"
     },
     "expect": {
       "relevance": "RELEVANT",

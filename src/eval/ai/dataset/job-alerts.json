@@ -69,7 +69,7 @@
         "INBOX",
         "CATEGORY_SOCIAL"
       ],
-      "body": "Expand your search. Recommendations based on your activity.\\n\\nRemote jobs\\n- Senior Frontend Engineer, Fabrikam, Bengaluru (Remote)\\n- Software Engineer 3 - Frontend, Contoso, Bengaluru (Remote)\\n\\nView all jobs"
+      "body": "Expand your search. Recommendations based on your activity.\n\nRemote jobs\n- Senior Frontend Engineer, Fabrikam, Bengaluru (Remote)\n- Software Engineer 3 - Frontend, Contoso, Bengaluru (Remote)\n\nView all jobs"
     },
     "expect": {
       "relevance": "IRRELEVANT",
@@ -90,7 +90,7 @@
         "INBOX",
         "CATEGORY_UPDATES"
       ],
-      "body": "Promoted jobs for you\\n- Backend Developer, Northwind Traders (Promoted)\\n- Backend Engineer, Litware (Promoted)\\n\\nSee all jobs. Manage your job alerts."
+      "body": "Promoted jobs for you\n- Backend Developer, Northwind Traders (Promoted)\n- Backend Engineer, Litware (Promoted)\n\nSee all jobs. Manage your job alerts."
     },
     "expect": {
       "relevance": "IRRELEVANT",
