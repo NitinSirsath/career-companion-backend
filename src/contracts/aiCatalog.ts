@@ -24,7 +24,11 @@ export interface CatalogModel {
   /** null = the model does not accept a temperature; the adapter omits it. */
   temperature: number | null;
   /** Reasoning or thinking kept at the minimum the model allows. */
-  reasoning: { thinkingBudget: number } | { reasoningEffort: 'minimal' | 'low' } | null;
+  reasoning:
+    | { thinkingBudget: number }
+    | { thinkingLevel: 'minimal' | 'low' }
+    | { reasoningEffort: 'minimal' | 'low' }
+    | null;
   structuredOutput: 'gemini_schema' | 'openai_json_schema' | 'anthropic_native' | 'anthropic_tool';
   timeoutMs: number;
   /** YYYY-MM-DD. After this day the model is no longer offered or used. */
@@ -114,6 +118,32 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
         reasoning: { thinkingBudget: 0 },
         structuredOutput: 'gemini_schema',
         timeoutMs: 30_000,
+        retiresOn: null,
+        evaluation: null,
+      },
+      // Google limits 2.5 models to projects that used them before; new keys need these.
+      // Gemini 3 models keep their default temperature and cannot turn thinking off.
+      {
+        id: 'gemini-3.5-flash-lite',
+        displayName: 'Gemini 3.5 Flash-Lite',
+        roles: ['fast'],
+        recommendedFor: [],
+        temperature: null,
+        reasoning: { thinkingLevel: 'minimal' },
+        structuredOutput: 'gemini_schema',
+        timeoutMs: 30_000,
+        retiresOn: null,
+        evaluation: null,
+      },
+      {
+        id: 'gemini-3.8-flash',
+        displayName: 'Gemini 3.8 Flash',
+        roles: ['fast', 'detailed'],
+        recommendedFor: [],
+        temperature: null,
+        reasoning: { thinkingLevel: 'low' },
+        structuredOutput: 'gemini_schema',
+        timeoutMs: 60_000,
         retiresOn: null,
         evaluation: null,
       },
