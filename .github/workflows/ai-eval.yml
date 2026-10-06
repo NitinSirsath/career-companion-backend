@@ -1,0 +1,48 @@
+name: AI eval
+# Sends the synthetic eval dataset (fictional emails only) to Gemini and scores relevance.
+# Batch mode: 44 emails in 2 calls per run, so a free-tier key is enough.
+# Runs on PRs that change AI prompts or eval data, and manually. Never runs for fork PRs.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/services/ai/**'
+      - 'src/eval/ai/**'
+      - 'src/contracts/aiCatalog.ts'
+permissions:
+  contents: read
+concurrency:
+  group: ai-eval-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  eval:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - name: Run AI eval (Gemini)
+        env:
+          AI_EVAL_API_KEY: ${{ secrets.GEMINI_EVAL_API_KEY }}
+        run: >-
+          npm run ai:eval --
+          --provider gemini
+          --fast gemini-2.5-flash-lite
+          --detailed gemini-2.5-flash
+          --triage batch
+          --batch-size 22
+          --runs 1
+          --delay-ms 4000
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-eval-report
+          path: src/eval/ai/reports/
+          if-no-files-found: ignore
