@@ -6,7 +6,10 @@ import { MatcherService } from '../matcher';
 import { AIAccess, resolveAIAccess } from './access';
 import {
   AI_CONTRACT_VERSIONS,
-  CLASSIFICATION_CONTRACT,
+  CLASSIFICATION_VERSIONS,
+  LEGACY_CONTRACT_VERSIONS,
+  RELEVANCE_BATCH_VERSIONS,
+  classificationContractFor,
   CLASSIFICATION_INPUT_LIMITS as LIMITS,
   EXTRACTION_BODY_LIMIT,
   EXTRACTION_CONTRACT,
@@ -18,7 +21,7 @@ import {
 } from './contracts';
 import { TerminalAIError } from './errors';
 import { runOperation } from './operations';
-import { classifyOne, triageBatchEnabled, relevanceThreshold } from './triage';
+import { autoIrrelevant, classifyOne, triageBatchEnabled, relevanceThreshold } from './triage';
 
 type RelevanceOutcome = {
   data: {
@@ -56,7 +59,7 @@ export class EmailAIPipeline {
     const result = email.aiProcessingResult;
     // Adopt existing completed work; neither a deployment nor a sync is reprocessing consent.
     const extracted = ['extraction/v2', 'extraction/v3'].includes(result?.contractVersion ?? '');
-    const batched = result?.contractVersion === AI_CONTRACT_VERSIONS.RELEVANCE_BATCH && result.relevanceDecision !== null;
+    const batched = !!result && RELEVANCE_BATCH_VERSIONS.includes(result.contractVersion) && result.relevanceDecision !== null;
     if (result && (result.processingStatus === 'COMPLETED' || extracted)) {
       await this.finish(userId, emailId, result.relevanceDecision);
       return;
@@ -65,11 +68,16 @@ export class EmailAIPipeline {
       where: { emailId, operation: 'classification' },
       select: { version: true },
     });
-    const hasBatchClassification = classificationLedger.some(
-      (row) => row.version === AI_CONTRACT_VERSIONS.RELEVANCE_BATCH,
+    const hasBatchClassification = classificationLedger.some((row) =>
+      RELEVANCE_BATCH_VERSIONS.includes(row.version),
     );
-    const hasPerEmailClassification = classificationLedger.some(
-      (row) => row.version === AI_CONTRACT_VERSIONS.CLASSIFICATION,
+    const perEmailRow = classificationLedger.find((row) =>
+      CLASSIFICATION_VERSIONS.includes(row.version),
+    );
+    const hasPerEmailClassification = !!perEmailRow;
+    // New mails only: an email that started on the legacy rules finishes on them.
+    const strictRules = !classificationLedger.some((row) =>
+      (Object.values(LEGACY_CONTRACT_VERSIONS) as string[]).includes(row.version),
     );
     const useBatch =
       hasBatchClassification ||
@@ -95,9 +103,7 @@ export class EmailAIPipeline {
         options,
       );
       const labels = gmail.labelIds ?? [];
-      const deterministic = labels.some((label) =>
-        ['CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'SPAM'].includes(label),
-      );
+      const deterministic = autoIrrelevant(labels, email.sender, strictRules);
       const threshold = relevanceThreshold();
       const boundedInput = {
         sender: email.sender?.slice(0, LIMITS.sender) ?? null,
@@ -128,13 +134,16 @@ export class EmailAIPipeline {
           version: one.version,
         };
       } else {
+        const contract = classificationContractFor(
+          perEmailRow?.version ?? AI_CONTRACT_VERSIONS.CLASSIFICATION,
+        );
         const r = await runOperation({
           userId,
           emailId,
           operation: 'classification',
-          contract: CLASSIFICATION_CONTRACT,
+          contract,
           access,
-          call: (ai) => ai.classifier.classifyRelevance(boundedInput),
+          call: (ai) => ai.classifier.classifyRelevance(boundedInput, contract.version),
         });
         relevance = {
           data: {
@@ -144,7 +153,7 @@ export class EmailAIPipeline {
           },
           provider: r.provider,
           model: r.model,
-          version: AI_CONTRACT_VERSIONS.CLASSIFICATION,
+          version: contract.version,
         };
       }
 

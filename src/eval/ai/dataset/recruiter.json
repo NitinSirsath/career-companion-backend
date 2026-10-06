@@ -171,5 +171,35 @@
       ]
     },
     "group": "recruiter"
+  },
+  {
+    "id": "recruiter-linkedin-inmail",
+    "input": {
+      "sender": "Priya Raman <inmail-hit-reply@linkedin.example.com>",
+      "subject": "Next steps for the Software Engineering Intern role at Tailspin Toys",
+      "labels": [
+        "INBOX",
+        "CATEGORY_SOCIAL"
+      ],
+      "body": "Hi Alex,\n\nYour profile caught our attention for the Software Developer Intern (New Initiatives) role at Tailspin Toys. We are excited about this position.\n\nTo help us understand your profile, please submit your information using the form linked below within 24 hours.\n\nPriya Raman\nTalent Partner, Tailspin Toys"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": [
+        "RECRUITER"
+      ],
+      "fields": {
+        "companyName": {
+          "contains": [
+            "Tailspin"
+          ]
+        }
+      },
+      "mustBeNull": [
+        "offerInfo",
+        "rejectionInfo"
+      ]
+    },
+    "group": "recruiter"
   }
 ]
