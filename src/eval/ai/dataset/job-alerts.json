@@ -11,10 +11,7 @@
       "body": "New jobs matching your alert 'Platform Engineer, Remote':\n- Platform Engineer, Adventure Works\n- Senior Platform Engineer, Coho Winery\n- Platform Reliability Engineer, Lucerne Publishing\n\nView all jobs or change your alert settings."
     },
     "expect": {
-      "relevance": "ANY",
-      "category": [
-        "NEWSLETTER"
-      ],
+      "relevance": "IRRELEVANT",
       "mustBeNull": [
         "offerInfo",
         "rejectionInfo",
@@ -32,13 +29,10 @@
         "INBOX",
         "CATEGORY_FORUMS"
       ],
-      "body": "Career Weekly — issue 214\n\nHow to negotiate a first offer, five questions to ask in a final round, and the salary report for backend roles."
+      "body": "Career Weekly \u2014 issue 214\n\nHow to negotiate a first offer, five questions to ask in a final round, and the salary report for backend roles."
     },
     "expect": {
-      "relevance": "ANY",
-      "category": [
-        "NEWSLETTER"
-      ],
+      "relevance": "IRRELEVANT",
       "mustBeNull": [
         "offerInfo",
         "rejectionInfo"
@@ -58,13 +52,52 @@
       "body": "We're hiring! New openings this month: Data Analyst, Seasonal Operations Lead, Backend Developer.\nSee all openings on our careers page."
     },
     "expect": {
-      "relevance": "ANY",
-      "category": [
-        "NEWSLETTER"
-      ],
+      "relevance": "IRRELEVANT",
       "mustBeNull": [
         "offerInfo",
         "rejectionInfo"
+      ]
+    },
+    "group": "job-alerts"
+  },
+  {
+    "id": "alert-linkedin-recommended",
+    "input": {
+      "sender": "LinkedIn <jobs-noreply@linkedin.example.com>",
+      "subject": "You may be a fit: Senior Frontend Engineer at Fabrikam",
+      "labels": [
+        "INBOX",
+        "CATEGORY_SOCIAL"
+      ],
+      "body": "Expand your search. Recommendations based on your activity.\\n\\nRemote jobs\\n- Senior Frontend Engineer, Fabrikam, Bengaluru (Remote)\\n- Software Engineer 3 - Frontend, Contoso, Bengaluru (Remote)\\n\\nView all jobs"
+    },
+    "expect": {
+      "relevance": "IRRELEVANT",
+      "mustBeNull": [
+        "offerInfo",
+        "rejectionInfo",
+        "interviewDate"
+      ]
+    },
+    "group": "job-alerts"
+  },
+  {
+    "id": "alert-linkedin-sponsored",
+    "input": {
+      "sender": "LinkedIn Job Alerts <jobalerts-noreply@linkedin.example.com>",
+      "subject": "Promoted: 12 new Backend Developer jobs in Pune",
+      "labels": [
+        "INBOX",
+        "CATEGORY_UPDATES"
+      ],
+      "body": "Promoted jobs for you\\n- Backend Developer, Northwind Traders (Promoted)\\n- Backend Engineer, Litware (Promoted)\\n\\nSee all jobs. Manage your job alerts."
+    },
+    "expect": {
+      "relevance": "IRRELEVANT",
+      "mustBeNull": [
+        "offerInfo",
+        "rejectionInfo",
+        "interviewDate"
       ]
     },
     "group": "job-alerts"

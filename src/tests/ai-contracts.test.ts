@@ -7,13 +7,20 @@ import {
   AIContract,
   CLASSIFICATION_CONTRACT,
   EXTRACTION_CONTRACT,
+  LEGACY_CLASSIFICATION_CONTRACT,
+  LEGACY_CONTRACT_VERSIONS,
+  LEGACY_RELEVANCE_BATCH_CONTRACT,
+  RELEVANCE_BATCH_CONTRACT,
+  classificationContractFor,
+  relevanceBatchContractFor,
 } from '../services/ai/contracts';
+import { TerminalAIError } from '../services/ai/errors';
 import { geminiSchema } from '../services/ai/providers/gemini';
 
 // Verbatim copies of the prompts and hand-written Gemini schemas that lived in
 // services/ai/gemini/GeminiProvider.ts before the provider-neutral seam (BYO AI, AI-01).
 const PROMPTS = {
-  [AI_CONTRACT_VERSIONS.CLASSIFICATION]: `
+  [LEGACY_CONTRACT_VERSIONS.CLASSIFICATION]: `
 You are an AI assistant that determines if an email is related to a user's job search.
 Analyze the provided email metadata (sender, subject, labels, snippet).
 Classify if it is RELEVANT, IRRELEVANT, or UNCERTAIN.
@@ -194,6 +201,9 @@ const nativeJobExtractionSchema: Schema = {
 // contract version adds a row here; changing an existing row is a contract break.
 const FINGERPRINTS: Record<string, string> = {
   'classification/v2': '8a9118222ad635794c226677775f917c897a8a220872b73c15c05e0bab6a3239',
+  'classification/v3': '547cbad83e73e6535ef1313d840b684f22ec2dc314137067479025aad5668c2a',
+  'relevance-batch/v1': 'ce9d4cbecbba3ff9d6b35755deb50ab1563e5776bbbed7d85550dd36364e25e2',
+  'relevance-batch/v2': 'afc1aa14379866a752596ab41b5298ce475abfdaddd986f3d51310e3ab5ff41a',
   'extraction/v2': '2919427b2419d8601aba25567f970f3b708072e3609fbf356e32c199ed02d7b5',
 };
 const fingerprint = (contract: AIContract<unknown>) =>
@@ -203,9 +213,9 @@ const fingerprint = (contract: AIContract<unknown>) =>
 
 describe('provider-neutral AI contracts', () => {
   it('moved the prompts byte-for-byte with unchanged versions', () => {
-    expect(CLASSIFICATION_CONTRACT.version).toBe('classification/v2');
+    expect(LEGACY_CLASSIFICATION_CONTRACT.version).toBe('classification/v2');
     expect(EXTRACTION_CONTRACT.version).toBe('extraction/v2');
-    expect(CLASSIFICATION_CONTRACT.instructions).toBe(PROMPTS[AI_CONTRACT_VERSIONS.CLASSIFICATION]);
+    expect(LEGACY_CLASSIFICATION_CONTRACT.instructions).toBe(PROMPTS[LEGACY_CONTRACT_VERSIONS.CLASSIFICATION]);
     expect(EXTRACTION_CONTRACT.instructions).toBe(PROMPTS[AI_CONTRACT_VERSIONS.EXTRACTION]);
   });
 
@@ -216,10 +226,49 @@ describe('provider-neutral AI contracts', () => {
     expect(geminiSchema(EXTRACTION_CONTRACT.schema)).toEqual(nativeJobExtractionSchema);
   });
 
-  it.each([CLASSIFICATION_CONTRACT, EXTRACTION_CONTRACT])(
+  it.each([
+    LEGACY_CLASSIFICATION_CONTRACT,
+    CLASSIFICATION_CONTRACT,
+    LEGACY_RELEVANCE_BATCH_CONTRACT,
+    RELEVANCE_BATCH_CONTRACT,
+    EXTRACTION_CONTRACT,
+  ])(
     'keeps $version bound to one prompt and schema',
     (contract) => {
       expect(fingerprint(contract as AIContract<unknown>)).toBe(FINGERPRINTS[contract.version]);
     },
   );
+});
+
+describe('strict relevance contracts', () => {
+  it('uses new versions for the strict rules', () => {
+    expect(CLASSIFICATION_CONTRACT.version).toBe('classification/v3');
+    expect(RELEVANCE_BATCH_CONTRACT.version).toBe('relevance-batch/v2');
+    expect(AI_CONTRACT_VERSIONS.CLASSIFICATION).toBe('classification/v3');
+    expect(AI_CONTRACT_VERSIONS.RELEVANCE_BATCH).toBe('relevance-batch/v2');
+  });
+
+  it.each([CLASSIFICATION_CONTRACT, RELEVANCE_BATCH_CONTRACT])(
+    '$version marks platform job discovery IRRELEVANT and keeps LinkedIn outreach RELEVANT',
+    (contract) => {
+      const text = contract.instructions;
+      expect(text).not.toContain('MUST be classified as RELEVANT');
+      expect(text).not.toContain('Job alerts and opportunities are RELEVANT');
+      expect(text).not.toContain('NEWSLETTER');
+      expect(text).not.toContain('SPAM');
+      expect(text).toContain('Job alerts, recommended jobs');
+      expect(text).toContain('Sponsored or promoted jobs');
+      expect(text).toContain('LINKEDIN RULES');
+      expect(text).toContain('reaches out to the user about a specific role is RELEVANT');
+    },
+  );
+
+  it('resolves stored versions and never guesses an unknown one', () => {
+    expect(classificationContractFor('classification/v2')).toBe(LEGACY_CLASSIFICATION_CONTRACT);
+    expect(classificationContractFor('classification/v3')).toBe(CLASSIFICATION_CONTRACT);
+    expect(relevanceBatchContractFor('relevance-batch/v1')).toBe(LEGACY_RELEVANCE_BATCH_CONTRACT);
+    expect(relevanceBatchContractFor('relevance-batch/v2')).toBe(RELEVANCE_BATCH_CONTRACT);
+    expect(() => classificationContractFor('classification/v9')).toThrow(TerminalAIError);
+    expect(() => relevanceBatchContractFor('relevance-batch/v9')).toThrow(TerminalAIError);
+  });
 });

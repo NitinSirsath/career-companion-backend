@@ -6,6 +6,8 @@ import { enqueueEmailProcessingJob } from '../../jobs/emailProcessingJob';
 import { AIAccessError, AIProviderError, RetryableAIError, TerminalAIError } from './errors';
 import {
   AI_CONTRACT_VERSIONS,
+  CLASSIFICATION_VERSIONS,
+  RELEVANCE_BATCH_VERSIONS,
   AIResult,
   RelevanceClassifierInput,
   RelevanceBatchItem,
@@ -42,32 +44,61 @@ type Candidate = {
 };
 type BatchOutcome = 'RELEVANT' | 'IRRELEVANT' | 'UNCERTAIN' | 'UNDECIDED';
 
-async function batchCandidates(userId: string, limit: number): Promise<string[]> {
+const AUTO_IRRELEVANT_LABELS = ['CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'SPAM'];
+
+/** True when the sender address is at linkedin.com or one of its subdomains. */
+export function isLinkedInSender(sender: string | null | undefined): boolean {
+  const address = (sender?.match(/<([^<>]+)>\s*$/)?.[1] ?? sender ?? '').trim().toLowerCase();
+  const at = address.lastIndexOf('@');
+  if (at < 1) return false;
+  const domain = address.slice(at + 1);
+  return domain === 'linkedin.com' || domain.endsWith('.linkedin.com');
+}
+
+/**
+ * Labels that mark an email IRRELEVANT without an AI call. Under the strict rules, Gmail's Social
+ * label no longer drops LinkedIn mail: people reach out there about roles, so the AI decides.
+ * Emails still on the legacy rules keep the old label rule (new mails only).
+ */
+export function autoIrrelevant(labels: string[], sender: string | null | undefined, strictRules: boolean): boolean {
+  return labels.some((label) =>
+    AUTO_IRRELEVANT_LABELS.includes(label) &&
+    !(label === 'CATEGORY_SOCIAL' && strictRules && isLinkedInSender(sender)));
+}
+
+/**
+ * New mails only: an email keeps the relevance version of its existing batch row; only an email
+ * with no classification row yet starts on the current rules.
+ */
+async function batchCandidates(userId: string, limit: number): Promise<{ emailId: string; version: string }[]> {
   const emails = await prisma.email.findMany({
     where: { userId, processingState: 'PENDING', aiProcessingResult: null },
     orderBy: [{ receivedAt: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
     take: Math.max(limit * 4, 100),
-    select: { id: true, aiOperations: { where: { operation: 'classification', version: { in: [AI_CONTRACT_VERSIONS.CLASSIFICATION, AI_CONTRACT_VERSIONS.RELEVANCE_BATCH] } }, select: { version: true, status: true, attempts: true, approvedRetries: true, retryAfter: true } } },
+    select: { id: true, aiOperations: { where: { operation: 'classification', version: { in: [...CLASSIFICATION_VERSIONS, ...RELEVANCE_BATCH_VERSIONS] } }, select: { version: true, status: true, attempts: true, approvedRetries: true, retryAfter: true } } },
   });
-  return emails.filter((email) => {
-    const legacy = email.aiOperations.find((row) => row.version === AI_CONTRACT_VERSIONS.CLASSIFICATION);
-    if (legacy) return false;
-    const batch = email.aiOperations.find((row) => row.version === AI_CONTRACT_VERSIONS.RELEVANCE_BATCH);
-    if (!batch) return true;
-    return ['PENDING', 'RETRYABLE'].includes(batch.status) &&
+  return emails.flatMap((email) => {
+    if (email.aiOperations.some((row) => CLASSIFICATION_VERSIONS.includes(row.version))) return [];
+    const batch = email.aiOperations.find((row) => RELEVANCE_BATCH_VERSIONS.includes(row.version));
+    if (!batch) return [{ emailId: email.id, version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH }];
+    const ready = ['PENDING', 'RETRYABLE'].includes(batch.status) &&
       batch.attempts < MAX_ATTEMPTS + batch.approvedRetries &&
       (!batch.retryAfter || batch.retryAfter <= new Date());
-  }).slice(0, limit).map((email) => email.id);
+    return ready ? [{ emailId: email.id, version: batch.version }] : [];
+  }).slice(0, limit);
 }
 
 export async function classifyBatch(
   userId: string,
   items: Candidate[],
   access: AIAccess,
-  options: { signal?: AbortSignal; updateEmails?: boolean } = {},
+  options: { signal?: AbortSignal; updateEmails?: boolean; version?: string } = {},
 ) {
   // false when called from classifyOne: the per-email job owns the email's state there.
   const updateEmails = options.updateEmails ?? true;
+  // Every item in one batch shares one version; callers group older emails by their pinned version.
+  const version = options.version ?? AI_CONTRACT_VERSIONS.RELEVANCE_BATCH;
+  if (!RELEVANCE_BATCH_VERSIONS.includes(version)) throw new TerminalAIError('Unknown relevance batch version');
   if (!items.length) return { decided: new Map<string, RelevanceBatchItem>(), undecided: [], ignored: 0, batchId: null, byEmail: new Map<string, BatchOutcome>() };
   const size = triageBatchSize();
   if (items.length > size || items.length > 25) throw new TerminalAIError('Invalid relevance batch size');
@@ -76,17 +107,30 @@ export async function classifyBatch(
   options.signal?.throwIfAborted();
   const now = new Date();
   const model = access.models.fast;
-  const operationKeys = items.map((item) => ({ emailId: item.emailId, operation: 'classification', version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH }));
   const claimed: Candidate[] = [];
   let batchId: string | null = null;
 
   await prisma.$transaction(async (tx) => {
-    await tx.aIOperation.createMany({ data: operationKeys, skipDuplicates: true });
+    // New mails only: an email that already has a row of another relevance version is never claimed here.
+    const pinned = await tx.aIOperation.findMany({
+      where: {
+        emailId: { in: items.map((item) => item.emailId) },
+        operation: 'classification',
+        version: { in: [...CLASSIFICATION_VERSIONS, ...RELEVANCE_BATCH_VERSIONS].filter((other) => other !== version) },
+      },
+      select: { emailId: true },
+    });
+    const elsewhere = new Set(pinned.map((row) => row.emailId));
+    const eligible = items.filter((item) => !elsewhere.has(item.emailId));
+    await tx.aIOperation.createMany({
+      data: eligible.map((item) => ({ emailId: item.emailId, operation: 'classification', version })),
+      skipDuplicates: true,
+    });
     const batch = await tx.aIBatch.create({
       data: {
         userId,
         operation: 'classification',
-        version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH,
+        version,
         status: 'PROCESSING',
         itemCount: items.length,
         provider: access.provider,
@@ -95,9 +139,9 @@ export async function classifyBatch(
       },
     });
     batchId = batch.id;
-    for (const item of items) {
+    for (const item of eligible) {
       const existing = await tx.aIOperation.findUniqueOrThrow({
-        where: { emailId_operation_version: { emailId: item.emailId, operation: 'classification', version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH } },
+        where: { emailId_operation_version: { emailId: item.emailId, operation: 'classification', version } },
       });
       const claim = await tx.aIOperation.updateMany({
         where: {
@@ -133,9 +177,9 @@ export async function classifyBatch(
   const sent = buildRelevanceBatchInput(claimed.map((item) => item.input));
   let result: AIResult<{ results: unknown[] }>;
   try {
-    result = await access.classifier.classifyRelevanceBatch(sent);
+    result = await access.classifier.classifyRelevanceBatch(sent, version);
   } catch (err) {
-    throw await failBatch(err, { userId, access, batchId: batchId!, claimed, now, modelId: model.id, updateEmails });
+    throw await failBatch(err, { userId, access, batchId: batchId!, claimed, now, modelId: model.id, updateEmails, version });
   }
 
   // Deliberately outside the catch (same rule as runOperation): if saving fails after the provider
@@ -158,7 +202,7 @@ export async function classifyBatch(
     for (let index = 0; index < claimed.length; index++) {
       const item = claimed[index];
       const decision = mapped.decided.get(sent.items[index].key!);
-      const op = await tx.aIOperation.findUniqueOrThrow({ where: { emailId_operation_version: { emailId: item.emailId, operation: 'classification', version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH } } });
+      const op = await tx.aIOperation.findUniqueOrThrow({ where: { emailId_operation_version: { emailId: item.emailId, operation: 'classification', version } } });
       if (!decision) {
         // Stays RETRYABLE even when its attempts are used up: holdOf then offers the user an approval.
         await tx.aIOperation.update({ where: { id: op.id }, data: { status: 'RETRYABLE', errorCode: 'BATCH_ITEM_MISSING', retryAfter: null } });
@@ -180,12 +224,12 @@ export async function classifyBatch(
       await tx.aIProcessingResult.upsert({
         where: { emailId: item.emailId },
         create: {
-          emailId: item.emailId, provider: batch.provider!, model: batch.model!, contractVersion: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH,
+          emailId: item.emailId, provider: batch.provider!, model: batch.model!, contractVersion: version,
           relevanceDecision: decisionState, confidence: decision.confidence, category: decision.category, deterministic: false,
           processingStatus: decisionState === 'IRRELEVANT' ? 'COMPLETED' : 'PROCESSING',
         },
         update: {
-          provider: batch.provider!, model: batch.model!, contractVersion: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH,
+          provider: batch.provider!, model: batch.model!, contractVersion: version,
           relevanceDecision: decisionState, confidence: decision.confidence, category: decision.category, deterministic: false,
           processingStatus: decisionState === 'IRRELEVANT' ? 'COMPLETED' : 'PROCESSING',
           errorCategory: null, errorDetails: null,
@@ -218,7 +262,7 @@ const isRefusal = (kind: string | undefined): kind is Refusal =>
  */
 async function failBatch(
   err: unknown,
-  ctx: { userId: string; access: AIAccess; batchId: string; claimed: Candidate[]; now: Date; modelId: string; updateEmails: boolean },
+  ctx: { userId: string; access: AIAccess; batchId: string; claimed: Candidate[]; now: Date; modelId: string; updateEmails: boolean; version: string },
 ): Promise<unknown> {
   const failure = failureKind(err);
   const kind = failure?.kind;
@@ -231,7 +275,7 @@ async function failBatch(
       data: { status, errorCode: kind ?? 'OutcomeUnknown', completedAt: status === 'UNKNOWN' ? null : new Date() },
     });
     for (const item of ctx.claimed) {
-      const where = { emailId_operation_version: { emailId: item.emailId, operation: 'classification', version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH } };
+      const where = { emailId_operation_version: { emailId: item.emailId, operation: 'classification', version: ctx.version } };
       if (refusal)
         await tx.aIOperation.update({ where, data: { status: 'PENDING', attempts: { decrement: 1 }, errorCode: refusal, batchId: null, startedAt: null } });
       else
@@ -259,21 +303,25 @@ export async function classifyOne(
   input: RelevanceClassifierInput,
   options: { signal?: AbortSignal } = {},
 ) {
-  const row = await prisma.aIOperation.findUnique({ where: { emailId_operation_version: { emailId, operation: 'classification', version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH } } });
+  const rows = await prisma.aIOperation.findMany({ where: { emailId, operation: 'classification', version: { in: [...RELEVANCE_BATCH_VERSIONS] } } });
+  if (rows.length > 1) throw new TerminalAIError('Relevance version requires reconciliation');
+  const row = rows[0] ?? null;
+  // New mails only: an email that started on an older version stays on it.
+  const version = row?.version ?? AI_CONTRACT_VERSIONS.RELEVANCE_BATCH;
   if (row?.status === 'COMPLETED') {
     const data = row.result as unknown as RelevanceBatchItem;
-    return { decision: data.decision, confidence: data.confidence, category: data.category, provider: row.provider, model: row.model, version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH };
+    return { decision: data.decision, confidence: data.confidence, category: data.category, provider: row.provider, model: row.model, version };
   }
   if (row?.status === 'PROCESSING' && row.startedAt && Date.now() - row.startedAt.getTime() < TRIAGE_STALE_PROCESSING_MS)
     throw new RetryableAIError('AI operation not ready');
   if (row && (row.status === 'UNKNOWN' || row.status === 'FAILED' || row.attempts >= MAX_ATTEMPTS + row.approvedRetries || row.status === 'PROCESSING'))
     throw new TerminalAIError(`AI operation requires review: ${row.status}`);
   const access = await resolveAIAccess(userId);
-  const result = await classifyBatch(userId, [{ emailId, input }], access, { ...options, updateEmails: false });
+  const result = await classifyBatch(userId, [{ emailId, input }], access, { ...options, updateEmails: false, version });
   if (result.undecided.length) throw new RetryableAIError('AI answer missing');
   const item = result.decided.get('e1') ?? [...result.decided.values()][0];
   if (!item) throw new RetryableAIError('AI answer missing');
-  return { decision: item.confidence < relevanceThreshold() ? 'UNCERTAIN' : item.decision, confidence: item.confidence, category: item.category, provider: access.provider, model: access.models.fast.id, version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH };
+  return { decision: item.confidence < relevanceThreshold() ? 'UNCERTAIN' : item.decision, confidence: item.confidence, category: item.category, provider: access.provider, model: access.models.fast.id, version };
 }
 
 async function markDeterministicIrrelevant(userId: string, emailId: string) {
@@ -291,50 +339,53 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
   const handled = new Set<string>();
   let batches = 0, processed = 0;
   let stoppedBy: 'time_limit' | 'ai_failure' = 'time_limit';
-  while (Date.now() - started < TRIAGE_RUN_LIMIT_MS) {
-    const ids = (await batchCandidates(userId, triageBatchSize())).filter((id) => !handled.has(id));
-    if (!ids.length) return { batches, emails: processed, stoppedBy: 'no_candidates' as const };
-    const candidates: Candidate[] = [];
-    for (const emailId of ids) {
+  run: while (Date.now() - started < TRIAGE_RUN_LIMIT_MS) {
+    const picked = (await batchCandidates(userId, triageBatchSize())).filter((pick) => !handled.has(pick.emailId));
+    if (!picked.length) return { batches, emails: processed, stoppedBy: 'no_candidates' as const };
+    const candidates: (Candidate & { version: string })[] = [];
+    for (const { emailId, version } of picked) {
       try {
         const email = await prisma.email.findFirst({ where: { id: emailId, userId }, select: { id: true, gmailMessageId: true, sender: true, subject: true } });
         if (!email) throw new TerminalAIError('Email unavailable');
         const gmail = await GmailFetcherService.fetchMessageMetadata(userId, email.gmailMessageId, { signal });
         const labels = gmail.labelIds ?? [];
-        if (labels.some((label) => ['CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'SPAM'].includes(label))) {
+        if (autoIrrelevant(labels, email.sender, version === AI_CONTRACT_VERSIONS.RELEVANCE_BATCH)) {
           await markDeterministicIrrelevant(userId, email.id);
           handled.add(email.id); processed++; continue;
         }
-        candidates.push({ emailId: email.id, input: { sender: email.sender, subject: email.subject, labels, snippet: gmail.snippet } });
+        candidates.push({ emailId: email.id, version, input: { sender: email.sender, subject: email.subject, labels, snippet: gmail.snippet } });
       } catch {
         handled.add(emailId);
         processed++;
         await enqueueEmailProcessingJob(userId, emailId);
       }
     }
-    if (!candidates.length) continue;
-    try {
-      const access = await resolveAIAccess(userId);
-      const result = await classifyBatch(userId, candidates, access, { signal });
-      batches++; processed += candidates.length;
-      for (const candidate of candidates) {
-        handled.add(candidate.emailId);
-        const outcome = result.byEmail.get(candidate.emailId);
-        if (outcome === 'RELEVANT' || outcome === 'UNCERTAIN') {
-          const id = await enqueueEmailProcessingJob(userId, candidate.emailId);
-          if (!id) console.log(JSON.stringify({ event: 'triage_email_queue_suppressed', emailId: candidate.emailId }));
+    // One call per version: an older email is never sent with the current rules.
+    for (const version of new Set(candidates.map((candidate) => candidate.version))) {
+      const group = candidates.filter((candidate) => candidate.version === version);
+      try {
+        const access = await resolveAIAccess(userId);
+        const result = await classifyBatch(userId, group, access, { signal, version });
+        batches++; processed += group.length;
+        for (const candidate of group) {
+          handled.add(candidate.emailId);
+          const outcome = result.byEmail.get(candidate.emailId);
+          if (outcome === 'RELEVANT' || outcome === 'UNCERTAIN') {
+            const id = await enqueueEmailProcessingJob(userId, candidate.emailId);
+            if (!id) console.log(JSON.stringify({ event: 'triage_email_queue_suppressed', emailId: candidate.emailId }));
+          }
         }
+      } catch (err) {
+        group.forEach((candidate) => handled.add(candidate.emailId));
+        // Nothing was claimed: another run or job holds these emails. Skip them and continue.
+        if (err instanceof RetryableAIError) continue;
+        // Every other AI outcome is already recorded on the ledger and the emails: stop this run.
+        if (err instanceof AIProviderError) {
+          stoppedBy = 'ai_failure';
+          break run;
+        }
+        throw err;
       }
-    } catch (err) {
-      candidates.forEach((candidate) => handled.add(candidate.emailId));
-      // Nothing was claimed: another run or job holds these emails. Skip them and continue.
-      if (err instanceof RetryableAIError) continue;
-      // Every other AI outcome is already recorded on the ledger and the emails: stop this run.
-      if (err instanceof AIProviderError) {
-        stoppedBy = 'ai_failure';
-        break;
-      }
-      throw err;
     }
   }
   console.log(JSON.stringify({ event: 'triage_run', userId, batches, emails: processed, stoppedBy }));

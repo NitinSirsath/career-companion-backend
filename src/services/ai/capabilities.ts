@@ -3,9 +3,10 @@ import {
   AIContract,
   AIResult,
   AIRole,
-  CLASSIFICATION_CONTRACT,
-  RELEVANCE_BATCH_CONTRACT,
+  AI_CONTRACT_VERSIONS,
   RelevanceBatchEnvelopeSchema,
+  classificationContractFor,
+  relevanceBatchContractFor,
   EXTRACTION_CONTRACT,
   EXTRACTION_V3_CONTRACT,
   EmailAnalyzer,
@@ -42,10 +43,11 @@ async function run<T>(
 export function bindCapabilities(client: ProviderClient, models: BoundModels): AICapabilities {
   return {
     classifier: {
-      classifyRelevanceBatch: async (inputs) => {
-        const model = models[RELEVANCE_BATCH_CONTRACT.role];
+      classifyRelevanceBatch: async (inputs, version = AI_CONTRACT_VERSIONS.RELEVANCE_BATCH) => {
+        const contract = relevanceBatchContractFor(version);
+        const model = models[contract.role];
         const { data, usage } = await client.generateStructured({
-          contract: RELEVANCE_BATCH_CONTRACT as AIContract<unknown>,
+          contract: contract as AIContract<unknown>,
           model,
           input: JSON.stringify(inputs),
         });
@@ -53,15 +55,12 @@ export function bindCapabilities(client: ProviderClient, models: BoundModels): A
         // item is checked by mapBatchResults, so one bad item never fails the whole batch.
         const parsed = RelevanceBatchEnvelopeSchema.safeParse(data);
         if (!parsed.success) throw new ProviderFailure('INVALID_OUTPUT', { usage });
-        return { version: RELEVANCE_BATCH_CONTRACT.version, data: parsed.data, model: model.id, usage };
+        return { version: contract.version, data: parsed.data, model: model.id, usage };
       },
-      classifyRelevance: (input) =>
-        run(
-          client,
-          CLASSIFICATION_CONTRACT,
-          models[CLASSIFICATION_CONTRACT.role],
-          JSON.stringify(input),
-        ),
+      classifyRelevance: (input, version = AI_CONTRACT_VERSIONS.CLASSIFICATION) => {
+        const contract = classificationContractFor(version);
+        return run(client, contract, models[contract.role], JSON.stringify(input));
+      },
     },
     analyzer: {
       extractJobData: (body, options) =>
