@@ -33,6 +33,7 @@ import { encryptToken, decryptToken, loadEncryptionKey } from '../utils/gmailTok
 import { prisma } from '../db/prisma';
 import { requestGmailSync } from '../jobs/gmailSyncJob';
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
+import { GmailSettingsPatchSchema } from '../contracts/gmail';
 
 const router = Router();
 
@@ -358,9 +359,9 @@ router.post('/disconnect', async (req: Request, res: Response, next: NextFunctio
 router.patch('/settings', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.auth!.user.id;
-    const { syncLookbackDays } = req.body;
+    const parsed = GmailSettingsPatchSchema.safeParse(req.body);
 
-    if (typeof syncLookbackDays !== 'number' || ![1, 7, 14, 30].includes(syncLookbackDays)) {
+    if (!parsed.success) {
       return res.status(400).json({
         error: { code: 'INVALID_LOOKBACK', message: 'syncLookbackDays must be 1, 7, 14, or 30' },
       });
@@ -368,7 +369,7 @@ router.patch('/settings', async (req: Request, res: Response, next: NextFunction
 
     const connection = await prisma.gmailConnection.update({
       where: { userId },
-      data: { syncLookbackDays },
+      data: { syncLookbackDays: parsed.data.syncLookbackDays },
     });
 
     return res.status(200).json({ success: true, syncLookbackDays: connection.syncLookbackDays });
