@@ -411,6 +411,55 @@ describe('Gmail OAuth Routes (COM-19)', () => {
     });
   });
 
+  describe('PATCH /api/gmail/settings', () => {
+    it('rejects an invalid syncLookbackDays value', async () => {
+      const res = await request(app)
+        .patch('/api/gmail/settings')
+        .set('X-Development-User', testUser.email)
+        .send({ syncLookbackDays: 15 });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({
+        error: { code: 'INVALID_LOOKBACK', message: 'syncLookbackDays must be 1, 7, 14, or 30' },
+      });
+    });
+
+    it('returns 400 when syncLookbackDays is omitted', async () => {
+      const res = await request(app)
+        .patch('/api/gmail/settings')
+        .set('X-Development-User', testUser.email)
+        .send({});
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({
+        error: { code: 'INVALID_LOOKBACK', message: 'syncLookbackDays must be 1, 7, 14, or 30' },
+      });
+    });
+
+    it('updates syncLookbackDays for an existing Gmail connection', async () => {
+      await prisma.gmailConnection.create({
+        data: {
+          userId: testUser.id,
+          gmailEmail: 'testuser@gmail.com',
+          status: 'CONNECTED',
+          syncStatus: 'IDLE',
+          accessToken: encryptToken('fake_access_token'),
+        },
+      });
+
+      const res = await request(app)
+        .patch('/api/gmail/settings')
+        .set('X-Development-User', testUser.email)
+        .send({ syncLookbackDays: 14 });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ success: true, syncLookbackDays: 14 });
+
+      const connection = await prisma.gmailConnection.findUnique({ where: { userId: testUser.id } });
+      expect(connection?.syncLookbackDays).toBe(14);
+    });
+  });
+
   // ─── Token security ────────────────────────────────────────────────────────
 
   describe('Token security (tokens never appear in responses)', () => {
