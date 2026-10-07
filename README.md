@@ -71,7 +71,7 @@ The `src/contracts` directory contains Zod schemas and types that are shared wit
 
 See [STABILIZATION.md](STABILIZATION.md) for migration preflight, production configuration, recovery boundaries, and release verification. The stabilization API changes require the matching frontend release: Gmail sync returns `202 { accepted: true }`; application events and actions return paginated envelopes. All public lists default to and cap at 20 items.
 
-Tests require a **separate local test database**, never the development database. Create an empty database named `career_companion_test` (or `career_companion_*test`). In ignored `.env.test`, set `DATABASE_URL` and `TEST_DATABASE_URL` to the exact same explicit URL for that database, plus development authentication and fixture-only signing/encryption secrets. The guard rejects remote hosts, development database names, URL overrides, and missing/mismatched test URLs before tests touch data. The suite deletes fixture data, so do not put real user records in this database.
+Tests require a **separate local test database**, never the development database. Create an empty database named `career_companion_test` (or `career_companion_*test`). In ignored `.env.test`, set `DATABASE_URL` and `TEST_DATABASE_URL` to the exact same explicit URL for that database, plus test-only development authentication and fixture-only signing/encryption secrets. The guard rejects remote hosts, development database names, URL overrides, and missing/mismatched test URLs before tests touch data. The suite deletes fixture data, so do not put real user records in this database.
 
 Generate and build first (the guard is loaded from `dist`), then migrate the dedicated test database **only through the guarded runner**. It loads `.env.test` with override, requires it to match the independently exported `TEST_DATABASE_URL`, runs the safety guard, and only then spawns the Prisma CLI. A raw `prisma migrate deploy` is not guarded.
 
@@ -90,24 +90,25 @@ Vitest loads `.env.test` with override enabled; confirm it contains that same te
 
 ## Application API & Development Authentication (COM-13)
 
-For Sprint 1 local development, this repository uses a **Development-Only Authentication Boundary**. 
-This is a fallback for local testing. Google OAuth is the primary and fully-implemented mechanism for authentication.
+Local development uses **Google OAuth** for authentication. Configure the Google OAuth variables in `.env.example` and log in through the application before calling protected API routes.
+
+The `X-Development-User` header is retained only for automated tests. It works only when both `NODE_ENV=test` and `ENABLE_DEV_AUTH=true`; it is ignored in local development and production.
 
 ### Making Authenticated Requests
-To authenticate as the development user, you must include the `X-Development-User` header with the user's email (default seeded user: `dev@career-companion.local`) in your requests. Also ensure `ENABLE_DEV_AUTH=true` is set in your `.env`.
+API calls to protected routes need a logged-in session cookie. For local development, authenticate with Google first and send the resulting `cc_session` cookie with API requests.
 
 #### Example POST Request
 ```bash
 curl -X POST http://localhost:3000/api/applications \
   -H "Content-Type: application/json" \
-  -H "X-Development-User: dev@career-companion.local" \
+  -H "Cookie: cc_session=<logged-in-session-cookie>" \
   -d '{"companyName": "Acme Corp", "jobTitle": "Software Engineer"}'
 ```
 
 #### Example GET Request
 ```bash
 curl -X GET http://localhost:3000/api/applications \
-  -H "X-Development-User: dev@career-companion.local"
+  -H "Cookie: cc_session=<logged-in-session-cookie>"
 ```
 
 ### Error Response Shape
@@ -130,7 +131,7 @@ Every application response (create 201, list, detail, status PATCH) includes the
 ```bash
 curl -X PATCH http://localhost:3000/api/applications/<id>/status \
   -H "Content-Type: application/json" \
-  -H "X-Development-User: dev@career-companion.local" \
+  -H "Cookie: cc_session=<logged-in-session-cookie>" \
   -d '{"userStatus": "INTERVIEW", "expectedUserStatusRevision": 0}'
 ```
 

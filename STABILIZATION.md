@@ -114,7 +114,7 @@ JOIN applications a ON a.id = x."applicationId" WHERE e."userId" <> a."userId";
 | Variable | Required behavior |
 | --- | --- |
 | `NODE_ENV=production` | Disables header impersonation independently of its flag. |
-| `ENABLE_DEV_AUTH` | Must not be `true` in production; startup rejects it. |
+| `ENABLE_DEV_AUTH` | Works only with `NODE_ENV=test`; production startup still rejects it. |
 | `SESSION_SECRET`, `OAUTH_STATE_COOKIE_SECRET` | Independent randomly generated values, at least 32 characters, no development fallback. |
 | `FRONTEND_URL`, `GOOGLE_REDIRECT_URI`, `GMAIL_REDIRECT_URI` | Explicit HTTPS URLs in production. Register matching OAuth redirects. |
 | `TRUST_PROXY_HOPS` | Set only when deployed behind that exact trusted proxy count. Required for secure session cookies behind TLS termination; do not trust arbitrary forwarded headers. |

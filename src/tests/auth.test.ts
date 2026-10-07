@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
 import { app } from '../index';
@@ -41,6 +41,8 @@ vi.mock('googleapis', () => {
 
 describe('Google OAuth Sign-In (COM-24)', () => {
   let testUser: import('@prisma/client').User;
+  let savedNodeEnv: string | undefined;
+  let savedDevAuth: string | undefined;
 
   beforeAll(async () => {
     process.env.GOOGLE_CLIENT_ID = 'test_client_id';
@@ -54,7 +56,23 @@ describe('Google OAuth Sign-In (COM-24)', () => {
     await prisma.user.deleteMany({ where: { email: 'auth_test_user@gmail.com' } });
   });
 
+  afterEach(() => {
+    if (savedNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = savedNodeEnv;
+    }
+
+    if (savedDevAuth === undefined) {
+      delete process.env.ENABLE_DEV_AUTH;
+    } else {
+      process.env.ENABLE_DEV_AUTH = savedDevAuth;
+    }
+  });
+
   beforeEach(async () => {
+    savedNodeEnv = process.env.NODE_ENV;
+    savedDevAuth = process.env.ENABLE_DEV_AUTH;
     await prisma.session.deleteMany();
     await prisma.user.deleteMany({ where: { email: 'auth_test_user@gmail.com' } });
   });
@@ -224,6 +242,7 @@ describe('Google OAuth Sign-In (COM-24)', () => {
     });
 
     it('returns 200 for /api/auth/me when development auth is enabled and header is present', async () => {
+      process.env.NODE_ENV = 'test';
       process.env.ENABLE_DEV_AUTH = 'true';
       const res = await request(app).get('/api/auth/me').set('X-Development-User', devUser.email);
 
@@ -232,6 +251,7 @@ describe('Google OAuth Sign-In (COM-24)', () => {
     });
 
     it('returns 401 for /api/auth/me when development auth is disabled', async () => {
+      process.env.NODE_ENV = 'test';
       process.env.ENABLE_DEV_AUTH = 'false';
       const res = await request(app).get('/api/auth/me').set('X-Development-User', devUser.email);
 
@@ -239,8 +259,25 @@ describe('Google OAuth Sign-In (COM-24)', () => {
     });
 
     it('returns 401 for /api/auth/me when unauthenticated without headers or session', async () => {
+      process.env.NODE_ENV = 'test';
       process.env.ENABLE_DEV_AUTH = 'true';
       const res = await request(app).get('/api/auth/me');
+      expect(res.status).toBe(401);
+    });
+
+    it('returns 401 for /api/auth/me when development auth is enabled outside test mode', async () => {
+      process.env.NODE_ENV = 'development';
+      process.env.ENABLE_DEV_AUTH = 'true';
+      const res = await request(app).get('/api/auth/me').set('X-Development-User', devUser.email);
+
+      expect(res.status).toBe(401);
+    });
+
+    it('returns 401 for /api/auth/me when production receives the development auth header', async () => {
+      process.env.NODE_ENV = 'production';
+      process.env.ENABLE_DEV_AUTH = 'true';
+      const res = await request(app).get('/api/auth/me').set('X-Development-User', devUser.email);
+
       expect(res.status).toBe(401);
     });
   });

@@ -12,6 +12,16 @@ import { healthRouter } from './routes/health';
 dotenv.config();
 validateProductionConfig(process.env);
 
+if (
+  process.env.ENABLE_DEV_AUTH === 'true' &&
+  process.env.NODE_ENV !== 'test' &&
+  process.env.NODE_ENV !== 'production'
+) {
+  console.warn(
+    'ENABLE_DEV_AUTH is ignored outside NODE_ENV=test; use Google login.',
+  );
+}
+
 // ── Startup configuration warnings ───────────────────────────────────────────
 // These surface missing required env vars at startup rather than at request time.
 if (!process.env.SESSION_SECRET) {

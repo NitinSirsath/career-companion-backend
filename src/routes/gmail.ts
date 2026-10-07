@@ -21,7 +21,7 @@ import { SyncQueueError } from '../services/gmailSyncErrors';
  *   HttpOnly, SameSite=Lax cookie. It is cleared after a single use (CSRF protection).
  * - The authorization code (query param `code`) is NEVER logged.
  * - accessToken and refreshToken are NEVER returned in API responses.
- * - All routes require developmentAuthMiddleware (dev auth continues unchanged in Sprint 2).
+ * - All routes require an authenticated user session; automated tests may use the test-only dev auth boundary.
  * - Gmail OAuth is a secondary authorization grant, not user authentication.
  */
 

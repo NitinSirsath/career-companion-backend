@@ -1,15 +1,19 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../db/prisma';
 
+function isDevAuthAllowed(): boolean {
+  return process.env.NODE_ENV === 'test' && process.env.ENABLE_DEV_AUTH === 'true';
+}
+
 export async function developmentAuthMiddleware(req: Request, res: Response, next: NextFunction) {
   try {
-    if (process.env.NODE_ENV === 'production' || process.env.ENABLE_DEV_AUTH !== 'true') {
+    if (!isDevAuthAllowed()) {
       return res
         .status(401)
         .json({
           error: {
             code: 'UNAUTHORIZED',
-            message: 'Development auth is not enabled in this environment',
+            message: 'Development auth is available only in automated tests',
           },
         });
     }
@@ -47,11 +51,7 @@ export async function developmentAuthMiddleware(req: Request, res: Response, nex
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
-    if (
-      process.env.NODE_ENV !== 'production' &&
-      process.env.ENABLE_DEV_AUTH === 'true' &&
-      req.header('X-Development-User')
-    ) {
+    if (isDevAuthAllowed() && req.header('X-Development-User')) {
       return developmentAuthMiddleware(req, res, next);
     }
 
