@@ -12,8 +12,8 @@ const FRONTEND_DASHBOARD_PATH = '/';
 /**
  * Warn at startup when required Google OAuth variables are absent.
  * This surfaces the configuration gap early (before any request hits /connect)
- * rather than producing an opaque 500. In ENABLE_DEV_AUTH mode the warning
- * is expected and safe to ignore.
+ * rather than producing an opaque 500. Google login is required for local
+ * development and production.
  */
 const OAUTH_REQUIRED_VARS = [
   'GOOGLE_CLIENT_ID',
@@ -24,7 +24,7 @@ const missingOAuthVars = OAUTH_REQUIRED_VARS.filter((v) => !process.env[v]);
 if (missingOAuthVars.length > 0) {
   console.warn(
     `[Auth] Google OAuth is not configured — missing env vars: ${missingOAuthVars.join(', ')}. ` +
-      'Google login will return 500. Set ENABLE_DEV_AUTH=true for local dev bypass.',
+      'Google login will return 500. Set the Google OAuth variables in .env.',
   );
 }
 
