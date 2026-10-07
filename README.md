@@ -90,7 +90,7 @@ Vitest loads `.env.test` with override enabled; confirm it contains that same te
 
 ## Application API & Development Authentication (COM-13)
 
-Local development uses **Google OAuth** for authentication. Configure the Google OAuth variables in `.env.example` and log in through the application before calling protected API routes.
+Local development uses **Google OAuth** for authentication. Copy `.env.example` to `.env`, set the Google OAuth variables in `.env`, and log in through the application before calling protected API routes.
 
 The `X-Development-User` header is retained only for automated tests. It works only when both `NODE_ENV=test` and `ENABLE_DEV_AUTH=true`; it is ignored in local development and production.
 
