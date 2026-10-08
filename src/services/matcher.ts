@@ -1,3 +1,4 @@
+import { logEvent, logError } from '../utils/log';
 import { suppressNotifications } from './notificationSuppression';
 import { DomainError } from './agenda';
 import { projectAgenda } from './agenda';
@@ -204,7 +205,7 @@ export class MatcherService {
       try {
         await enqueueNotificationJob(actionId);
       } catch {
-        console.error(JSON.stringify({ event: 'notification_enqueue_failed', actionId }));
+        logError('notification_enqueue_failed', {actionId});
       }
     }
     return actionId !== undefined;
@@ -344,17 +345,12 @@ export class MatcherService {
         retiredActions: retiredActions.count,
       };
     });
-    console.log(
-      JSON.stringify({
-        event: 'email_match_corrected',
-        emailId,
+    logEvent('email_match_corrected', {emailId,
         kind: request.applicationId ? 'MOVE' : 'UNLINK',
         fromApplicationIds: result.fromApplicationIds,
         toApplicationId: request.applicationId,
         retiredEvents: result.retiredEvents,
-        retiredActions: result.retiredActions,
-      }),
-    );
+        retiredActions: result.retiredActions,});
     return { email: result.email, affectedApplicationIds: result.affectedApplicationIds };
   }
 
@@ -591,9 +587,7 @@ async function applyEffects(
   const deadlineText = aiResult.actionRequired ? aiResult.actionDeadline : aiResult.followUpDate;
   const parsed = parseActionDeadline(deadlineText, email.receivedAt);
   if (deadlineText?.trim() && !parsed.deadline)
-    console.log(
-      JSON.stringify({ event: 'action_deadline_unclear', emailId, reason: parsed.reason }),
-    );
+    logEvent('action_deadline_unclear', {emailId, reason: parsed.reason});
   const action = await tx.action.create({
     data: {
       applicationId,

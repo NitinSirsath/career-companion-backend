@@ -1,3 +1,4 @@
+import { logDebug, logError } from '../utils/log';
 import { JobWithMetadata } from 'pg-boss';
 import { SyncQueueError, SyncSupersededError } from '../services/gmailSyncErrors';
 import { randomUUID } from 'crypto';
@@ -54,15 +55,10 @@ export async function requestGmailSync(userId: string, trigger: 'manual' | 'sche
         },
       })
       .catch(() => undefined);
-    console.error(
-      JSON.stringify({
-        event: 'gmail_sync_failed',
-        category: 'QUEUE_UNAVAILABLE',
+    logError('gmail_sync_failed', {category: 'QUEUE_UNAVAILABLE',
         trigger,
         userId,
-        requestId: claim,
-      }),
-    );
+        requestId: claim,});
     throw new SyncQueueError();
   }
 }
@@ -91,5 +87,5 @@ export async function handleGmailSyncJobs(jobs: JobWithMetadata<GmailSyncJobData
 export async function startGmailSyncWorker() {
   const queue = await getQueue();
   await queue.work('gmail-sync-job', { includeMetadata: true, batchSize: 1 }, handleGmailSyncJobs);
-  console.log(JSON.stringify({ event: 'worker_registered', queue: 'gmail-sync-job' }));
+  logDebug('worker_registered', {queue: 'gmail-sync-job'});
 }

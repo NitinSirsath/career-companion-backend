@@ -1,3 +1,4 @@
+import { logDebug, logEvent, logError } from '../utils/log';
 import { gmailCallOptions, SYNC_ATTEMPT_BUDGET_MS } from './googleTransport';
 import { randomUUID } from 'crypto';
 import { gmail_v1 } from 'googleapis';
@@ -187,7 +188,7 @@ export class GmailSyncService {
         daysSinceLastSync > syncLookbackDays ||
         (connection.lastSyncedLookbackDays !== null &&
           syncLookbackDays > connection.lastSyncedLookbackDays);
-      console.log(JSON.stringify({ event: 'gmail_sync_started', ...context }));
+      logDebug('gmail_sync_started', {...context});
       const deadline = () => {
         signal!.throwIfAborted();
       };
@@ -350,10 +351,7 @@ export class GmailSyncService {
       }
       checkpointCommitted = true;
       checkpointAdvanced = historyId !== connection.lastHistoryId;
-      console.log(
-        JSON.stringify({
-          event: 'gmail_sync_completed',
-          ...context,
+      logEvent('gmail_sync_completed', {...context,
           checkpointCommitted,
           checkpointAdvanced,
           windowDays: window.windowDays,
@@ -361,9 +359,7 @@ export class GmailSyncService {
           userId,
           messagesIngested,
           messagesSkipped,
-          durationMs: Date.now() - started,
-        }),
-      );
+          durationMs: Date.now() - started,});
       return { synced: true, messagesIngested, messagesSkipped, lastSyncedAt, checkpointAdvanced };
     } catch (caught) {
       const error = signal?.aborted
@@ -391,17 +387,7 @@ export class GmailSyncService {
           /* A failed cleanup must not hide the original delivery outcome. */
         }
       }
-      console.error(
-        JSON.stringify({
-          event: superseded ? 'gmail_sync_superseded' : 'gmail_sync_failed',
-          ...context,
-          durationMs: Date.now() - started,
-          checkpointCommitted,
-          checkpointAdvanced,
-          category: syncCategory(error),
-        }),
-      );
-      if (googleAuthFailure(error)) throw new GmailAuthError();
+      logError(superseded ? 'gmail_sync_superseded' : 'gmail_sync_failed', { ...context, durationMs: Date.now() - started, checkpointCommitted, checkpointAdvanced, category: syncCategory(error) }, error);      if (googleAuthFailure(error)) throw new GmailAuthError();
       throw error;
     }
   }

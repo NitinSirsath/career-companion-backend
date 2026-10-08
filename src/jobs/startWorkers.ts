@@ -1,3 +1,4 @@
+import { logEvent, logError } from '../utils/log';
 import { startGmailScheduledSync } from './gmailScheduledSyncJob';
 import { GMAIL_SCHEDULE_QUEUE } from '../services/gmailSchedule';
 import { startGmailSyncWorker } from './gmailSyncJob';
@@ -69,39 +70,26 @@ export async function startWorkers(
       if (result.status === 'rejected') {
         const worker = pending[i];
         failed.push(worker);
-        console.error(
-          JSON.stringify({
-            event: worker.failureEvent,
-            queue: worker.queue,
-            attempt,
-            maxAttempts,
-            retryInMs,
-            ...errorCategory(result.reason),
-          }),
-        );
+        logError(worker.failureEvent, {
+          queue: worker.queue,
+          attempt,
+          maxAttempts,
+          retryInMs,
+          ...errorCategory(result.reason),
+        }, result.reason);
       }
     });
     if (!failed.length) {
-      console.log(
-        JSON.stringify({
-          event: 'workers_ready',
-          queues: workers.map((w) => w.queue),
-          attempts: attempt,
-        }),
-      );
+      logEvent('workers_ready', {queues: workers.map((w) => w.queue),
+          attempts: attempt,});
       return true;
     }
     pending = failed;
     if (retryInMs !== null) await sleep(retryInMs);
   }
   if (isShuttingDown()) return false;
-  console.error(
-    JSON.stringify({
-      event: 'worker_start_gave_up',
-      queues: pending.map((w) => w.queue),
-      attempts: maxAttempts,
-    }),
-  );
+  logError('worker_start_gave_up', {queues: pending.map((w) => w.queue),
+      attempts: maxAttempts,});
   await stop().catch(() => undefined);
   if (!isShuttingDown()) onGiveUp();
   return false;

@@ -1,3 +1,4 @@
+import { logEvent } from '../utils/log';
 import { CorrectEmailMatchRequestSchema } from '../contracts/email';
 import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
@@ -303,18 +304,13 @@ router.post('/:id/retry', async (req: Request, res: Response, next: NextFunction
         return;
       }
       for (const { op } of held)
-        console.log(
-          JSON.stringify({
-            event: 'ai_retry_approved',
-            userId,
+        logEvent('ai_retry_approved', {userId,
             emailId,
             operation: op.operation,
             version: op.version,
             previousStatus: op.status,
             previousProvider: op.provider,
-            currentProvider: config?.provider ?? null,
-          }),
-        );
+            currentProvider: config?.provider ?? null,});
     }
 
     const jobId = await enqueueEmailProcessingJob(userId, emailId, approval);

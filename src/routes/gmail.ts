@@ -1,3 +1,4 @@
+import { logWarn, logError } from '../utils/log';
 import {
   createGoogleOAuthClient,
   GOOGLE_OAUTH_TIMEOUT_MS,
@@ -283,12 +284,7 @@ router.get('/callback', async (req: Request, res: Response) => {
     return res.redirect(302, frontendGmailUrl);
   } catch (err) {
     // Do not expose error details to the browser — redirect with a generic error.
-    console.error(
-      JSON.stringify({
-        event: 'gmail_oauth_failed',
-        category: err instanceof Error ? err.name : 'UnknownError',
-      }),
-    );
+    logError('gmail_oauth_failed', {category: err instanceof Error ? err.name : 'UnknownError',});
     return res.redirect(302, `${frontendGmailUrl}?gmailError=server_error`);
   }
 });
@@ -321,12 +317,7 @@ router.post('/disconnect', async (req: Request, res: Response, next: NextFunctio
       await oauth2Client.revokeToken(decryptedAccessToken);
     } catch (revokeErr) {
       // Log that revocation failed, but do NOT log the token value.
-      console.warn(
-        JSON.stringify({
-          event: 'gmail_revocation_failed',
-          category: revokeErr instanceof Error ? revokeErr.name : 'UnknownError',
-        }),
-      );
+      logWarn('gmail_revocation_failed', {category: revokeErr instanceof Error ? revokeErr.name : 'UnknownError',});
     }
 
     // ── Clear tokens and mark NOT_CONNECTED ───────────────────────────────

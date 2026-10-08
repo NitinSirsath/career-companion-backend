@@ -1,3 +1,4 @@
+import { logEvent } from '../utils/log';
 /**
  * Per-user integration tokens for the MCP endpoint (ADR-0002 decision 10; MCP-02).
  *
@@ -87,7 +88,7 @@ export async function createIntegrationToken(
       },
     });
   });
-  console.log(JSON.stringify({ event: 'integration_token_created', userId, tokenId: row.id, expiresInDays }));
+  logEvent('integration_token_created', {userId, tokenId: row.id, expiresInDays});
   return { integrationToken: toResponse(row, now), plaintextToken };
 }
 
@@ -109,7 +110,7 @@ export async function revokeIntegrationToken(userId: string, id: string, now = n
   });
   const row = await prisma.integrationToken.findFirst({ where: { id, userId } });
   if (!row) throw new IntegrationTokenError(404, 'NOT_FOUND', 'Token not found.');
-  if (revoked.count) console.log(JSON.stringify({ event: 'integration_token_revoked', userId, tokenId: id }));
+  if (revoked.count) logEvent('integration_token_revoked', {userId, tokenId: id});
   return toResponse(row, now);
 }
 

@@ -1,3 +1,4 @@
+import { logWarn } from '../../utils/log';
 /**
  * Per-user AI safety limit, counts and cooldown (ADR-0001 decision 7; plan §3.9).
  *
@@ -75,7 +76,7 @@ export async function recordTokens(userId: string, now: Date, usage: AIUsage | u
       },
     });
   } catch {
-    console.warn(JSON.stringify({ event: 'ai_usage_record_failed', userId }));
+    logWarn('ai_usage_record_failed', {userId});
   }
 }
 
@@ -146,6 +147,6 @@ export async function noteProviderSuccess(access: AccessIdentity) {
       data: { consecutiveFailures: 0, cooldownUntil: null, accessIssue: null },
     });
   } catch {
-    console.warn(JSON.stringify({ event: 'ai_access_state_record_failed', userId: access.userId }));
+    logWarn('ai_access_state_record_failed', {userId: access.userId});
   }
 }

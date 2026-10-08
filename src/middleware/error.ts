@@ -1,26 +1,29 @@
 import { DomainError } from '../services/agenda';
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
+import { logError } from '../utils/log';
 
 export function errorHandler(
   err: unknown,
   req: Request,
   res: Response,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _next: NextFunction,
 ) {
-  console.error(
-    JSON.stringify({
-      event: 'request_failed',
-      method: req.method,
-      category: err instanceof Error ? err.name : 'UnknownError',
-      ...(process.env.NODE_ENV !== 'production' && err instanceof Error ? { message: err.message } : {})
-    }),
-  );
+  let status = 500;
+  if (err instanceof DomainError) status = err.status;
+  else if (err instanceof ZodError) status = 400;
+  else if (err instanceof Error && err.name === 'UnauthorizedError') status = 401;
 
-  if (process.env.NODE_ENV !== 'production') {
-    console.error('[DEV ERROR]', err);
-  }
+  logError(
+    'request_failed',
+    {
+      method: req.method,
+      path: req.originalUrl.split('?')[0],
+      status,
+      userId: req.auth?.user.id,
+    },
+    err,
+  );
 
   if (err instanceof DomainError) return res.status(err.status).json({ error: { code: err.code, message: err.code === 'NOT_FOUND' ? 'Not found' : 'This change could not be saved. Refresh and review the current state.' } });
 

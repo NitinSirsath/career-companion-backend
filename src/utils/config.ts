@@ -16,6 +16,29 @@ export function parseAI_TRIAGE_BATCH_SIZE(value: string | undefined): number {
   return parsed;
 }
 
+export function logLevel(): 'debug' | 'info' | 'warn' | 'error' {
+  const value = process.env.LOG_LEVEL?.trim().toLowerCase() || 'info';
+  if (value === 'debug' || value === 'info' || value === 'warn' || value === 'error') return value;
+  throw new Error('LOG_LEVEL must be debug, info, warn or error');
+}
+
+export function readableLogs(): boolean {
+  return process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test';
+}
+
+export function validateRequiredSecrets(env: NodeJS.ProcessEnv) {
+  for (const key of ['GMAIL_TOKEN_ENCRYPTION_KEY', 'AI_CREDENTIAL_ENCRYPTION_KEY'] as const) {
+    if (!env[key] || !/^[0-9a-f]{64}$/i.test(env[key])) {
+      throw new Error(
+        `${key} is missing or not 64 hex characters. Generate one with the command in .env.example.`,
+      );
+    }
+  }
+  if (env.GMAIL_TOKEN_ENCRYPTION_KEY!.toLowerCase() === env.AI_CREDENTIAL_ENCRYPTION_KEY!.toLowerCase()) {
+    throw new Error('AI_CREDENTIAL_ENCRYPTION_KEY must differ from GMAIL_TOKEN_ENCRYPTION_KEY');
+  }
+}
+
 export function validateProductionConfig(env: NodeJS.ProcessEnv) {
   if (
     env.TRUST_PROXY_HOPS &&

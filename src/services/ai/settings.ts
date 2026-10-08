@@ -1,3 +1,4 @@
+import { logEvent, logError } from '../../utils/log';
 /**
  * AI settings for the session user (ADR-0001 decisions 5–6; plan §5).
  *
@@ -181,16 +182,11 @@ export async function saveSettings(
   await reserveVerification(userId, now);
   const result = await createProviderClient(provider, apiKey).verifyModels([models.fast.id, models.detailed.id]);
   const keyChanged = switching || !!newKey;
-  console.log(
-    JSON.stringify({
-      event: 'ai_access_checked',
-      userId,
+  logEvent('ai_access_checked', {userId,
       provider: provider.id,
       on: 'save',
       result: result.result,
-      kind: result.result === 'REJECTED' ? result.kind : undefined,
-    }),
-  );
+      kind: result.result === 'REJECTED' ? result.kind : undefined,});
   if (result.result === 'REJECTED') throw rejectedError(result);
 
   const verified = result.result === 'VERIFIED';
@@ -229,9 +225,7 @@ export async function saveSettings(
       },
     });
   }
-  console.log(
-    JSON.stringify({ event: 'ai_settings_saved', userId, provider: provider.id, verification: result.result, switched: switching, keyChanged }),
-  );
+  logEvent('ai_settings_saved', {userId, provider: provider.id, verification: result.result, switched: switching, keyChanged});
   await reofferPendingEmails(userId);
   return { ...(await readSettings(userId, now)), verification: result.result };
 }
@@ -250,7 +244,7 @@ export async function checkSettings(userId: string, now = new Date()): Promise<C
     apiKey = openApiKey(userId, config.encryptedApiKey);
   } catch (err) {
     if (!(err instanceof CredentialUnreadableError)) throw err;
-    console.error(JSON.stringify({ event: 'ai_credential_unreadable', userId }));
+    logError('ai_credential_unreadable', {userId});
     await prisma.aIConfiguration.updateMany({
       where: guarded,
       data: { accessIssue: 'KEY_UNREADABLE', accessIssueModel: null, lastCheckedAt: now },
@@ -260,16 +254,11 @@ export async function checkSettings(userId: string, now = new Date()): Promise<C
   await reserveVerification(userId, now);
   const { models } = modelsFor(provider, config, now);
   const result = await createProviderClient(provider, apiKey).verifyModels([models.fast.id, models.detailed.id]);
-  console.log(
-    JSON.stringify({
-      event: 'ai_access_checked',
-      userId,
+  logEvent('ai_access_checked', {userId,
       provider: provider.id,
       on: 'check',
       result: result.result,
-      kind: result.result === 'REJECTED' ? result.kind : undefined,
-    }),
-  );
+      kind: result.result === 'REJECTED' ? result.kind : undefined,});
   if (result.result === 'VERIFIED') {
     // A model lookup proves access, not that a rate limit has cleared: a cooldown stays.
     const clears = config.accessIssue && NEEDS_ATTENTION_ISSUES.includes(config.accessIssue);
@@ -292,7 +281,7 @@ export async function checkSettings(userId: string, now = new Date()): Promise<C
 /** Removes the configuration and its sealed key. Processed data stays. Idempotent. */
 export async function removeSettings(userId: string): Promise<{ removed: true }> {
   const { count } = await prisma.aIConfiguration.deleteMany({ where: { userId } });
-  if (count) console.log(JSON.stringify({ event: 'ai_settings_removed', userId }));
+  if (count) logEvent('ai_settings_removed', {userId});
   return { removed: true };
 }
 
@@ -336,7 +325,7 @@ export async function runSampleTest(userId: string, now = new Date()): Promise<A
       return result.data;
     } catch (err) {
       const kind = err instanceof ProviderFailure ? err.kind : 'OUTCOME_UNKNOWN';
-      console.log(JSON.stringify({ event: 'ai_sample_test', userId, provider: access.provider, outcome: kind, ...usage }));
+      logEvent('ai_sample_test', {userId, provider: access.provider, outcome: kind, ...usage});
       if (kind === 'KEY_REJECTED' || kind === 'ACCOUNT_OR_BILLING' || kind === 'MODEL_UNAVAILABLE' || kind === 'RATE_LIMITED') {
         const resumesAt = await prisma.$transaction((tx) =>
           noteProviderFailure(tx, access, kind, now, { modelId: model, retryAfterMs: (err as ProviderFailure).retryAfterMs }),
@@ -364,7 +353,7 @@ export async function runSampleTest(userId: string, now = new Date()): Promise<A
     access.analyzer.extractJobData(SAMPLE_EMAIL.body.slice(0, EXTRACTION_BODY_LIMIT)),
   );
   await noteProviderSuccess(access);
-  console.log(JSON.stringify({ event: 'ai_sample_test', userId, provider: access.provider, outcome: 'COMPLETED', ...usage }));
+  logEvent('ai_sample_test', {userId, provider: access.provider, outcome: 'COMPLETED', ...usage});
   return {
     provider: access.provider,
     models: { fast: access.models.fast.id, detailed: access.models.detailed.id },

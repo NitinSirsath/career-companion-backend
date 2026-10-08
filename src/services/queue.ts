@@ -1,3 +1,4 @@
+import { logError } from '../utils/log';
 import { GMAIL_SCHEDULE_QUEUE, setGmailScheduleRegistered } from './gmailSchedule';
 import { PgBoss } from 'pg-boss';
 import { errorCategory } from '../utils/errorCategory';
@@ -18,7 +19,7 @@ export function getQueue(): Promise<PgBoss> {
     starting = (async () => {
       const boss = new PgBoss({ connectionString: process.env.DATABASE_URL, schema: 'pgboss' });
       boss.on('error', (error) =>
-        console.error(JSON.stringify({ event: 'queue_error', ...errorCategory(error) })),
+        logError('queue_error', {...errorCategory(error)}),
       );
       try {
         await boss.start();

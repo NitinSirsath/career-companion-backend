@@ -12,4 +12,12 @@ export default [
     languageOptions: { sourceType: 'commonjs' },
     rules: { '@typescript-eslint/no-require-imports': 'off' },
   },
+  {
+    files: ['src/**/*.ts'],
+    rules: { 'no-console': 'error' },
+  },
+  {
+    files: ['src/utils/log.ts', 'src/tests/**', 'src/**/*.test.ts', 'src/eval/**'],
+    rules: { 'no-console': 'off' },
+  },
 ];

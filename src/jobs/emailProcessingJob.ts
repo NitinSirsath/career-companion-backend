@@ -1,3 +1,4 @@
+import { logDebug, logEvent, logWarn, logError } from '../utils/log';
 import type { JobWithMetadata } from 'pg-boss';
 import { getQueue } from '../services/queue';
 import { prisma } from '../db/prisma';
@@ -88,7 +89,7 @@ async function withdrawDelivery(jobId: string) {
   try {
     await (await getQueue()).cancel(EMAIL_PROCESSING_JOB, jobId);
   } catch {
-    console.warn(JSON.stringify({ event: 'job_withdraw_failed', jobId }));
+    logWarn('job_withdraw_failed', {jobId});
   }
 }
 
@@ -97,7 +98,7 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
   const startTime = Date.now();
   const attempt = { retryCount: job.retryCount, retryLimit: job.retryLimit };
 
-  console.log(JSON.stringify({ event: 'job_started', jobId: job.id, emailId, ...attempt }));
+  logDebug('job_started', {jobId: job.id, emailId, ...attempt});
 
   try {
     // The worker alone moves an email (including a manually retried FAILED one) into PROCESSING.
@@ -106,16 +107,11 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
       data: { processingState: 'PROCESSING' },
     });
     await EmailAIPipeline.processEmail(userId, emailId, { signal: job.signal });
-    console.log(
-      JSON.stringify({
-        event: 'job_completed',
-        jobId: job.id,
+    logDebug('job_completed', {jobId: job.id,
         emailId,
         outcome: 'completed',
         durationMs: Date.now() - startTime,
-        ...attempt,
-      }),
-    );
+        ...attempt,});
   } catch (err) {
     if (err instanceof AIAccessError) {
       // Waiting for the user's AI access is not a processing failure (ADR-0001 decision 8): the
@@ -133,16 +129,11 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
         },
       });
       await withdrawDelivery(job.id);
-      console.log(
-        JSON.stringify({
-          event: 'job_waiting_for_ai',
-          jobId: job.id,
+      logEvent('job_waiting_for_ai', {jobId: job.id,
           emailId,
           reason: err.reason,
           durationMs: Date.now() - startTime,
-          ...attempt,
-        }),
-      );
+          ...attempt,});
       return;
     }
     const failure = describeFailure(err);
@@ -163,18 +154,13 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
       },
     });
 
-    console.error(
-      JSON.stringify({
-        event: 'job_failed',
-        jobId: job.id,
+    logError('job_failed', {jobId: job.id,
         emailId,
         outcome: terminal ? 'failed_terminal' : exhausted ? 'failed_exhausted' : 'retry_scheduled',
         errorCategory: failure.category,
         errorStage: failure.stage,
         durationMs: Date.now() - startTime,
-        ...attempt,
-      }),
-    );
+        ...attempt,});
     // Terminal work is acknowledged; anything else lets pg-boss record retry or exhaustion.
     // The original error stays in memory: only the sanitized category reaches pg-boss storage.
     if (!terminal) throw new EmailJobFailure(failure.category);
@@ -191,14 +177,9 @@ export const EMAIL_WORKER_OPTIONS = { includeMetadata: true, batchSize: 1 } as c
 
 export async function handleEmailJobs(jobs: JobWithMetadata<EmailProcessingJobData>[]) {
   if (jobs.length !== 1) {
-    console.error(
-      JSON.stringify({
-        event: 'job_batch_rejected',
-        queue: EMAIL_PROCESSING_JOB,
+    logError('job_batch_rejected', {queue: EMAIL_PROCESSING_JOB,
         delivered: jobs.length,
-        jobIds: jobs.map((job) => job.id),
-      }),
-    );
+        jobIds: jobs.map((job) => job.id),});
     throw new Error('UNEXPECTED_EMAIL_JOB_BATCH');
   }
   await processEmailJob(jobs[0]);
@@ -207,7 +188,5 @@ export async function handleEmailJobs(jobs: JobWithMetadata<EmailProcessingJobDa
 export async function startEmailProcessingWorker() {
   const queue = await getQueue();
   await queue.work(EMAIL_PROCESSING_JOB, EMAIL_WORKER_OPTIONS, handleEmailJobs);
-  console.log(
-    JSON.stringify({ event: 'worker_registered', queue: EMAIL_PROCESSING_JOB, batchSize: 1 }),
-  );
+  logDebug('worker_registered', {queue: EMAIL_PROCESSING_JOB, batchSize: 1});
 }
