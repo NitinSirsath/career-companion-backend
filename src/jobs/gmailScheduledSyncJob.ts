@@ -11,6 +11,7 @@ import {
 import { SyncInProgressError } from '../services/gmailSyncErrors';
 import { errorCategory } from '../utils/errorCategory';
 import { requestGmailSync } from './gmailSyncJob';
+import { logDebug, logEvent, logError } from '../utils/log';
 type Source = 'schedule' | 'startup';
 const options = { retryLimit: 2, retryDelay: 60, expireInSeconds: 120 };
 export async function runScheduledGmailSync(source: Source, now = new Date()) {
@@ -41,27 +42,21 @@ export async function runScheduledGmailSync(source: Source, now = new Date()) {
       if (error instanceof SyncInProgressError) counts.skippedBusy++;
       else {
         counts.failed++;
-        console.error(
-          JSON.stringify({
-            event: 'gmail_scheduled_sync_request_failed',
-            userId: connection.userId,
-            ...errorCategory(error),
-          }),
-        );
+        logError('gmail_scheduled_sync_request_failed', {
+          userId: connection.userId,
+          ...errorCategory(error),
+        });
       }
     }
   }
-  console.log(
-    JSON.stringify({
-      event: 'gmail_scheduled_sync_run',
-      source,
-      slot: slot.toISOString(),
-      timezone,
-      lateBySeconds: Math.floor((now.getTime() - slot.getTime()) / 1000),
-      ...counts,
-      durationMs: Date.now() - started,
-    }),
-  );
+  logEvent('gmail_scheduled_sync_run', {
+    source,
+    slot: slot.toISOString(),
+    timezone,
+    lateBySeconds: Math.floor((now.getTime() - slot.getTime()) / 1000),
+    ...counts,
+    durationMs: Date.now() - started,
+  });
   if (counts.failed) throw new Error('Scheduled Gmail requests failed');
   return counts;
 }
@@ -97,5 +92,5 @@ export async function startGmailScheduledSync(config = gmailScheduleConfig()) {
     catchups.add(boss);
   }
   setGmailScheduleRegistered(true);
-  console.log(JSON.stringify({ event: 'worker_registered', queue: GMAIL_SCHEDULE_QUEUE }));
+  logDebug('worker_registered', { queue: GMAIL_SCHEDULE_QUEUE });
 }

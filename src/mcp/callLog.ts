@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'async_hooks';
+import { logEvent } from '../utils/log';
 
 /**
  * One structured log line per /mcp request (ADR-0002 decision 13), written when the response
@@ -37,5 +38,5 @@ export function rpcMethodOf(body: unknown): string | undefined {
 
 export function writeCallLog(record: McpCallRecord, status: number) {
   const { startedAt, ...fields } = record;
-  console.log(JSON.stringify({ event: 'mcp_request', status, durationMs: Date.now() - startedAt, ...fields }));
+  logEvent('mcp_request', { status, durationMs: Date.now() - startedAt, ...fields });
 }

@@ -6,7 +6,7 @@ import {
   openApiKey,
   sealApiKey,
 } from '../services/ai/credentials';
-import { validateProductionConfig } from '../utils/config';
+import { validateProductionConfig, validateRequiredSecrets } from '../utils/config';
 
 const KEY = 'sk-test-SENTINEL-credential-0123456789';
 const OWNER = '11111111-1111-4111-8111-111111111111';
@@ -101,5 +101,33 @@ describe('production configuration for AI credentials', () => {
   it('accepts the per-user limit, including 0 as the kill switch', () => {
     expect(() => validateProductionConfig({ ...base, AI_USER_DAILY_CALL_LIMIT: '0' })).not.toThrow();
     expect(() => validateProductionConfig({ ...base, AI_USER_DAILY_CALL_LIMIT: '500' })).not.toThrow();
+  });
+});
+
+describe('required startup secrets', () => {
+  const valid = {
+    GMAIL_TOKEN_ENCRYPTION_KEY: 'a1'.repeat(32),
+    AI_CREDENTIAL_ENCRYPTION_KEY: 'b2'.repeat(32),
+  };
+
+  it('rejects a missing secret and names the variable', () => {
+    expect(() => validateRequiredSecrets({ ...valid, AI_CREDENTIAL_ENCRYPTION_KEY: undefined })).toThrow(
+      'AI_CREDENTIAL_ENCRYPTION_KEY is missing or not 64 hex characters',
+    );
+  });
+
+  it('rejects a malformed secret', () => {
+    expect(() => validateRequiredSecrets({ ...valid, GMAIL_TOKEN_ENCRYPTION_KEY: 'short' })).toThrow(
+      'GMAIL_TOKEN_ENCRYPTION_KEY is missing or not 64 hex characters',
+    );
+  });
+
+  it('rejects shared encryption keys', () => {
+    expect(() =>
+      validateRequiredSecrets({
+        GMAIL_TOKEN_ENCRYPTION_KEY: 'a1'.repeat(32),
+        AI_CREDENTIAL_ENCRYPTION_KEY: 'A1'.repeat(32),
+      }),
+    ).toThrow('AI_CREDENTIAL_ENCRYPTION_KEY must differ from GMAIL_TOKEN_ENCRYPTION_KEY');
   });
 });

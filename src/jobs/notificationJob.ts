@@ -3,6 +3,7 @@ import { getQueue } from '../services/queue';
 import { prisma } from '../db/prisma';
 import { DiscordProvider } from '../services/notifications/DiscordProvider';
 import { NotificationPayload } from '../services/notifications/NotificationProvider';
+import { logDebug, logEvent, logWarn, logError } from '../utils/log';
 
 export const NOTIFICATION_JOB = 'discord-notification-job';
 
@@ -44,20 +45,15 @@ export async function startNotificationWorker() {
     });
 
     if (!action) {
-      console.warn(
-        JSON.stringify({ event: 'notification_failed', reason: 'action_not_found', actionId }),
-      );
+      logWarn('notification_failed', { reason: 'action_not_found', actionId });
       return; // Nothing to do
     }
 
     if (!process.env.DISCORD_USER_ID || action.application.userId !== process.env.DISCORD_USER_ID) {
-      console.warn(
-        JSON.stringify({
-          event: 'notification_skipped',
-          reason: 'recipient_not_configured_for_owner',
-          actionId,
-        }),
-      );
+      logWarn('notification_skipped', {
+        reason: 'recipient_not_configured_for_owner',
+        actionId,
+      });
       return;
     }
     if (action.retiredAt || action.status !== 'PENDING') return;
@@ -76,9 +72,7 @@ export async function startNotificationWorker() {
     });
 
     if (existingDelivery && existingDelivery.status === 'DELIVERED') {
-      console.log(
-        JSON.stringify({ event: 'notification_skipped', reason: 'already_delivered', actionId }),
-      );
+      logDebug('notification_skipped', { reason: 'already_delivered', actionId });
       return;
     }
 
@@ -88,14 +82,11 @@ export async function startNotificationWorker() {
     const isEligible = action.type === 'ACTION_REQUIRED' || action.type === 'FOLLOW_UP_REQUIRED';
 
     if (!isEligible) {
-      console.log(
-        JSON.stringify({
-          event: 'notification_skipped',
-          reason: 'ineligible_action_type',
-          actionId,
-          type: action.type,
-        }),
-      );
+      logDebug('notification_skipped', {
+        reason: 'ineligible_action_type',
+        actionId,
+        type: action.type,
+      });
       return;
     }
 
@@ -126,9 +117,7 @@ export async function startNotificationWorker() {
       data: { claimedAt: new Date(), lastAttemptAt: new Date(), attemptCount: { increment: 1 } },
     });
     if (!claimed.count) {
-      console.log(
-        JSON.stringify({ event: 'notification_skipped', reason: 'claimed_or_terminal', actionId }),
-      );
+      logDebug('notification_skipped', { reason: 'claimed_or_terminal', actionId });
       return;
     }
     const current = await prisma.action.findUnique({ where: { id: actionId }, include: { application: true } });
@@ -151,23 +140,22 @@ export async function startNotificationWorker() {
     });
 
     if (!result.success) {
-      const logData = {
-        event: 'notification_error',
+      const fields = {
         actionId,
         errorCategory: result.errorCategory,
         retryable: result.retryable,
       };
 
       if (result.retryable) {
-        console.warn(JSON.stringify(logData));
+        logWarn('notification_error', fields);
         throw new Error(`Notification failed: ${result.errorCategory}. Will retry.`);
       } else {
-        console.error(JSON.stringify(logData));
+        logError('notification_error', fields);
         // Don't throw for permanent failures so pg-boss marks the job as completed/won't retry
       }
     } else {
-      console.log(JSON.stringify({ event: 'notification_delivered', actionId }));
+      logEvent('notification_delivered', { actionId });
     }
   });
-  console.log(JSON.stringify({ event: 'worker_registered', queue: 'discord-notification-job' }));
+  logDebug('worker_registered', { queue: 'discord-notification-job' });
 }

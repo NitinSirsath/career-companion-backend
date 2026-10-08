@@ -5,36 +5,42 @@ import session from 'express-session';
 import pgSession from 'connect-pg-simple';
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
-import { validateProductionConfig } from './utils/config';
+import { validateProductionConfig, validateRequiredSecrets } from './utils/config';
+import { logEvent, logWarn } from './utils/log';
 import { createMcpRouter } from './mcp/router';
 import { healthRouter } from './routes/health';
+import { requestContext } from './middleware/requestContext';
 
 dotenv.config();
 validateProductionConfig(process.env);
+// Fail at startup, not inside the first request that needs a key. Tests set their own keys.
+if (process.env.NODE_ENV !== 'test') validateRequiredSecrets(process.env);
 
 if (
   process.env.ENABLE_DEV_AUTH === 'true' &&
   process.env.NODE_ENV !== 'test' &&
   process.env.NODE_ENV !== 'production'
 ) {
-  console.warn(
-    'ENABLE_DEV_AUTH is ignored outside NODE_ENV=test; use Google login.',
-  );
+  logWarn('config_warning', {
+    message: 'ENABLE_DEV_AUTH is ignored outside NODE_ENV=test; use Google login.',
+  });
 }
 
 // ── Startup configuration warnings ───────────────────────────────────────────
 // These surface missing required env vars at startup rather than at request time.
 if (!process.env.SESSION_SECRET) {
-  console.warn(
-    '[Config] SESSION_SECRET is not set — using an insecure dev default. ' +
+  logWarn('config_warning', {
+    message:
+      'SESSION_SECRET is not set — using an insecure dev default. ' +
       'Set SESSION_SECRET in .env before running in any shared or production environment.',
-  );
+  });
 }
 if (!process.env.FRONTEND_URL) {
-  console.warn(
-    '[Config] FRONTEND_URL is not set — defaulting to http://localhost:5173 (Vite dev server). ' +
+  logWarn('config_warning', {
+    message:
+      'FRONTEND_URL is not set — defaulting to http://localhost:5173 (Vite dev server). ' +
       'Set FRONTEND_URL in .env for production.',
-  );
+  });
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -43,8 +49,12 @@ const app = express();
 if (process.env.TRUST_PROXY_HOPS) app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS));
 const port = process.env.PORT || 3000;
 
-// MCP endpoint (ADR-0002). Mounted FIRST, before CORS, the global JSON parser, cookies and session:
-// its own 32 KB body limit must apply, and it accepts only Bearer integration tokens.
+// Request ID and one line per request, before everything else so every route is covered.
+app.use(requestContext);
+
+// MCP endpoint (ADR-0002). Mounted right after the request ID, before CORS, the global JSON
+// parser, cookies and session: its own 32 KB body limit must apply, and it accepts only Bearer
+// integration tokens.
 app.use('/mcp', createMcpRouter());
 app.use(healthRouter);
 
@@ -115,17 +125,16 @@ if (process.env.NODE_ENV !== 'test') {
   void startWorkers(undefined, { isShuttingDown: () => shuttingDown });
 
   const server = app.listen(port, () => {
-    console.log(`Backend server is running on port ${port}`);
+    logEvent('server_started', { port });
   });
 
   const shutdown = async () => {
     shuttingDown = true;
-    console.log('Shutting down server...');
+    logEvent('server_stopping');
     server.close(async () => {
-      console.log('HTTP server closed.');
       await stopQueue();
       await prisma.$disconnect();
-      console.log('Resources released.');
+      logEvent('server_stopped');
       process.exit(0);
     });
   };

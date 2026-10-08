@@ -6,6 +6,7 @@ import { MatcherService, MatchCorrectionError } from '../services/matcher';
 import { ResolveAmbiguityRequestSchema, RetryEmailRequestSchema } from '../contracts/email';
 
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
+import { logEvent } from '../utils/log';
 
 const router = Router();
 
@@ -303,18 +304,15 @@ router.post('/:id/retry', async (req: Request, res: Response, next: NextFunction
         return;
       }
       for (const { op } of held)
-        console.log(
-          JSON.stringify({
-            event: 'ai_retry_approved',
-            userId,
-            emailId,
-            operation: op.operation,
-            version: op.version,
-            previousStatus: op.status,
-            previousProvider: op.provider,
-            currentProvider: config?.provider ?? null,
-          }),
-        );
+        logEvent('ai_retry_approved', {
+          userId,
+          emailId,
+          operation: op.operation,
+          version: op.version,
+          previousStatus: op.status,
+          previousProvider: op.provider,
+          currentProvider: config?.provider ?? null,
+        });
     }
 
     const jobId = await enqueueEmailProcessingJob(userId, emailId, approval);

@@ -1,6 +1,7 @@
 import { GMAIL_SCHEDULE_QUEUE, setGmailScheduleRegistered } from './gmailSchedule';
 import { PgBoss } from 'pg-boss';
 import { errorCategory } from '../utils/errorCategory';
+import { logError } from '../utils/log';
 
 export const QUEUE_NAMES = [
   'email-processing-job',
@@ -17,9 +18,7 @@ export function getQueue(): Promise<PgBoss> {
   if (!starting) {
     starting = (async () => {
       const boss = new PgBoss({ connectionString: process.env.DATABASE_URL, schema: 'pgboss' });
-      boss.on('error', (error) =>
-        console.error(JSON.stringify({ event: 'queue_error', ...errorCategory(error) })),
-      );
+      boss.on('error', (error) => logError('queue_error', errorCategory(error)));
       try {
         await boss.start();
         for (const name of QUEUE_NAMES) {

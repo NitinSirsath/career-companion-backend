@@ -12,6 +12,7 @@ import {
   UpdateApplicationStatusRequest,
   deriveStatus,
 } from '../contracts';
+import { logError } from '../utils/log';
 
 export class ApplicationNotFoundError extends Error {
   readonly code = 'NOT_FOUND';
@@ -151,7 +152,7 @@ function toSourceEmail(
 ): { sourceEmail: SourceEmail | null; foreign: boolean } {
   if (!source) return { sourceEmail: null, foreign: false };
   if (source.userId !== userId) {
-    console.error(JSON.stringify({ event: 'evidence_ownership_mismatch', ...context }));
+    logError('evidence_ownership_mismatch', { ...context });
     return { sourceEmail: null, foreign: true };
   }
   return {
@@ -177,9 +178,7 @@ function toSourceSubmission(
 ): SourceSubmission | null {
   if (type !== AUTOMATION_SUBMITTED || !source) return null;
   if (source.userId !== userId) {
-    console.error(
-      JSON.stringify({ event: 'evidence_ownership_mismatch', kind: 'submission', ...context }),
-    );
+    logError('evidence_ownership_mismatch', { kind: 'submission', ...context });
     return null;
   }
   return {

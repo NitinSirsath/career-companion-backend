@@ -16,6 +16,7 @@ import {
 import { requireAuth } from '../middleware/auth';
 
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
+import { logEvent } from '../utils/log';
 
 const router = Router();
 
@@ -121,14 +122,11 @@ router.patch('/:id/status', async (req: Request, res: Response, next: NextFuncti
     const id = z.uuid().parse(req.params.id);
     const body = UpdateApplicationStatusRequestSchema.parse(req.body);
     const { application, changed } = await ApplicationService.updateUserStatus(userId, id, body);
-    console.log(
-      JSON.stringify({
-        event: 'application_status_corrected',
-        applicationId: id,
-        changed,
-        revision: application.userStatusRevision,
-      }),
-    );
+    logEvent('application_status_corrected', {
+      applicationId: id,
+      changed,
+      revision: application.userStatusRevision,
+    });
     return res.status(200).json(application);
   } catch (err) {
     if (err instanceof ApplicationNotFoundError)

@@ -91,7 +91,8 @@ async function main() {
   }
   function launch(crash) {
     child = fork(__filename, ['--worker', ...(crash ? ['--crash'] : [])], {
-      env: process.env,
+      // gmail_sync_started is a debug-level line, and the checks below count it.
+      env: { ...process.env, LOG_LEVEL: 'debug' },
       silent: true,
     });
     let buffer = '';

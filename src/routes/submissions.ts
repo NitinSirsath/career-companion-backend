@@ -14,6 +14,7 @@ import { PendingSubmission, ResolveSubmissionRequestSchema } from '../contracts/
 import { requireAuth } from '../middleware/auth';
 import { SubmissionReviewError, listPendingSubmissions, resolveSubmission } from '../services/externalSubmission';
 import { createPaginatedResponse, getPaginationParams } from '../utils/pagination';
+import { logEvent } from '../utils/log';
 
 const router = Router();
 router.use(requireAuth);
@@ -45,7 +46,7 @@ router.post('/:id/resolve', async (req: Request, res: Response, next: NextFuncti
     const id = z.uuid().parse(req.params.id);
     const resolution = ResolveSubmissionRequestSchema.parse(req.body);
     const resolved = await resolveSubmission(userId, id, resolution);
-    console.log(JSON.stringify({ event: 'submission_resolved', userId, submissionId: id, matchState: resolved.matchState }));
+    logEvent('submission_resolved', { userId, submissionId: id, matchState: resolved.matchState });
     res.status(200).json(resolved);
   } catch (err) {
     if (err instanceof SubmissionReviewError) {
