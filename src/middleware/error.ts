@@ -7,19 +7,15 @@ export function errorHandler(
   err: unknown,
   req: Request,
   res: Response,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _next: NextFunction,
 ) {
-  let status = 500;
-  if (err instanceof DomainError) status = err.status;
-  else if (err instanceof ZodError) status = 400;
-  else if (err instanceof Error && err.name === 'UnauthorizedError') status = 401;
-
   logError(
     'request_failed',
     {
       method: req.method,
       path: req.originalUrl.split('?')[0],
-      status,
+      status: statusFor(err),
       userId: req.auth?.user.id,
     },
     err,
@@ -54,4 +50,12 @@ export function errorHandler(
       message: 'An unexpected error occurred',
     },
   });
+}
+
+/** The status the handler above sends for this error. */
+function statusFor(err: unknown): number {
+  if (err instanceof DomainError) return err.status;
+  if (err instanceof ZodError) return 400;
+  if (err instanceof Error && err.name === 'UnauthorizedError') return 401;
+  return 500;
 }

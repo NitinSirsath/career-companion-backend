@@ -1,7 +1,7 @@
-import { logWarn, logError } from '../utils/log';
 import { Router, Request, Response, NextFunction } from 'express';
 import { createGoogleOAuthClient, GOOGLE_OAUTH_TIMEOUT_MS } from '../services/googleTransport';
 import { prisma } from '../db/prisma';
+import { logWarn, logError } from '../utils/log';
 
 const router = Router();
 
@@ -23,7 +23,10 @@ const OAUTH_REQUIRED_VARS = [
 ] as const;
 const missingOAuthVars = OAUTH_REQUIRED_VARS.filter((v) => !process.env[v]);
 if (missingOAuthVars.length > 0) {
-  logWarn('google_oauth_not_configured', { message: `[Auth] Google OAuth is not configured — missing env vars: ${missingOAuthVars.join(', ')}. Google login will return 500. Set the Google OAuth variables in .env.` });
+  logWarn('google_oauth_not_configured', {
+    missing: missingOAuthVars,
+    message: 'Google login will return 500. Set the Google OAuth variables in .env.',
+  });
 }
 
 function createOAuth2Client() {
@@ -182,7 +185,7 @@ router.get('/callback', async (req: Request, res: Response) => {
     );
     return res.redirect(302, frontendDashboardUrl);
   } catch (err) {
-    logError('google_login_failed', {category: err instanceof Error ? err.name : 'UnknownError'}, err);
+    logError('google_login_failed', {}, err);
     return res.redirect(302, `${frontendLoginUrl}?error=server_error`);
   }
 });

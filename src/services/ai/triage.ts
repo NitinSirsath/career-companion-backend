@@ -1,4 +1,3 @@
-import { logEvent, logWarn } from '../../utils/log';
 import type { AIAccess } from './access';
 import { getAccessState, resolveAIAccess } from './access';
 import { prisma } from '../../db/prisma';
@@ -17,6 +16,7 @@ import {
 } from './contracts';
 import { noteProviderFailure, noteProviderSuccess, recordTokens, reserveUserCall } from './usage';
 import { failureError, failureKind } from './operations';
+import { logEvent, logWarn } from '../../utils/log';
 
 export const TRIAGE_STALE_PROCESSING_MS = 15 * 60_000;
 export const TRIAGE_RUN_LIMIT_MS = 180_000;
@@ -172,7 +172,7 @@ export async function classifyBatch(
         data: { processingState: 'PROCESSING' },
       });
     await tx.aIBatch.update({ where: { id: batch.id }, data: { itemCount: claimed.length } });
-    logEvent('ai_batch_claimed', {batchId: batch.id, userId, itemCount: claimed.length, provider: access.provider, model: model.id});
+    logEvent('ai_batch_claimed', { batchId: batch.id, userId, itemCount: claimed.length, provider: access.provider, model: model.id });
   });
 
   const sent = buildRelevanceBatchInput(claimed.map((item) => item.input));
@@ -247,7 +247,7 @@ export async function classifyBatch(
     }
   });
   await noteProviderSuccess(access);
-  logEvent('ai_batch_completed', {batchId, userId, itemCount: claimed.length, decided: mapped.decided.size, undecided: mapped.undecided.length, ignored: mapped.ignored});
+  logEvent('ai_batch_completed', { batchId, userId, itemCount: claimed.length, decided: mapped.decided.size, undecided: mapped.undecided.length, ignored: mapped.ignored });
   return { ...mapped, batchId, byEmail };
 }
 
@@ -294,7 +294,7 @@ async function failBatch(
     if (kind === 'OUTCOME_UNKNOWN') await noteProviderFailure(tx, ctx.access, 'OUTCOME_UNKNOWN', ctx.now);
     return null;
   });
-  logWarn('ai_batch_failed', {batchId: ctx.batchId, userId: ctx.userId, itemCount: ctx.claimed.length, kind: kind ?? 'OutcomeUnknown'});
+  logWarn('ai_batch_failed', { batchId: ctx.batchId, userId: ctx.userId, itemCount: ctx.claimed.length, kind: kind ?? 'OutcomeUnknown' });
   return refusal ? new AIAccessError(refusal, resumesAt) : thrown;
 }
 
@@ -373,7 +373,7 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
           const outcome = result.byEmail.get(candidate.emailId);
           if (outcome === 'RELEVANT' || outcome === 'UNCERTAIN') {
             const id = await enqueueEmailProcessingJob(userId, candidate.emailId);
-            if (!id) logEvent('triage_email_queue_suppressed', {emailId: candidate.emailId});
+            if (!id) logEvent('triage_email_queue_suppressed', { emailId: candidate.emailId });
           }
         }
       } catch (err) {
@@ -389,6 +389,6 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
       }
     }
   }
-  logEvent('triage_run', {userId, batches, emails: processed, stoppedBy});
+  logEvent('triage_run', { userId, batches, emails: processed, stoppedBy });
   return { batches, emails: processed, stoppedBy };
 }

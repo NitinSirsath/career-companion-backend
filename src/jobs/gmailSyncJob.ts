@@ -1,4 +1,3 @@
-import { logDebug, logError } from '../utils/log';
 import { JobWithMetadata } from 'pg-boss';
 import { SyncQueueError, SyncSupersededError } from '../services/gmailSyncErrors';
 import { randomUUID } from 'crypto';
@@ -10,6 +9,7 @@ import {
   SyncInProgressError,
   syncLease,
 } from '../services/gmailSync';
+import { logDebug, logError } from '../utils/log';
 
 export const GMAIL_SYNC_EXPIRE_SECONDS = 300;
 
@@ -55,10 +55,12 @@ export async function requestGmailSync(userId: string, trigger: 'manual' | 'sche
         },
       })
       .catch(() => undefined);
-    logError('gmail_sync_failed', {category: 'QUEUE_UNAVAILABLE',
-        trigger,
-        userId,
-        requestId: claim,});
+    logError('gmail_sync_failed', {
+      category: 'QUEUE_UNAVAILABLE',
+      trigger,
+      userId,
+      requestId: claim,
+    });
     throw new SyncQueueError();
   }
 }
@@ -87,5 +89,5 @@ export async function handleGmailSyncJobs(jobs: JobWithMetadata<GmailSyncJobData
 export async function startGmailSyncWorker() {
   const queue = await getQueue();
   await queue.work('gmail-sync-job', { includeMetadata: true, batchSize: 1 }, handleGmailSyncJobs);
-  logDebug('worker_registered', {queue: 'gmail-sync-job'});
+  logDebug('worker_registered', { queue: 'gmail-sync-job' });
 }

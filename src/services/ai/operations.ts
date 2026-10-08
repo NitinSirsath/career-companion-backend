@@ -1,4 +1,3 @@
-import { logDebug, logEvent, logWarn } from '../../utils/log';
 import { AIOperationStatus, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import type { AIAccess } from './access';
@@ -13,6 +12,7 @@ import {
   TerminalAIError,
 } from './errors';
 import { noteProviderFailure, noteProviderSuccess, recordTokens, reserveUserCall } from './usage';
+import { logDebug, logEvent, logWarn } from '../../utils/log';
 
 export const MAX_ATTEMPTS = 3;
 
@@ -59,7 +59,7 @@ export async function runOperation<T>(request: OperationRequest<T>): Promise<Ope
     where: { emailId_operation_version: key },
   });
   if (existing.status === 'COMPLETED') {
-    logDebug('ai_result_reused', {emailId, operation, version});
+    logDebug('ai_result_reused', { emailId, operation, version });
     return {
       data: contract.schema.parse(existing.result),
       provider: existing.provider,
@@ -70,11 +70,13 @@ export async function runOperation<T>(request: OperationRequest<T>): Promise<Ope
     ['PROCESSING', 'UNKNOWN', 'FAILED'].includes(existing.status) ||
     existing.attempts >= MAX_ATTEMPTS + existing.approvedRetries
   ) {
-    logWarn('ai_call_blocked', {emailId,
-        operation,
-        version,
-        status: existing.status,
-        attempts: existing.attempts,});
+    logWarn('ai_call_blocked', {
+      emailId,
+      operation,
+      version,
+      status: existing.status,
+      attempts: existing.attempts,
+    });
     throw new TerminalAIError(`AI operation requires review: ${existing.status}`);
   }
 
@@ -103,17 +105,19 @@ export async function runOperation<T>(request: OperationRequest<T>): Promise<Ope
     await reserveUserCall(tx, userId, now);
   }).catch((err: unknown) => {
     if (err instanceof AIAccessError)
-      logEvent('ai_call_deferred', {userId, emailId, operation, version, reason: err.reason});
+      logEvent('ai_call_deferred', { userId, emailId, operation, version, reason: err.reason });
     if (err instanceof AIProviderError) err.operationStage = operation;
     throw err;
   });
-  logEvent('ai_call_started', {userId,
-      emailId,
-      operation,
-      version,
-      attempt: existing.attempts + 1,
-      provider: access.provider,
-      model: model.id,});
+  logEvent('ai_call_started', {
+    userId,
+    emailId,
+    operation,
+    version,
+    attempt: existing.attempts + 1,
+    provider: access.provider,
+    model: model.id,
+  });
 
   let result: AIResult<T>;
   let data: T;
@@ -136,15 +140,17 @@ export async function runOperation<T>(request: OperationRequest<T>): Promise<Ope
     },
   });
   await noteProviderSuccess(access);
-  logEvent('ai_call_completed', {userId,
-      emailId,
-      operation,
-      version,
-      provider: access.provider,
-      model: model.id,
-      inputTokens: result.usage.inputTokens,
-      outputTokens: result.usage.outputTokens,
-      durationMs: Date.now() - now.getTime(),});
+  logEvent('ai_call_completed', {
+    userId,
+    emailId,
+    operation,
+    version,
+    provider: access.provider,
+    model: model.id,
+    inputTokens: result.usage.inputTokens,
+    outputTokens: result.usage.outputTokens,
+    durationMs: Date.now() - now.getTime(),
+  });
   return { data, provider: access.provider, model: model.id };
 }
 
@@ -215,12 +221,14 @@ async function recordFailure(
     }
   });
   if (thrown instanceof AIProviderError) thrown.operationStage = operation;
-  logWarn('ai_call_failed', {userId: access.userId,
-      operation,
-      provider: access.provider,
-      model: modelId,
-      kind: kind ?? 'UNCLASSIFIED',
-      status: failure?.status,
-      providerCode: failure?.providerCode,});
+  logWarn('ai_call_failed', {
+    userId: access.userId,
+    operation,
+    provider: access.provider,
+    model: modelId,
+    kind: kind ?? 'UNCLASSIFIED',
+    status: failure?.status,
+    providerCode: failure?.providerCode,
+  });
   return thrown;
 }

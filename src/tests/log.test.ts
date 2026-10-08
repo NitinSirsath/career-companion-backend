@@ -4,83 +4,109 @@ import { logDebug, logError, logEvent, logWarn, runWithRequestId } from '../util
 const originalLevel = process.env.LOG_LEVEL;
 const originalEnv = process.env.NODE_ENV;
 
+function restore(name: string, value: string | undefined) {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
 afterEach(() => {
-  process.env.LOG_LEVEL = originalLevel;
-  process.env.NODE_ENV = originalEnv;
+  restore('LOG_LEVEL', originalLevel);
+  restore('NODE_ENV', originalEnv);
   vi.restoreAllMocks();
 });
 
-function line(spy: ReturnType<typeof vi.spyOn>) {
-  return String(spy.mock.calls[0]?.[0]);
-}
+const capture = (method: 'log' | 'warn' | 'error' | 'debug') =>
+  vi.spyOn(console, method).mockImplementation(() => {});
+const firstLine = (spy: ReturnType<typeof capture>) => String(spy.mock.calls[0]?.[0]);
 
 describe('logger', () => {
-  it('filters events below LOG_LEVEL', () => {
-    process.env.NODE_ENV = 'test';
+  it('writes each level to its console method and skips levels below LOG_LEVEL', () => {
     process.env.LOG_LEVEL = 'warn';
-    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const debug = capture('debug');
+    const info = capture('log');
+    const warn = capture('warn');
+    const error = capture('error');
     logDebug('debug_event');
     logEvent('info_event');
     logWarn('warn_event');
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(line(spy)).toContain('"event":"warn_event"');
+    logError('error_event');
+    expect(debug).not.toHaveBeenCalled();
+    expect(info).not.toHaveBeenCalled();
+    expect(JSON.parse(firstLine(warn))).toMatchObject({ event: 'warn_event', level: 'warn' });
+    expect(JSON.parse(firstLine(error))).toMatchObject({ event: 'error_event', level: 'error' });
   });
 
-  it('redacts sensitive top-level fields', () => {
-    process.env.NODE_ENV = 'test';
-    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  it('prints debug lines only with LOG_LEVEL=debug', () => {
+    process.env.LOG_LEVEL = 'debug';
+    const debug = capture('debug');
+    logDebug('debug_event', { count: 1 });
+    expect(JSON.parse(firstLine(debug))).toEqual({
+      event: 'debug_event',
+      level: 'debug',
+      count: 1,
+    });
+  });
+
+  it('rejects an unknown LOG_LEVEL', () => {
+    process.env.LOG_LEVEL = 'verbose';
+    expect(() => logEvent('any')).toThrow('LOG_LEVEL must be debug, info, warn or error');
+  });
+
+  it('redacts secret and email-content fields', () => {
+    const spy = capture('log');
     logEvent('redaction_test', {
       apiKey: 'secret-api-key',
       token: 'secret-token',
       body: 'email body',
+      subject: 'email subject',
       userId: 'safe-user-id',
     });
-    const output = line(spy);
-    expect(output).not.toContain('secret-api-key');
-    expect(output).not.toContain('secret-token');
-    expect(output).not.toContain('email body');
-    expect(output).toContain('[redacted]');
-    expect(output).toContain('safe-user-id');
-  });
-
-  it('writes the JSON event shape in tests', () => {
-    process.env.NODE_ENV = 'test';
-    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    logEvent('shape_test', { count: 2 });
-    expect(JSON.parse(line(spy))).toEqual({ level: 'info', event: 'shape_test', count: 2 });
-  });
-
-  it('adds message and stack outside production', () => {
-    process.env.NODE_ENV = 'test';
-    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const error = Object.assign(new Error('boom'), { code: 'SOMETHING_BROKE' });
-    logError('failure', undefined, error);
-    const output = JSON.parse(line(spy));
-    expect(output.errorName).toBe('Error');
-    expect(output.code).toBe('SOMETHING_BROKE');
-    expect(output.message).toBe('boom');
-    expect(output.stack).toContain('log.test.ts');
-    expect(output.where).toContain('log.test.ts');
-  });
-
-  it('keeps production errors free of messages and stacks', () => {
-    process.env.NODE_ENV = 'production';
-    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const error = Object.assign(new Error('provider secret must not escape'), { code: 'PROVIDER_FAIL' });
-    logError('failure', undefined, error);
-    const output = JSON.parse(line(spy));
-    expect(output.errorName).toBe('Error');
-    expect(output.code).toBe('PROVIDER_FAIL');
-    expect(output.where).toBeDefined();
-    expect(output.message).toBeUndefined();
-    expect(output.stack).toBeUndefined();
-    expect(line(spy)).not.toContain('provider secret must not escape');
+    expect(JSON.parse(firstLine(spy))).toEqual({
+      event: 'redaction_test',
+      level: 'info',
+      apiKey: '[redacted]',
+      token: '[redacted]',
+      body: '[redacted]',
+      subject: '[redacted]',
+      userId: 'safe-user-id',
+    });
   });
 
   it('adds the active request ID', () => {
-    process.env.NODE_ENV = 'test';
-    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const spy = capture('log');
     runWithRequestId('request-123', () => logEvent('request_event'));
-    expect(JSON.parse(line(spy)).requestId).toBe('request-123');
+    logEvent('outside_request');
+    expect(JSON.parse(String(spy.mock.calls[0][0])).requestId).toBe('request-123');
+    expect(JSON.parse(String(spy.mock.calls[1][0]))).not.toHaveProperty('requestId');
+  });
+
+  it('says what broke and where, without the message, in tests and production', () => {
+    for (const env of ['test', 'production']) {
+      process.env.NODE_ENV = env;
+      const spy = capture('error');
+      const error = Object.assign(new Error('postgresql://secret'), { code: 'ECONNREFUSED' });
+      logError('failure', { jobId: 'job-1' }, error);
+      const line = firstLine(spy);
+      expect(JSON.parse(line)).toMatchObject({
+        event: 'failure',
+        jobId: 'job-1',
+        category: 'Error',
+        code: 'ECONNREFUSED',
+        where: expect.stringMatching(/^src\/tests\/log\.test\.ts:\d+$/),
+      });
+      expect(line).not.toContain('secret');
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('prints a readable line with the message and stack on a developer machine', () => {
+    process.env.NODE_ENV = 'development';
+    const spy = capture('error');
+    logError('request_failed', { method: 'PUT', status: 500 }, new Error('key is missing'));
+    const [line, ...stack] = firstLine(spy).split('\n');
+    expect(line).toMatch(
+      /^\d\d:\d\d:\d\d ERROR request_failed method=PUT status=500 category=Error where=src\/tests\/log\.test\.ts:\d+ message=key is missing$/,
+    );
+    expect(stack[0]).toContain('log.test.ts');
   });
 });

@@ -1,4 +1,3 @@
-import { logDebug, logEvent, logError, logWarn } from '../../utils/log';
 /**
  * AI access resolution (architecture §6): the single place that answers "can this user's AI work
  * run now, and with what?". It reads by the userId of the job or session only; keys never travel
@@ -18,6 +17,7 @@ import { CredentialUnreadableError, openApiKey } from './credentials';
 import { AIAccessError, AccessReason } from './errors';
 import { createProviderClient } from './providers';
 import { nextUtcMidnight, userDailyCallLimit, utcDay } from './usage';
+import { logError } from '../../utils/log';
 
 export type AccessState = 'NOT_SET_UP' | 'READY' | 'NEEDS_ATTENTION' | 'LIMITED';
 
@@ -164,7 +164,7 @@ export async function resolveAIAccess(userId: string, now = new Date()): Promise
   } catch (err) {
     if (!(err instanceof CredentialUnreadableError)) throw err;
     // An operator problem (lost or wrong encryption key) the user can repair by re-entering the key.
-    logError('ai_credential_unreadable', {userId});
+    logError('ai_credential_unreadable', { userId });
     await prisma.aIConfiguration.updateMany({
       where: { userId, revision: config.revision },
       data: { accessIssue: 'KEY_UNREADABLE', accessIssueModel: null },

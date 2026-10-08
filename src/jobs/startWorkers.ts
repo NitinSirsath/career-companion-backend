@@ -1,4 +1,3 @@
-import { logEvent, logError } from '../utils/log';
 import { startGmailScheduledSync } from './gmailScheduledSyncJob';
 import { GMAIL_SCHEDULE_QUEUE } from '../services/gmailSchedule';
 import { startGmailSyncWorker } from './gmailSyncJob';
@@ -7,6 +6,7 @@ import { startNotificationWorker } from './notificationJob';
 import { startRelevanceTriageWorker } from './relevanceTriageJob';
 import { stopQueue, QUEUE_NAMES } from '../services/queue';
 import { errorCategory } from '../utils/errorCategory';
+import { logEvent, logError } from '../utils/log';
 
 export interface WorkerRegistration {
   queue: string;
@@ -76,20 +76,24 @@ export async function startWorkers(
           maxAttempts,
           retryInMs,
           ...errorCategory(result.reason),
-        }, result.reason);
+        });
       }
     });
     if (!failed.length) {
-      logEvent('workers_ready', {queues: workers.map((w) => w.queue),
-          attempts: attempt,});
+      logEvent('workers_ready', {
+        queues: workers.map((w) => w.queue),
+        attempts: attempt,
+      });
       return true;
     }
     pending = failed;
     if (retryInMs !== null) await sleep(retryInMs);
   }
   if (isShuttingDown()) return false;
-  logError('worker_start_gave_up', {queues: pending.map((w) => w.queue),
-      attempts: maxAttempts,});
+  logError('worker_start_gave_up', {
+    queues: pending.map((w) => w.queue),
+    attempts: maxAttempts,
+  });
   await stop().catch(() => undefined);
   if (!isShuttingDown()) onGiveUp();
   return false;

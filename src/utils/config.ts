@@ -34,7 +34,10 @@ export function validateRequiredSecrets(env: NodeJS.ProcessEnv) {
       );
     }
   }
-  if (env.GMAIL_TOKEN_ENCRYPTION_KEY!.toLowerCase() === env.AI_CREDENTIAL_ENCRYPTION_KEY!.toLowerCase()) {
+  if (
+    env.GMAIL_TOKEN_ENCRYPTION_KEY!.toLowerCase() ===
+    env.AI_CREDENTIAL_ENCRYPTION_KEY!.toLowerCase()
+  ) {
     throw new Error('AI_CREDENTIAL_ENCRYPTION_KEY must differ from GMAIL_TOKEN_ENCRYPTION_KEY');
   }
 }
