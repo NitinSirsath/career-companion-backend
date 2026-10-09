@@ -8,11 +8,7 @@ import {
   CreateApplicationRequestSchema,
   UpdateApplicationStatusRequestSchema,
 } from '../contracts';
-import {
-  ApplicationService,
-  ApplicationNotFoundError,
-  StatusConflictError,
-} from '../services/application';
+import { ApplicationService } from '../services/application';
 import { requireAuth } from '../middleware/auth';
 
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
@@ -129,10 +125,6 @@ router.patch('/:id/status', async (req: Request, res: Response, next: NextFuncti
     });
     return res.status(200).json(application);
   } catch (err) {
-    if (err instanceof ApplicationNotFoundError)
-      return res.status(404).json({ error: { code: err.code, message: err.message } });
-    if (err instanceof StatusConflictError)
-      return res.status(409).json({ error: { code: err.code, message: err.message } });
     next(err);
   }
 });
