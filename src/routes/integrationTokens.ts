@@ -49,7 +49,7 @@ router.get(
 
 router.delete(
   '/:id',
-  handle(200, (req) => revokeIntegrationToken(req.auth!.user.id, z.uuid().parse(req.params.id)),
+  handle(200, (req) => revokeIntegrationToken(req.auth!.user.id, z.uuid().parse(req.params.id))),
 );
 
 export const integrationTokenRouter = router;
