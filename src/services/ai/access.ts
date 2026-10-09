@@ -8,7 +8,6 @@ import { prisma } from '../../db/prisma';
 import {
   CatalogProvider,
   ModelSource,
-  catalogDay,
   getCatalogProvider,
   resolveModel,
 } from '../../contracts/aiCatalog';
@@ -54,7 +53,7 @@ export interface ConfigurationState {
   revision: number;
 }
 
-const NEEDS_ATTENTION: readonly AIAccessIssue[] = [
+export const NEEDS_ATTENTION_ISSUES: readonly AIAccessIssue[] = [
   'KEY_REJECTED',
   'ACCOUNT_OR_BILLING',
   'MODEL_UNAVAILABLE',
@@ -94,7 +93,7 @@ export function deriveAccess(
   if (limit === 0) return status('LIMITED', 'PAUSED');
   if (!config) return status('NOT_SET_UP', 'NOT_SET_UP');
   if (!offeredProvider(config.provider)) return status('NEEDS_ATTENTION', 'PROVIDER_UNSUPPORTED');
-  if (config.accessIssue && NEEDS_ATTENTION.includes(config.accessIssue))
+  if (config.accessIssue && NEEDS_ATTENTION_ISSUES.includes(config.accessIssue))
     return status('NEEDS_ATTENTION', config.accessIssue, null, config.accessIssueModel);
   if (config.cooldownUntil && config.cooldownUntil > now)
     return status(
@@ -115,7 +114,8 @@ export async function callsToday(userId: string, now: Date): Promise<number> {
 }
 
 /** Access state without decrypting anything. Used by the status API and the waiting re-offer. */
-export async function getAccessState(userId: string, now = new Date()): Promise<AccessStatus> {
+export async function getAccessState(userId: string): Promise<AccessStatus> {
+  const now = new Date();
   const config = await prisma.aIConfiguration.findUnique({
     where: { userId },
     select: CONFIGURATION_STATE,
@@ -126,11 +126,9 @@ export async function getAccessState(userId: string, now = new Date()): Promise<
 export function modelsFor(
   provider: CatalogProvider,
   config: Pick<ConfigurationState, 'fastModel' | 'detailedModel'>,
-  now: Date,
 ): { models: BoundModels; sources: Record<keyof BoundModels, ModelSource> } {
-  const day = catalogDay(now);
-  const fast = resolveModel(provider, 'fast', config.fastModel, day);
-  const detailed = resolveModel(provider, 'detailed', config.detailedModel, day);
+  const fast = resolveModel(provider, 'fast', config.fastModel);
+  const detailed = resolveModel(provider, 'detailed', config.detailedModel);
   return {
     models: { fast: fast.model, detailed: detailed.model },
     sources: { fast: fast.source, detailed: detailed.source },
@@ -149,7 +147,8 @@ export interface AIAccess extends AICapabilities {
  * Resolves the user's own AI access for one job (decrypting the key in memory) or throws
  * AIAccessError with the reason. Runs before any ledger claim, so waiting uses no attempt or call.
  */
-export async function resolveAIAccess(userId: string, now = new Date()): Promise<AIAccess> {
+export async function resolveAIAccess(userId: string): Promise<AIAccess> {
+  const now = new Date();
   const config = await prisma.aIConfiguration.findUnique({
     where: { userId },
     select: { ...CONFIGURATION_STATE, encryptedApiKey: true },
@@ -171,7 +170,7 @@ export async function resolveAIAccess(userId: string, now = new Date()): Promise
     });
     throw new AIAccessError('KEY_UNREADABLE');
   }
-  const { models } = modelsFor(provider, config, now);
+  const { models } = modelsFor(provider, config);
   return {
     userId,
     provider: provider.id,
