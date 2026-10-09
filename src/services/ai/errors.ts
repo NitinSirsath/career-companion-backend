@@ -60,7 +60,11 @@ export type FailureKind =
   | 'INVALID_OUTPUT'
   | 'INVALID_REQUEST';
 
-export const ACCESS_FAILURE_KINDS = ['KEY_REJECTED', 'ACCOUNT_OR_BILLING', 'MODEL_UNAVAILABLE'] as const;
+export const ACCESS_FAILURE_KINDS = [
+  'KEY_REJECTED',
+  'ACCOUNT_OR_BILLING',
+  'MODEL_UNAVAILABLE',
+] as const;
 
 const FAILURE_MESSAGES: Record<FailureKind, string> = {
   KEY_REJECTED: 'AI provider rejected the API key',
@@ -100,7 +104,9 @@ export class ProviderFailure extends AIProviderError {
     this.name = 'ProviderFailure';
     this.status = details.status;
     this.providerCode =
-      details.providerCode && PROVIDER_CODE.test(details.providerCode) ? details.providerCode : undefined;
+      details.providerCode && PROVIDER_CODE.test(details.providerCode)
+        ? details.providerCode
+        : undefined;
     this.retryAfterMs = details.retryAfterMs;
     this.usage = details.usage;
   }

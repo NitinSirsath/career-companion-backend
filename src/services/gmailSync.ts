@@ -210,7 +210,8 @@ export class GmailSyncService {
               if (existing) {
                 if (existing.processingState === 'PENDING') {
                   await heartbeat();
-                  if (triageBatchEnabled()) await enqueueRelevanceTriage(userId); else await enqueueEmailProcessingJob(userId, existing.id);
+                  if (triageBatchEnabled()) await enqueueRelevanceTriage(userId);
+                  else await enqueueEmailProcessingJob(userId, existing.id);
                 }
                 messagesSkipped++;
                 continue;
@@ -254,7 +255,8 @@ export class GmailSyncService {
               });
               if (record.processingState === 'PENDING') {
                 await heartbeat();
-                if (triageBatchEnabled()) await enqueueRelevanceTriage(userId); else await enqueueEmailProcessingJob(userId, record.id);
+                if (triageBatchEnabled()) await enqueueRelevanceTriage(userId);
+                else await enqueueEmailProcessingJob(userId, record.id);
               }
               messagesIngested++;
             }

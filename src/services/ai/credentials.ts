@@ -37,7 +37,8 @@ export function sealApiKey(userId: string, apiKey: string): string {
 export function openApiKey(userId: string, sealed: string): string {
   const key = loadAICredentialKey();
   const [format, iv, ciphertext, extra] = sealed.split(':');
-  if (format !== FORMAT || !iv || !ciphertext || extra !== undefined) throw new CredentialUnreadableError();
+  if (format !== FORMAT || !iv || !ciphertext || extra !== undefined)
+    throw new CredentialUnreadableError();
   try {
     return decrypt(ciphertext, iv, key, aad(userId));
   } catch {

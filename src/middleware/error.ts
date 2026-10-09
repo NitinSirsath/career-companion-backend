@@ -21,7 +21,16 @@ export function errorHandler(
     err,
   );
 
-  if (err instanceof DomainError) return res.status(err.status).json({ error: { code: err.code, message: err.code === 'NOT_FOUND' ? 'Not found' : 'This change could not be saved. Refresh and review the current state.' } });
+  if (err instanceof DomainError)
+    return res.status(err.status).json({
+      error: {
+        code: err.code,
+        message:
+          err.code === 'NOT_FOUND'
+            ? 'Not found'
+            : 'This change could not be saved. Refresh and review the current state.',
+      },
+    });
 
   if (err instanceof ZodError) {
     return res.status(400).json({

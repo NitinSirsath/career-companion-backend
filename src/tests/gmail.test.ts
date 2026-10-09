@@ -455,7 +455,9 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ success: true, syncLookbackDays: 14 });
 
-      const connection = await prisma.gmailConnection.findUnique({ where: { userId: testUser.id } });
+      const connection = await prisma.gmailConnection.findUnique({
+        where: { userId: testUser.id },
+      });
       expect(connection?.syncLookbackDays).toBe(14);
     });
   });

@@ -113,7 +113,11 @@ export const AISampleTestResponseSchema = z.object({
     requestedAction: z.string().nullable(),
     actionDeadline: z.string().nullable(),
   }),
-  usage: z.object({ calls: z.number().int(), inputTokens: z.number().int(), outputTokens: z.number().int() }),
+  usage: z.object({
+    calls: z.number().int(),
+    inputTokens: z.number().int(),
+    outputTokens: z.number().int(),
+  }),
 });
 export type AISampleTestResponse = z.infer<typeof AISampleTestResponseSchema>;
 

@@ -67,12 +67,15 @@ async function main() {
     : undefined;
 
   const triageMode = option('triage') ?? 'single';
-  if (!['single', 'batch'].includes(triageMode)) throw new Error('--triage must be single or batch');
+  if (!['single', 'batch'].includes(triageMode))
+    throw new Error('--triage must be single or batch');
   const batchSize = Number(option('batch-size') ?? 20);
-  if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 25) throw new Error('--batch-size must be 1-25');
+  if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 25)
+    throw new Error('--batch-size must be 1-25');
 
   const extractionVersion = option('extraction-version') ?? 'extraction/v2';
-  if (!['extraction/v2', 'extraction/v3'].includes(extractionVersion)) throw new Error('Unsupported extraction version');
+  if (!['extraction/v2', 'extraction/v3'].includes(extractionVersion))
+    throw new Error('Unsupported extraction version');
   const cases = [...loadDataset(), ...(extractionVersion === 'extraction/v3' ? temporalCases : [])];
   const models = { fast: catalogModel('fast', fast), detailed: catalogModel('detailed', detailed) };
   const ai = bindCapabilities(createProviderClient(provider, apiKey), models);
@@ -88,17 +91,22 @@ async function main() {
       }
       for (let offset = 0; offset < ordered.length; offset += batchSize) {
         const group = ordered.slice(offset, offset + batchSize);
-        const classified = await timed(() => ai.classifier.classifyRelevanceBatch({
-          items: group.map((c, index) => ({
-            key: `e${index + 1}`,
-            sender: c.input.sender.slice(0, LIMITS.sender),
-            subject: c.input.subject.slice(0, LIMITS.subject),
-            labels: c.input.labels.slice(0, LIMITS.labels),
-            snippet: snippetOf(c).slice(0, LIMITS.snippet),
-          })),
-        }));
+        const classified = await timed(() =>
+          ai.classifier.classifyRelevanceBatch({
+            items: group.map((c, index) => ({
+              key: `e${index + 1}`,
+              sender: c.input.sender.slice(0, LIMITS.sender),
+              subject: c.input.subject.slice(0, LIMITS.subject),
+              labels: c.input.labels.slice(0, LIMITS.labels),
+              snippet: snippetOf(c).slice(0, LIMITS.snippet),
+            })),
+          }),
+        );
         const mapped = classified.value
-          ? mapBatchResults(group.map((_c, index) => `e${index + 1}`), classified.value.data.results)
+          ? mapBatchResults(
+              group.map((_c, index) => `e${index + 1}`),
+              classified.value.data.results,
+            )
           : null;
         for (let index = 0; index < group.length; index++) {
           const c = group[index];
@@ -127,12 +135,14 @@ async function main() {
   } else {
     evaluation: for (let run = 1; run <= runs; run++) {
       for (const c of cases) {
-        const classified = await timed(() => ai.classifier.classifyRelevance({
-          sender: c.input.sender.slice(0, LIMITS.sender),
-          subject: c.input.subject.slice(0, LIMITS.subject),
-          labels: c.input.labels.slice(0, LIMITS.labels),
-          snippet: snippetOf(c).slice(0, LIMITS.snippet),
-        }));
+        const classified = await timed(() =>
+          ai.classifier.classifyRelevance({
+            sender: c.input.sender.slice(0, LIMITS.sender),
+            subject: c.input.subject.slice(0, LIMITS.subject),
+            labels: c.input.labels.slice(0, LIMITS.labels),
+            snippet: snippetOf(c).slice(0, LIMITS.snippet),
+          }),
+        );
         const result: CaseRun = {
           id: c.id,
           run,
@@ -150,12 +160,17 @@ async function main() {
             confidence: classified.value?.data.confidence,
           },
         };
-        if (isRefused(result.classification)) { results.push(result); break evaluation; }
+        if (isRefused(result.classification)) {
+          results.push(result);
+          break evaluation;
+        }
         if (c.expect.relevance !== 'IRRELEVANT') {
-          const extracted = await timed(() => ai.analyzer.extractJobData(
-            c.input.body.slice(0, EXTRACTION_BODY_LIMIT),
-            { version: extractionVersion, receivedAt: c.input.receivedAt ?? null },
-          ));
+          const extracted = await timed(() =>
+            ai.analyzer.extractJobData(c.input.body.slice(0, EXTRACTION_BODY_LIMIT), {
+              version: extractionVersion,
+              receivedAt: c.input.receivedAt ?? null,
+            }),
+          );
           result.extraction = {
             valid: !!extracted.value,
             error: extracted.error,
@@ -180,7 +195,12 @@ async function main() {
   const failed = failures(metrics, baseline);
   const temporal = extractionVersion === 'extraction/v3' ? scoreTemporal(results, runs) : null;
   const baseOutcome = evaluationOutcome(metrics, baseline);
-  const outcome = baseOutcome === 'INCONCLUSIVE' || temporal?.outcome === 'INCONCLUSIVE' ? 'INCONCLUSIVE' : baseOutcome === 'FAIL' || temporal?.outcome === 'FAIL' ? 'FAIL' : 'PASS';
+  const outcome =
+    baseOutcome === 'INCONCLUSIVE' || temporal?.outcome === 'INCONCLUSIVE'
+      ? 'INCONCLUSIVE'
+      : baseOutcome === 'FAIL' || temporal?.outcome === 'FAIL'
+        ? 'FAIL'
+        : 'PASS';
   const createdAt = new Date().toISOString();
   const report = {
     createdAt,

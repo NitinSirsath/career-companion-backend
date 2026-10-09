@@ -4,30 +4,18 @@
     "input": {
       "sender": "Marco Bianchi <marco@talentbridge.example.org>",
       "subject": "Following up",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "Hi Alex, following up on my note last week about the Staff Backend Engineer role at Woodgrove Payments. Is this still of interest?\nMarco"
     },
     "expect": {
       "relevance": "RELEVANT",
-      "category": [
-        "FOLLOW_UP",
-        "RECRUITER"
-      ],
+      "category": ["FOLLOW_UP", "RECRUITER"],
       "fields": {
         "jobTitle": {
-          "contains": [
-            "backend engineer"
-          ]
+          "contains": ["backend engineer"]
         }
       },
-      "mustBeNull": [
-        "offerInfo",
-        "rejectionInfo",
-        "interviewDate"
-      ]
+      "mustBeNull": ["offerInfo", "rejectionInfo", "interviewDate"]
     },
     "group": "follow-up"
   },
@@ -36,22 +24,15 @@
     "input": {
       "sender": "Relecloud People Team <people@relecloud.example.com>",
       "subject": "Documents needed before your start date",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "Hi Alex,\n\nTo complete your onboarding, please upload two professional references and a copy of your work permit by November 20, 2026.\n\nThank you,\nRelecloud People Team"
     },
     "expect": {
       "relevance": "RELEVANT",
-      "category": [
-        "FOLLOW_UP"
-      ],
+      "category": ["FOLLOW_UP"],
       "fields": {
         "companyName": {
-          "contains": [
-            "relecloud"
-          ]
+          "contains": ["relecloud"]
         },
         "actionRequired": {
           "equals": true
@@ -60,9 +41,7 @@
           "date": "2026-11-20"
         }
       },
-      "mustBeNull": [
-        "rejectionInfo"
-      ]
+      "mustBeNull": ["rejectionInfo"]
     },
     "group": "follow-up"
   },
@@ -71,22 +50,13 @@
     "input": {
       "sender": "Daniel Okafor <daniel.okafor@northwind-robotics.example.com>",
       "subject": "Re: Thank you",
-      "labels": [
-        "INBOX",
-        "CATEGORY_PERSONAL"
-      ],
+      "labels": ["INBOX", "CATEGORY_PERSONAL"],
       "body": "Thanks for the kind note, Alex. It was great talking with you. We'll share an update on next steps by the end of next week.\nDaniel"
     },
     "expect": {
       "relevance": "RELEVANT",
-      "category": [
-        "FOLLOW_UP",
-        "INTERVIEW"
-      ],
-      "mustBeNull": [
-        "offerInfo",
-        "rejectionInfo"
-      ]
+      "category": ["FOLLOW_UP", "INTERVIEW"],
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
     },
     "group": "follow-up"
   }

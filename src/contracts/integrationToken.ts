@@ -55,7 +55,8 @@ export type CreateIntegrationTokenResponse = z.infer<typeof CreateIntegrationTok
 
 // ─── GET /api/integration-tokens ────────────────────────────────────────────
 
-export const ListIntegrationTokensResponseSchema = createPaginatedResponseSchema(IntegrationTokenSchema);
+export const ListIntegrationTokensResponseSchema =
+  createPaginatedResponseSchema(IntegrationTokenSchema);
 export type ListIntegrationTokensResponse = z.infer<typeof ListIntegrationTokensResponseSchema>;
 
 // ─── DELETE /api/integration-tokens/:id (revoke) ───────────────────────────

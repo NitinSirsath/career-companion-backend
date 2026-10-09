@@ -397,8 +397,13 @@ describe('request ownership fencing', () => {
   it('stops a cancelled delivery before inserting the just-fetched message', async () => {
     const original = await mocks.get.getMockImplementation()!({ id: 'message-a' });
     const controller = new AbortController();
-    mocks.get.mockImplementationOnce(async () => { controller.abort(); return original; });
-    await expect(GmailSyncService.syncUser(userId, undefined, { signal: controller.signal })).rejects.toThrow('cancelled');
+    mocks.get.mockImplementationOnce(async () => {
+      controller.abort();
+      return original;
+    });
+    await expect(
+      GmailSyncService.syncUser(userId, undefined, { signal: controller.signal }),
+    ).rejects.toThrow('cancelled');
     expect(await prisma.email.count({ where: { userId } })).toBe(0);
   });
 

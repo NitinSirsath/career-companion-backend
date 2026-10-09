@@ -4,7 +4,10 @@ import crypto from 'crypto';
 import request from 'supertest';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
-import { ListIntegrationTokensResponseSchema, CreateIntegrationTokenResponseSchema } from '../contracts';
+import {
+  ListIntegrationTokensResponseSchema,
+  CreateIntegrationTokenResponseSchema,
+} from '../contracts';
 import { verifyIntegrationToken } from '../services/integrationTokens';
 
 const DOMAIN = '@mcp-tokens.test';
@@ -61,10 +64,16 @@ describe('POST /api/integration-tokens', () => {
       lastUsedAt: null,
       revokedAt: null,
     });
-    const days = (Date.parse(body.integrationToken.expiresAt) - Date.parse(body.integrationToken.createdAt)) / 86_400_000;
+    const days =
+      (Date.parse(body.integrationToken.expiresAt) - Date.parse(body.integrationToken.createdAt)) /
+      86_400_000;
     expect(days).toBe(90);
-    const row = await prisma.integrationToken.findUniqueOrThrow({ where: { id: body.integrationToken.id } });
-    expect(row.tokenHash).toBe(crypto.createHash('sha256').update(body.plaintextToken).digest('hex'));
+    const row = await prisma.integrationToken.findUniqueOrThrow({
+      where: { id: body.integrationToken.id },
+    });
+    expect(row.tokenHash).toBe(
+      crypto.createHash('sha256').update(body.plaintextToken).digest('hex'),
+    );
     expect(JSON.stringify(row)).not.toContain(body.plaintextToken);
     expect(JSON.stringify(row)).not.toContain(body.plaintextToken.slice(12));
   });
@@ -103,11 +112,17 @@ describe('POST /api/integration-tokens', () => {
     const sixth = await create(ALICE);
     expect(sixth.status).toBe(409);
     expect(sixth.body.error.code).toBe('TOKEN_LIMIT_REACHED');
-    const [first, second] = await prisma.integrationToken.findMany({ where: { userId: alice }, take: 2 });
+    const [first, second] = await prisma.integrationToken.findMany({
+      where: { userId: alice },
+      take: 2,
+    });
     await request(app).delete(`/api/integration-tokens/${first.id}`).set(as(ALICE)).expect(200);
     await prisma.integrationToken.update({
       where: { id: second.id },
-      data: { createdAt: new Date(Date.now() - 3 * 86_400_000), expiresAt: new Date(Date.now() - 1000) },
+      data: {
+        createdAt: new Date(Date.now() - 3 * 86_400_000),
+        expiresAt: new Date(Date.now() - 1000),
+      },
     });
     expect((await create(ALICE)).status).toBe(201);
     expect((await create(ALICE)).status).toBe(201);
@@ -137,7 +152,9 @@ describe('GET /api/integration-tokens', () => {
       where: { id: older.integrationToken.id },
       data: { createdAt: new Date(Date.now() - 60_000) },
     });
-    await request(app).delete(`/api/integration-tokens/${newer.integrationToken.id}`).set(as(ALICE));
+    await request(app)
+      .delete(`/api/integration-tokens/${newer.integrationToken.id}`)
+      .set(as(ALICE));
 
     const res = await request(app).get('/api/integration-tokens').set(as(ALICE));
     expect(res.status).toBe(200);
@@ -151,21 +168,38 @@ describe('GET /api/integration-tokens', () => {
     expect(text).not.toContain(older.plaintextToken);
     expect(text).not.toContain(newer.plaintextToken);
     expect(Object.keys(body.items[0]).sort()).toEqual(
-      ['createdAt', 'displayPrefix', 'expiresAt', 'id', 'lastUsedAt', 'name', 'revokedAt', 'scope', 'status'].sort(),
+      [
+        'createdAt',
+        'displayPrefix',
+        'expiresAt',
+        'id',
+        'lastUsedAt',
+        'name',
+        'revokedAt',
+        'scope',
+        'status',
+      ].sort(),
     );
   });
 
   it('paginates with the existing offset envelope and reports expired tokens', async () => {
     for (let i = 0; i < 3; i++) await create(ALICE, { name: `t${i}` });
-    const t = await prisma.integrationToken.findFirstOrThrow({ where: { userId: alice, name: 't0' } });
+    const t = await prisma.integrationToken.findFirstOrThrow({
+      where: { userId: alice, name: 't0' },
+    });
     await prisma.integrationToken.update({
       where: { id: t.id },
-      data: { createdAt: new Date(Date.now() - 2 * 86_400_000), expiresAt: new Date(Date.now() - 1000) },
+      data: {
+        createdAt: new Date(Date.now() - 2 * 86_400_000),
+        expiresAt: new Date(Date.now() - 1000),
+      },
     });
     const page = await request(app).get('/api/integration-tokens?limit=2').set(as(ALICE));
     expect(page.body.metadata).toEqual({ limit: 2, offset: 0, nextOffset: 2 });
     const rest = await request(app).get('/api/integration-tokens?limit=2&offset=2').set(as(ALICE));
-    expect(rest.body.items.map((x: { name: string; status: string }) => [x.name, x.status])).toEqual([['t0', 'expired']]);
+    expect(
+      rest.body.items.map((x: { name: string; status: string }) => [x.name, x.status]),
+    ).toEqual([['t0', 'expired']]);
     expect(rest.body.metadata.nextOffset).toBeNull();
   });
 });
@@ -174,11 +208,15 @@ describe('DELETE /api/integration-tokens/:id', () => {
   it('revokes immediately and keeps the row; a second revoke returns it unchanged', async () => {
     const { integrationToken, plaintextToken } = (await create(ALICE)).body;
     expect(await verifyIntegrationToken(plaintextToken)).not.toBeNull();
-    const first = await request(app).delete(`/api/integration-tokens/${integrationToken.id}`).set(as(ALICE));
+    const first = await request(app)
+      .delete(`/api/integration-tokens/${integrationToken.id}`)
+      .set(as(ALICE));
     expect(first.status).toBe(200);
     expect(first.body.status).toBe('revoked');
     expect(await verifyIntegrationToken(plaintextToken)).toBeNull();
-    const second = await request(app).delete(`/api/integration-tokens/${integrationToken.id}`).set(as(ALICE));
+    const second = await request(app)
+      .delete(`/api/integration-tokens/${integrationToken.id}`)
+      .set(as(ALICE));
     expect(second.status).toBe(200);
     expect(second.body.revokedAt).toBe(first.body.revokedAt);
     expect(await prisma.integrationToken.count({ where: { id: integrationToken.id } })).toBe(1);
@@ -186,11 +224,15 @@ describe('DELETE /api/integration-tokens/:id', () => {
 
   it('returns 404 for unknown and foreign tokens, without revoking the foreign one', async () => {
     const bobs = (await create(BOB)).body;
-    const foreign = await request(app).delete(`/api/integration-tokens/${bobs.integrationToken.id}`).set(as(ALICE));
+    const foreign = await request(app)
+      .delete(`/api/integration-tokens/${bobs.integrationToken.id}`)
+      .set(as(ALICE));
     expect(foreign.status).toBe(404);
     expect(foreign.body.error.code).toBe('NOT_FOUND');
     expect(await verifyIntegrationToken(bobs.plaintextToken)).not.toBeNull();
-    const unknown = await request(app).delete(`/api/integration-tokens/${crypto.randomUUID()}`).set(as(ALICE));
+    const unknown = await request(app)
+      .delete(`/api/integration-tokens/${crypto.randomUUID()}`)
+      .set(as(ALICE));
     expect(unknown.status).toBe(404);
   });
 });
@@ -205,13 +247,22 @@ describe('verifyIntegrationToken', () => {
       scope: 'submissions:write',
       expiresAt: new Date(integrationToken.expiresAt),
     });
-    const row = await prisma.integrationToken.findUniqueOrThrow({ where: { id: integrationToken.id } });
+    const row = await prisma.integrationToken.findUniqueOrThrow({
+      where: { id: integrationToken.id },
+    });
     expect(row.lastUsedAt).not.toBeNull();
   });
 
   it('rejects malformed values before any database lookup', async () => {
     const lookup = vi.spyOn(prisma.integrationToken, 'findUnique');
-    for (const value of ['', 'Bearer x', 'ccmcp_short', `ccmcp_${'a'.repeat(44)}`, `xxmcp_${'a'.repeat(43)}`, `ccmcp_${'a'.repeat(42)}=`])
+    for (const value of [
+      '',
+      'Bearer x',
+      'ccmcp_short',
+      `ccmcp_${'a'.repeat(44)}`,
+      `xxmcp_${'a'.repeat(43)}`,
+      `ccmcp_${'a'.repeat(42)}=`,
+    ])
       expect(await verifyIntegrationToken(value)).toBeNull();
     expect(lookup).not.toHaveBeenCalled();
   });
@@ -221,11 +272,17 @@ describe('verifyIntegrationToken', () => {
     const expired = (await create(ALICE)).body;
     await prisma.integrationToken.update({
       where: { id: expired.integrationToken.id },
-      data: { createdAt: new Date(Date.now() - 2 * 86_400_000), expiresAt: new Date(Date.now() - 1) },
+      data: {
+        createdAt: new Date(Date.now() - 2 * 86_400_000),
+        expiresAt: new Date(Date.now() - 1),
+      },
     });
     expect(await verifyIntegrationToken(expired.plaintextToken)).toBeNull();
     const revoked = (await create(ALICE)).body;
-    await prisma.integrationToken.update({ where: { id: revoked.integrationToken.id }, data: { revokedAt: new Date() } });
+    await prisma.integrationToken.update({
+      where: { id: revoked.integrationToken.id },
+      data: { revokedAt: new Date() },
+    });
     expect(await verifyIntegrationToken(revoked.plaintextToken)).toBeNull();
   });
 });

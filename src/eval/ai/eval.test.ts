@@ -285,16 +285,14 @@ describe('refusal accounting and safe evaluation retries', () => {
     ).toThrow('PASS');
   });
   it('honors the provider delay with at most three waits, and preserves only safe metadata', async () => {
-    const call = vi
-      .fn()
-      .mockRejectedValue(
-        new ProviderFailure('RATE_LIMITED', {
-          status: 429,
-          providerCode: 'RESOURCE_EXHAUSTED',
-          retryAfterMs: 1234,
-          message: 'secret fixture text',
-        }),
-      );
+    const call = vi.fn().mockRejectedValue(
+      new ProviderFailure('RATE_LIMITED', {
+        status: 429,
+        providerCode: 'RESOURCE_EXHAUSTED',
+        retryAfterMs: 1234,
+        message: 'secret fixture text',
+      }),
+    );
     const sleep = vi.fn().mockResolvedValue(undefined);
     expect(await evaluateCall(call, { sleep })).toMatchObject({
       error: 'RATE_LIMITED',

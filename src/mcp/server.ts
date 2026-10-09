@@ -24,7 +24,11 @@ export const ToolOutputSchema = z.object({
   recordId: z.string(),
 });
 
-const text = (maxLength: number, description?: string) => ({ type: 'string', maxLength, ...(description ? { description } : {}) });
+const text = (maxLength: number, description?: string) => ({
+  type: 'string',
+  maxLength,
+  ...(description ? { description } : {}),
+});
 
 /**
  * The tool contract as advertised to clients: one plain JSON Schema object. Deliberately portable
@@ -38,27 +42,41 @@ export const ADVERTISED_INPUT_SCHEMA = {
     sourceRecordRef: {
       type: 'string',
       pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}/[0-9]{2}:[0-9]{2}:[0-9]{2}$',
-      description: 'YYYY-MM-DD/HH:MM:SS: the daily file folder date and the entry heading time, copied verbatim',
+      description:
+        'YYYY-MM-DD/HH:MM:SS: the daily file folder date and the entry heading time, copied verbatim',
     },
     platform: {
       type: 'string',
       enum: [...SUBMISSION_PLATFORMS],
-      description: 'The application workflow actually used (workday whenever a Workday form was used); never the discovery source',
+      description:
+        'The application workflow actually used (workday whenever a Workday form was used); never the discovery source',
     },
     company: { type: 'string', minLength: 1, maxLength: 200 },
     jobTitle: { type: 'string', minLength: 1, maxLength: 200 },
     submittedAt: {
       type: 'string',
       format: 'date-time',
-      description: 'ISO 8601 with a UTC offset, for example 2026-10-01T09:15:00+05:30; when the site confirmed the submission',
+      description:
+        'ISO 8601 with a UTC offset, for example 2026-10-01T09:15:00+05:30; when the site confirmed the submission',
     },
-    jobUrl: { type: 'string', format: 'uri', maxLength: 2048, description: 'http or https job URL' },
+    jobUrl: {
+      type: 'string',
+      format: 'uri',
+      maxLength: 2048,
+      description: 'http or https job URL',
+    },
     portalJobId: text(200),
-    destinationHost: text(253, 'Hostname of the application destination only, for example jobs.lever.co'),
+    destinationHost: text(
+      253,
+      'Hostname of the application destination only, for example jobs.lever.co',
+    ),
     discoverySource: text(100, 'Where the job was found, for example we_work_remotely'),
     location: text(200),
     workMode: { type: 'string', enum: ['remote', 'hybrid', 'onsite'] },
-    confirmationText: { type: 'string', description: 'The confirmation the site showed; longer text is truncated to 300 characters' },
+    confirmationText: {
+      type: 'string',
+      description: 'The confirmation the site showed; longer text is truncated to 300 characters',
+    },
   },
   required: ['sourceRecordRef', 'platform', 'company', 'jobTitle', 'submittedAt'],
   additionalProperties: false,
@@ -108,7 +126,12 @@ export function createMcpServer(authInfo: AuthInfo | undefined) {
       description: DESCRIPTION,
       inputSchema: advertisedInput,
       outputSchema: ToolOutputSchema,
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async (args: unknown) => {
       const call = currentCall();
@@ -128,7 +151,10 @@ export function createMcpServer(authInfo: AuthInfo | undefined) {
           result: outcome.result,
           recordId: outcome.recordId,
         };
-        return { content: [{ type: 'text' as const, text: JSON.stringify(structuredContent) }], structuredContent };
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(structuredContent) }],
+          structuredContent,
+        };
       } catch (err) {
         if (err instanceof SubmissionIntakeError) {
           if (call) {

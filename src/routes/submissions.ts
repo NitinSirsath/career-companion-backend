@@ -12,7 +12,11 @@ import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { PendingSubmission, ResolveSubmissionRequestSchema } from '../contracts/submission';
 import { requireAuth } from '../middleware/auth';
-import { SubmissionReviewError, listPendingSubmissions, resolveSubmission } from '../services/externalSubmission';
+import {
+  SubmissionReviewError,
+  listPendingSubmissions,
+  resolveSubmission,
+} from '../services/externalSubmission';
 import { createPaginatedResponse, getPaginationParams } from '../utils/pagination';
 import { logEvent } from '../utils/log';
 

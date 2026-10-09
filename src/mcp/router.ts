@@ -36,7 +36,8 @@ const REQUIRED_SCOPES = [TOKEN_SCOPE];
 const verifier = {
   async verifyAccessToken(token: string): Promise<AuthInfo> {
     const verified = await verifyIntegrationToken(token);
-    if (!verified) throw new OAuthError(OAuthErrorCode.InvalidToken, 'The token is invalid, expired or revoked');
+    if (!verified)
+      throw new OAuthError(OAuthErrorCode.InvalidToken, 'The token is invalid, expired or revoked');
     return {
       // The plaintext is not carried past verification.
       token: verified.tokenId,
@@ -52,7 +53,11 @@ const verifier = {
 const loggableHostname = (hostname: string | undefined) =>
   hostname && /^[A-Za-z0-9.:[\]-]{1,253}$/.test(hostname) ? hostname.toLowerCase() : 'unparseable';
 
-const jsonRpcError = (code: number, message: string) => ({ jsonrpc: '2.0', error: { code, message }, id: null });
+const jsonRpcError = (code: number, message: string) => ({
+  jsonrpc: '2.0',
+  error: { code, message },
+  id: null,
+});
 
 const callOf = (res: Response) => res.locals.mcpCall as McpCallRecord;
 
@@ -113,7 +118,10 @@ export function createMcpRouter(config = mcpConfig()) {
 
   router.use(async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const authInfo = await verifyBearerToken(req.headers.authorization, { verifier, requiredScopes: REQUIRED_SCOPES });
+      const authInfo = await verifyBearerToken(req.headers.authorization, {
+        verifier,
+        requiredScopes: REQUIRED_SCOPES,
+      });
       const extra = authInfo.extra as { userId: string; tokenId: string };
       Object.assign(callOf(res), { userId: extra.userId, tokenId: extra.tokenId });
       res.locals.mcpAuth = authInfo;
@@ -121,8 +129,12 @@ export function createMcpRouter(config = mcpConfig()) {
     } catch (err) {
       const call = callOf(res);
       call.outcome = 'unauthorized';
-      if (!(err instanceof OAuthError)) call.errorCategory = err instanceof Error ? err.name : 'UnknownError';
-      await sendWebResponse(res, bearerAuthChallengeResponse(err, { requiredScopes: REQUIRED_SCOPES }));
+      if (!(err instanceof OAuthError))
+        call.errorCategory = err instanceof Error ? err.name : 'UnknownError';
+      await sendWebResponse(
+        res,
+        bearerAuthChallengeResponse(err, { requiredScopes: REQUIRED_SCOPES }),
+      );
     }
   });
 
@@ -153,13 +165,15 @@ export function createMcpRouter(config = mcpConfig()) {
   router.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
     const type = (err as { type?: unknown })?.type;
     if (res.headersSent) return;
-    if (type === 'entity.too.large') return reject(res, 413, 'body_too_large', 'Request body too large.');
+    if (type === 'entity.too.large')
+      return reject(res, 413, 'body_too_large', 'Request body too large.');
     if (type === 'entity.parse.failed') {
       callOf(res).outcome = 'invalid_json';
       return res.status(400).json(jsonRpcError(-32700, 'Parse error.'));
     }
     const status = (err as { status?: unknown })?.status;
-    if (typeof status === 'number' && status >= 400 && status < 500) return reject(res, status, 'bad_request', 'Bad request.');
+    if (typeof status === 'number' && status >= 400 && status < 500)
+      return reject(res, status, 'bad_request', 'Bad request.');
     callOf(res).errorCategory = err instanceof Error ? err.name : 'UnknownError';
     reject(res, 500, 'error', 'Internal error.');
   });

@@ -22,7 +22,11 @@ export interface StructuredResponse {
 /** Content-free check that a key authenticates and can use the given models (no tokens). */
 export type VerifyResult =
   | { result: 'VERIFIED' }
-  | { result: 'REJECTED'; kind: 'KEY_REJECTED' | 'ACCOUNT_OR_BILLING' | 'MODEL_UNAVAILABLE'; modelId?: string }
+  | {
+      result: 'REJECTED';
+      kind: 'KEY_REJECTED' | 'ACCOUNT_OR_BILLING' | 'MODEL_UNAVAILABLE';
+      modelId?: string;
+    }
   | { result: 'INCONCLUSIVE' };
 
 export interface ProviderClient {

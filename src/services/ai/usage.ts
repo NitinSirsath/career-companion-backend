@@ -56,7 +56,11 @@ export async function reserveUserCall(tx: Prisma.TransactionClient, userId: stri
       config.cooldownUntil,
     );
   const day = utcDay(now);
-  await tx.aIUsageDay.upsert({ where: { userId_day: { userId, day } }, create: { userId, day }, update: {} });
+  await tx.aIUsageDay.upsert({
+    where: { userId_day: { userId, day } },
+    create: { userId, day },
+    update: {},
+  });
   const reserved = await tx.aIUsageDay.updateMany({
     where: { userId, day, calls: { lt: limit } },
     data: { calls: { increment: 1 } },
@@ -86,7 +90,11 @@ export interface AccessIdentity {
   revision: number;
 }
 
-function cooldownMs(kind: 'RATE_LIMITED' | 'OUTCOME_UNKNOWN', failures: number, retryAfterMs?: number) {
+function cooldownMs(
+  kind: 'RATE_LIMITED' | 'OUTCOME_UNKNOWN',
+  failures: number,
+  retryAfterMs?: number,
+) {
   if (kind === 'RATE_LIMITED' && retryAfterMs !== undefined)
     return Math.min(Math.max(retryAfterMs, RETRY_AFTER_MIN_MS), RETRY_AFTER_MAX_MS);
   const base = kind === 'RATE_LIMITED' ? RATE_LIMIT_BASE_MS : UNKNOWN_OUTCOME_BASE_MS;
@@ -105,7 +113,10 @@ function cooldownMs(kind: 'RATE_LIMITED' | 'OUTCOME_UNKNOWN', failures: number, 
 export async function noteProviderFailure(
   tx: Prisma.TransactionClient,
   access: AccessIdentity,
-  kind: Extract<FailureKind, 'KEY_REJECTED' | 'ACCOUNT_OR_BILLING' | 'MODEL_UNAVAILABLE' | 'RATE_LIMITED' | 'OUTCOME_UNKNOWN'>,
+  kind: Extract<
+    FailureKind,
+    'KEY_REJECTED' | 'ACCOUNT_OR_BILLING' | 'MODEL_UNAVAILABLE' | 'RATE_LIMITED' | 'OUTCOME_UNKNOWN'
+  >,
   now: Date,
   details: { modelId?: string; retryAfterMs?: number } = {},
 ): Promise<Date | null> {
@@ -113,12 +124,20 @@ export async function noteProviderFailure(
   if (kind === 'KEY_REJECTED' || kind === 'ACCOUNT_OR_BILLING' || kind === 'MODEL_UNAVAILABLE') {
     await tx.aIConfiguration.updateMany({
       where,
-      data: { accessIssue: kind, accessIssueModel: kind === 'MODEL_UNAVAILABLE' ? (details.modelId ?? null) : null },
+      data: {
+        accessIssue: kind,
+        accessIssueModel: kind === 'MODEL_UNAVAILABLE' ? (details.modelId ?? null) : null,
+      },
     });
     return null;
   }
-  const current = await tx.aIConfiguration.findFirst({ where, select: { consecutiveFailures: true } });
-  const resumesAt = new Date(now.getTime() + cooldownMs(kind, current?.consecutiveFailures ?? 0, details.retryAfterMs));
+  const current = await tx.aIConfiguration.findFirst({
+    where,
+    select: { consecutiveFailures: true },
+  });
+  const resumesAt = new Date(
+    now.getTime() + cooldownMs(kind, current?.consecutiveFailures ?? 0, details.retryAfterMs),
+  );
   await tx.aIConfiguration.updateMany({
     where,
     data: {
@@ -140,8 +159,19 @@ export async function noteProviderSuccess(access: AccessIdentity) {
         revision: access.revision,
         // Only limitations are cleared; a needs-attention issue recorded concurrently stays.
         AND: [
-          { OR: [{ accessIssue: null }, { accessIssue: { in: ['RATE_LIMITED', 'PROVIDER_UNAVAILABLE'] } }] },
-          { OR: [{ consecutiveFailures: { gt: 0 } }, { cooldownUntil: { not: null } }, { accessIssue: { not: null } }] },
+          {
+            OR: [
+              { accessIssue: null },
+              { accessIssue: { in: ['RATE_LIMITED', 'PROVIDER_UNAVAILABLE'] } },
+            ],
+          },
+          {
+            OR: [
+              { consecutiveFailures: { gt: 0 } },
+              { cooldownUntil: { not: null } },
+              { accessIssue: { not: null } },
+            ],
+          },
         ],
       },
       data: { consecutiveFailures: 0, cooldownUntil: null, accessIssue: null },

@@ -63,7 +63,14 @@ describe('daily workspace against PostgreSQL', () => {
     });
     await prisma.action.create({ data: { ...action(null), applicationId: other.id } });
     const first = await readWorkspaceActions(owner, { ...query, bucket: 'overdue' }, at);
-    expect(first.counts).toEqual({ snoozed: 0, overdue: 25, today: 7, later: 8, undated: 7, totalPending: 47 });
+    expect(first.counts).toEqual({
+      snoozed: 0,
+      overdue: 25,
+      today: 7,
+      later: 8,
+      undated: 7,
+      totalPending: 47,
+    });
     expect(first.items).toHaveLength(20);
     expect(first.metadata.nextOffset).toBe(20);
     const second = await readWorkspaceActions(
@@ -93,7 +100,14 @@ describe('daily workspace against PostgreSQL', () => {
     });
     const result = await readWorkspaceActions(owner, { ...query, bucket: 'undated' }, at);
     expect(result.items).toHaveLength(1);
-    expect(result.counts).toEqual({ snoozed: 0, overdue: 2, today: 2, later: 0, undated: 1, totalPending: 5 });
+    expect(result.counts).toEqual({
+      snoozed: 0,
+      overdue: 2,
+      today: 2,
+      later: 0,
+      undated: 1,
+      totalPending: 5,
+    });
     expect(result.nextTransitionAt).toBe('2026-10-03T07:00:00.001Z');
     const later = await readWorkspaceActions(owner, query, new Date(result.nextTransitionAt!));
     expect(later.counts.overdue).toBe(3);

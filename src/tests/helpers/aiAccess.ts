@@ -15,7 +15,11 @@ export function configureAI(userId: string, overrides: Record<string, unknown> =
     consentedAt: new Date(),
     ...overrides,
   };
-  return prisma.aIConfiguration.upsert({ where: { userId }, create: { userId, ...data }, update: data });
+  return prisma.aIConfiguration.upsert({
+    where: { userId },
+    create: { userId, ...data },
+    update: data,
+  });
 }
 
 /** Resolved access for ledger tests; the test supplies the provider call itself. */
@@ -24,7 +28,10 @@ export function fakeAccess(userId: string, revision = 0): AIAccess {
   return {
     userId,
     provider: 'gemini',
-    models: { fast: recommendedModel(gemini, 'fast'), detailed: recommendedModel(gemini, 'detailed') },
+    models: {
+      fast: recommendedModel(gemini, 'fast'),
+      detailed: recommendedModel(gemini, 'detailed'),
+    },
     revision,
     classifier: { classifyRelevance: vi.fn(), classifyRelevanceBatch: vi.fn() },
     analyzer: { extractJobData: vi.fn() },

@@ -4,28 +4,19 @@
     "input": {
       "sender": "Trey Research Hiring <hiring@trey-research.example.org>",
       "subject": "Take-home assignment — Machine Learning Engineer",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "Hi Alex,\n\nAs the next step for the Machine Learning Engineer role at Trey Research, please complete the attached take-home assignment.\nIt should take about four hours. Please submit your solution by Monday, November 2, 2026 at 6:00 PM.\n\nGood luck!\nTrey Research Hiring"
     },
     "expect": {
       "relevance": "RELEVANT",
       "critical": true,
-      "category": [
-        "ASSESSMENT"
-      ],
+      "category": ["ASSESSMENT"],
       "fields": {
         "companyName": {
-          "contains": [
-            "trey research"
-          ]
+          "contains": ["trey research"]
         },
         "jobTitle": {
-          "contains": [
-            "machine learning"
-          ]
+          "contains": ["machine learning"]
         },
         "assessmentDeadline": {
           "date": "2026-11-02"
@@ -34,10 +25,7 @@
           "equals": true
         }
       },
-      "mustBeNull": [
-        "offerInfo",
-        "rejectionInfo"
-      ]
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
     },
     "group": "assessment"
   },
@@ -46,23 +34,16 @@
     "input": {
       "sender": "CodeCheck for Fourth Coffee <invites@codecheck.example.com>",
       "subject": "Fourth Coffee invited you to an online coding test",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "Hello Alex,\n\nFourth Coffee has invited you to complete a 90-minute online coding test for the Backend Developer role.\nYour link expires on October 31, 2026 at 11:59 PM UTC.\n\nStart the test: https://codecheck.example.com/t/abc123"
     },
     "expect": {
       "relevance": "RELEVANT",
       "critical": true,
-      "category": [
-        "ASSESSMENT"
-      ],
+      "category": ["ASSESSMENT"],
       "fields": {
         "companyName": {
-          "contains": [
-            "fourth coffee"
-          ]
+          "contains": ["fourth coffee"]
         },
         "assessmentDeadline": {
           "date": "2026-10-31"
@@ -71,10 +52,7 @@
           "equals": true
         }
       },
-      "mustBeNull": [
-        "offerInfo",
-        "rejectionInfo"
-      ]
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
     },
     "group": "assessment"
   },
@@ -83,32 +61,22 @@
     "input": {
       "sender": "Humongous Insurance Careers <careers@humongous-insurance.example.com>",
       "subject": "Next step: work style questionnaire",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "Dear Alex,\n\nThank you for your interest in the Business Analyst role. Please complete a short work style questionnaire (about 20 minutes)\nwithin five days of this email. There are no right or wrong answers.\n\nHumongous Insurance Careers"
     },
     "expect": {
       "relevance": "RELEVANT",
       "critical": true,
-      "category": [
-        "ASSESSMENT"
-      ],
+      "category": ["ASSESSMENT"],
       "fields": {
         "companyName": {
-          "contains": [
-            "humongous"
-          ]
+          "contains": ["humongous"]
         },
         "actionRequired": {
           "equals": true
         }
       },
-      "mustBeNull": [
-        "offerInfo",
-        "rejectionInfo"
-      ]
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
     },
     "group": "assessment"
   },
@@ -117,28 +85,19 @@
     "input": {
       "sender": "Trey Research Hiring <hiring@trey-research.example.org>",
       "subject": "Reminder: take-home due Monday",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "Hi Alex, just a friendly reminder that your take-home assignment is due Monday, November 2, 2026. Reply if you need more time.\nTrey Research Hiring"
     },
     "expect": {
       "relevance": "RELEVANT",
       "critical": true,
-      "category": [
-        "ASSESSMENT",
-        "FOLLOW_UP"
-      ],
+      "category": ["ASSESSMENT", "FOLLOW_UP"],
       "fields": {
         "assessmentDeadline": {
           "date": "2026-11-02"
         }
       },
-      "mustBeNull": [
-        "offerInfo",
-        "rejectionInfo"
-      ]
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
     },
     "group": "assessment"
   }

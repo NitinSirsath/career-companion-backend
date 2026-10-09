@@ -4,7 +4,13 @@ import type { JobWithMetadata } from 'pg-boss';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
 import { EmailAIPipeline } from '../services/ai/pipeline';
-import { AIAccessError, AIOutcomeUnknownError, AIProviderError, RetryableAIError, TerminalAIError } from '../services/ai/errors';
+import {
+  AIAccessError,
+  AIOutcomeUnknownError,
+  AIProviderError,
+  RetryableAIError,
+  TerminalAIError,
+} from '../services/ai/errors';
 import { createProviderClient } from '../services/ai/providers';
 import { configureAI } from './helpers/aiAccess';
 import { getQueue, stopQueue } from '../services/queue';
@@ -60,19 +66,34 @@ describe('email worker attributable outcomes', () => {
     await prisma.email.update({
       where: { id: emailId },
       data: {
-        processingState: 'FAILED', processingErrorCategory: 'RetryableAIError', processingErrorDetails: 'old',
-        processingErrorStage: 'classification', processingRetryable: true, processingFailedAt: new Date(),
+        processingState: 'FAILED',
+        processingErrorCategory: 'RetryableAIError',
+        processingErrorDetails: 'old',
+        processingErrorStage: 'classification',
+        processingRetryable: true,
+        processingFailedAt: new Date(),
       },
     });
     await prisma.aIProcessingResult.create({
-      data: { emailId, provider: 't', model: 't', contractVersion: 'classification/v2', processingStatus: 'COMPLETED', relevanceDecision: 'IRRELEVANT' },
+      data: {
+        emailId,
+        provider: 't',
+        model: 't',
+        contractVersion: 'classification/v2',
+        processingStatus: 'COMPLETED',
+        relevanceDecision: 'IRRELEVANT',
+      },
     });
     const gemini = vi.mocked(createProviderClient);
     gemini.mockClear();
     await processEmailJob(job());
     expect(await email()).toMatchObject({
-      processingState: 'COMPLETED', processingErrorCategory: null, processingErrorDetails: null,
-      processingErrorStage: null, processingRetryable: null, processingFailedAt: null,
+      processingState: 'COMPLETED',
+      processingErrorCategory: null,
+      processingErrorDetails: null,
+      processingErrorStage: null,
+      processingRetryable: null,
+      processingFailedAt: null,
     });
     expect(gemini).not.toHaveBeenCalled();
   });
@@ -86,7 +107,9 @@ describe('email worker attributable outcomes', () => {
   });
 
   it('schedules a retry for a retryable failure before the final attempt', async () => {
-    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(new RetryableAIError('AI operation not ready'));
+    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(
+      new RetryableAIError('AI operation not ready'),
+    );
     await expect(processEmailJob(job(1))).rejects.toThrow();
     const row = await email();
     expect(row.processingState).toBe('PROCESSING');
@@ -95,7 +118,9 @@ describe('email worker attributable outcomes', () => {
   });
 
   it('marks the email FAILED when the final permitted delivery fails', async () => {
-    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(new RetryableAIError('AI operation not ready'));
+    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(
+      new RetryableAIError('AI operation not ready'),
+    );
     await expect(processEmailJob(job(3, 3))).rejects.toThrow();
     const row = await email();
     expect(row.processingState).toBe('FAILED');
@@ -103,18 +128,24 @@ describe('email worker attributable outcomes', () => {
   });
 
   it('acknowledges terminal failures as FAILED without rethrowing', async () => {
-    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(new TerminalAIError('AI provider rejected request'));
+    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(
+      new TerminalAIError('AI provider rejected request'),
+    );
     await expect(processEmailJob(job())).resolves.toBeUndefined();
     expect((await email()).processingState).toBe('FAILED');
   });
 
   it('hands pg-boss only the sanitized category, never the original error (S6-R06)', async () => {
-    const raw = Object.assign(new Error('Dear candidate, private body'), { meta: { body: 'private' } });
+    const raw = Object.assign(new Error('Dear candidate, private body'), {
+      meta: { body: 'private' },
+    });
     vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(raw);
     const thrown = await processEmailJob(job()).catch((e: unknown) => e);
     expect(thrown).toBeInstanceOf(EmailJobFailure);
     expect(thrown).toMatchObject({ name: 'EmailJobFailure', message: 'ProcessingError' });
-    expect(JSON.stringify({ ...(thrown as object), stack: (thrown as Error).stack })).not.toContain('private');
+    expect(JSON.stringify({ ...(thrown as object), stack: (thrown as Error).stack })).not.toContain(
+      'private',
+    );
   });
 
   it('stores an outcome-unknown provider error as not retryable; retry semantics unchanged (S6-R06)', async () => {
@@ -134,13 +165,23 @@ describe('email worker attributable outcomes', () => {
     async (reason) => {
       await prisma.email.update({
         where: { id: emailId },
-        data: { processingState: 'FAILED', processingErrorCategory: 'TerminalAIError', processingErrorDetails: 'old', processingRetryable: false, processingFailedAt: new Date() },
+        data: {
+          processingState: 'FAILED',
+          processingErrorCategory: 'TerminalAIError',
+          processingErrorDetails: 'old',
+          processingRetryable: false,
+          processingFailedAt: new Date(),
+        },
       });
       vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(new AIAccessError(reason));
       await expect(processEmailJob(job(1))).resolves.toBeUndefined();
       expect(await email()).toMatchObject({
-        processingState: 'PENDING', processingErrorCategory: null, processingErrorDetails: null,
-        processingErrorStage: null, processingRetryable: null, processingFailedAt: null,
+        processingState: 'PENDING',
+        processingErrorCategory: null,
+        processingErrorDetails: null,
+        processingErrorStage: null,
+        processingRetryable: null,
+        processingFailedAt: null,
       });
     },
   );
@@ -148,11 +189,17 @@ describe('email worker attributable outcomes', () => {
   it('fails an unknown outcome at once, held for review, without a queue retry', async () => {
     vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(new AIOutcomeUnknownError());
     await expect(processEmailJob(job(0))).resolves.toBeUndefined();
-    expect(await email()).toMatchObject({ processingState: 'FAILED', processingRetryable: false, processingErrorCategory: 'OutcomeUnknown' });
+    expect(await email()).toMatchObject({
+      processingState: 'FAILED',
+      processingRetryable: false,
+      processingErrorCategory: 'OutcomeUnknown',
+    });
   });
 
   it('never persists unexpected raw error text', async () => {
-    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(new Error('Dear candidate, private body'));
+    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(
+      new Error('Dear candidate, private body'),
+    );
     await expect(processEmailJob(job())).rejects.toThrow();
     const row = await email();
     expect(row.processingErrorDetails).toBe('Processing failed unexpectedly');
@@ -161,7 +208,9 @@ describe('email worker attributable outcomes', () => {
 
   it('never downgrades a completed email', async () => {
     await prisma.email.update({ where: { id: emailId }, data: { processingState: 'COMPLETED' } });
-    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(new TerminalAIError('Email unavailable'));
+    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(
+      new TerminalAIError('Email unavailable'),
+    );
     await processEmailJob(job());
     expect((await email()).processingState).toBe('COMPLETED');
   });
@@ -173,7 +222,13 @@ describe('manual email retry preserves paid claims and user decisions', () => {
 
   async function failedWithOperation(
     status: 'RETRYABLE' | 'UNKNOWN' | 'PROCESSING' | 'COMPLETED' | 'FAILED',
-    extra: { errorCode?: string; startedAt?: Date; provider?: string; model?: string; attempts?: number } = {},
+    extra: {
+      errorCode?: string;
+      startedAt?: Date;
+      provider?: string;
+      model?: string;
+      attempts?: number;
+    } = {},
   ) {
     await prisma.email.update({
       where: { id: emailId },
@@ -226,14 +281,20 @@ describe('manual email retry preserves paid claims and user decisions', () => {
     ['PROCESSING', { startedAt: new Date() }, 'AI_OPERATION_REQUIRES_REVIEW'],
     ['FAILED', { errorCode: 'INVALID_REQUEST' }, 'AI_OPERATION_REQUIRES_REVIEW'],
     ['FAILED', { errorCode: 'TerminalAIError' }, 'AI_OPERATION_REQUIRES_REVIEW'],
-  ] as const)('never replays a held %s operation automatically (%o → %s)', async (status, extra, code) => {
-    await failedWithOperation(status, extra);
-    const res = await retry();
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe(code);
-    expect(enqueueEmailProcessingJob).not.toHaveBeenCalled();
-    expect(await prisma.aIOperation.findFirstOrThrow({ where: { emailId } })).toMatchObject({ status, approvedRetries: 0 });
-  });
+  ] as const)(
+    'never replays a held %s operation automatically (%o → %s)',
+    async (status, extra, code) => {
+      await failedWithOperation(status, extra);
+      const res = await retry();
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe(code);
+      expect(enqueueEmailProcessingJob).not.toHaveBeenCalled();
+      expect(await prisma.aIOperation.findFirstOrThrow({ where: { emailId } })).toMatchObject({
+        status,
+        approvedRetries: 0,
+      });
+    },
+  );
 
   describe('user-approved retry (ADR-0001 decision 10)', () => {
     const approve = (body: object = { acceptPossibleDuplicateCharge: true }) =>
@@ -245,11 +306,23 @@ describe('manual email retry preserves paid claims and user decisions', () => {
 
     it('explains where the uncertain attempt went and which provider a retry would use', async () => {
       const attemptedAt = new Date('2026-10-01T10:00:00Z');
-      await failedWithOperation('UNKNOWN', { provider: 'gemini', model: 'gemini-2.5-flash', startedAt: attemptedAt });
+      await failedWithOperation('UNKNOWN', {
+        provider: 'gemini',
+        model: 'gemini-2.5-flash',
+        startedAt: attemptedAt,
+      });
       const res = await retry();
       expect(res.status).toBe(409);
       expect(res.body.error.details).toEqual({
-        operations: [{ operation: 'classification', reason: 'OUTCOME_UNKNOWN', provider: 'gemini', model: 'gemini-2.5-flash', attemptedAt: attemptedAt.toISOString() }],
+        operations: [
+          {
+            operation: 'classification',
+            reason: 'OUTCOME_UNKNOWN',
+            provider: 'gemini',
+            model: 'gemini-2.5-flash',
+            attemptedAt: attemptedAt.toISOString(),
+          },
+        ],
         currentProvider: 'gemini',
       });
     });
@@ -257,7 +330,11 @@ describe('manual email retry preserves paid claims and user decisions', () => {
     it.each([
       ['an unknown outcome', 'UNKNOWN', {}],
       ['unusable output', 'FAILED', { errorCode: 'INVALID_OUTPUT' }],
-      ['a stale claim after a crash', 'PROCESSING', { startedAt: new Date(Date.now() - 20 * 60_000) }],
+      [
+        'a stale claim after a crash',
+        'PROCESSING',
+        { startedAt: new Date(Date.now() - 20 * 60_000) },
+      ],
       ['exhausted attempts', 'RETRYABLE', { attempts: 3 }],
     ] as const)('approves exactly one more attempt after %s', async (_label, status, extra) => {
       await failedWithOperation(status, extra);
@@ -282,13 +359,18 @@ describe('manual email retry preserves paid claims and user decisions', () => {
       await configureAI(userId, { accessIssue: 'KEY_REJECTED' });
       const res = await approve();
       expect(res.status).toBe(409);
-      expect(res.body.error).toMatchObject({ code: 'AI_ACCESS_UNAVAILABLE', details: { state: 'NEEDS_ATTENTION', reason: 'KEY_REJECTED' } });
+      expect(res.body.error).toMatchObject({
+        code: 'AI_ACCESS_UNAVAILABLE',
+        details: { state: 'NEEDS_ATTENTION', reason: 'KEY_REJECTED' },
+      });
       expect(await op()).toMatchObject({ status: 'UNKNOWN', approvedRetries: 0 });
     });
 
     it('rejects unexpected fields in the approval', async () => {
       await failedWithOperation('UNKNOWN');
-      expect((await approve({ acceptPossibleDuplicateCharge: true, force: true })).status).toBe(400);
+      expect((await approve({ acceptPossibleDuplicateCharge: true, force: true })).status).toBe(
+        400,
+      );
       expect((await approve({ acceptPossibleDuplicateCharge: false })).status).toBe(400);
     });
   });
@@ -311,7 +393,9 @@ describe('manual email retry preserves paid claims and user decisions', () => {
 describe('delivery invariant (S6-03)', () => {
   it('fails an unexpected multi-job delivery without attempting or acknowledging any job', async () => {
     const pipeline = vi.spyOn(EmailAIPipeline, 'processEmail');
-    await expect(handleEmailJobs([job(), { ...job(), id: 'job-extra' }])).rejects.toThrow('UNEXPECTED_EMAIL_JOB_BATCH');
+    await expect(handleEmailJobs([job(), { ...job(), id: 'job-extra' }])).rejects.toThrow(
+      'UNEXPECTED_EMAIL_JOB_BATCH',
+    );
     expect(pipeline).not.toHaveBeenCalled();
   });
 
@@ -319,10 +403,16 @@ describe('delivery invariant (S6-03)', () => {
     const boss = await getQueue();
     await prisma.$executeRaw`DELETE FROM pgboss.job WHERE name = ${EMAIL_PROCESSING_JOB}`;
     vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(new AIAccessError('NOT_SET_UP'));
-    const first = await boss.send(EMAIL_PROCESSING_JOB, { userId, emailId }, emailJobOptions(userId, emailId));
+    const first = await boss.send(
+      EMAIL_PROCESSING_JOB,
+      { userId, emailId },
+      emailJobOptions(userId, emailId),
+    );
     expect(first).toBeTruthy();
     // Same email, same 5-minute singleton slot: suppressed while the first delivery is live.
-    expect(await boss.send(EMAIL_PROCESSING_JOB, { userId, emailId }, emailJobOptions(userId, emailId))).toBeNull();
+    expect(
+      await boss.send(EMAIL_PROCESSING_JOB, { userId, emailId }, emailJobOptions(userId, emailId)),
+    ).toBeNull();
     await startEmailProcessingWorker();
     let state: string | undefined;
     for (let i = 0; i < 150 && state !== 'cancelled'; i++) {
@@ -333,32 +423,49 @@ describe('delivery invariant (S6-03)', () => {
     expect(state).toBe('cancelled');
     expect((await email()).processingState).toBe('PENDING');
     // The waiting delivery no longer holds the slot: a re-offer after access is fixed is accepted.
-    expect(await boss.send(EMAIL_PROCESSING_JOB, { userId, emailId }, emailJobOptions(userId, emailId))).toBeTruthy();
+    expect(
+      await boss.send(EMAIL_PROCESSING_JOB, { userId, emailId }, emailJobOptions(userId, emailId)),
+    ).toBeTruthy();
     await prisma.$executeRaw`DELETE FROM pgboss.job WHERE name = ${EMAIL_PROCESSING_JOB}`;
   }, 60_000);
 
   it('accounts for every distinct queued email through installed pg-boss delivery', async () => {
     const boss = await getQueue();
     await prisma.$executeRaw`DELETE FROM pgboss.job WHERE name = ${EMAIL_PROCESSING_JOB}`;
-    const ids = await Promise.all(['ok-1', 'terminal', 'exhausted', 'ok-2', 'raw'].map(async (key) =>
-      (await prisma.email.create({ data: { userId, gmailMessageId: `queue-${key}` } })).id));
+    const ids = await Promise.all(
+      ['ok-1', 'terminal', 'exhausted', 'ok-2', 'raw'].map(
+        async (key) =>
+          (await prisma.email.create({ data: { userId, gmailMessageId: `queue-${key}` } })).id,
+      ),
+    );
     const [ok1, terminal, exhausted, ok2, raw] = ids;
     vi.spyOn(EmailAIPipeline, 'processEmail').mockImplementation(async (_user, id) => {
       if (id === terminal) throw new TerminalAIError('AI provider rejected request');
       if (id === exhausted) throw new RetryableAIError('AI operation not ready');
       if (id === raw)
-        throw Object.assign(new Error('Dear candidate, private body'), { meta: { body: 'private' } });
+        throw Object.assign(new Error('Dear candidate, private body'), {
+          meta: { body: 'private' },
+        });
       await prisma.email.update({ where: { id }, data: { processingState: 'COMPLETED' } });
     });
-    const jobIds = await Promise.all(ids.map((id) =>
-      boss.send(EMAIL_PROCESSING_JOB, { userId, emailId: id }, { ...emailJobOptions(userId, id), retryLimit: 1, retryDelay: 1, retryBackoff: false })));
+    const jobIds = await Promise.all(
+      ids.map((id) =>
+        boss.send(
+          EMAIL_PROCESSING_JOB,
+          { userId, emailId: id },
+          { ...emailJobOptions(userId, id), retryLimit: 1, retryDelay: 1, retryBackoff: false },
+        ),
+      ),
+    );
     expect(jobIds.every(Boolean)).toBe(true);
 
     await startEmailProcessingWorker();
     const registration = boss.getWipData().find((w) => w.name === EMAIL_PROCESSING_JOB);
     expect(registration?.options).toMatchObject({ batchSize: 1, includeMetadata: true });
     const settled = async () => {
-      const jobs = await Promise.all(jobIds.map((id) => boss.getJobById(EMAIL_PROCESSING_JOB, id!)));
+      const jobs = await Promise.all(
+        jobIds.map((id) => boss.getJobById(EMAIL_PROCESSING_JOB, id!)),
+      );
       return jobs.every((j) => j && ['completed', 'failed'].includes(j.state)) ? jobs : null;
     };
     let jobs = await settled();
@@ -369,7 +476,7 @@ describe('delivery invariant (S6-03)', () => {
     await boss.offWork(EMAIL_PROCESSING_JOB, { wait: true });
     expect(jobs).not.toBeNull();
     const byEmail = new Map(ids.map((id, i) => [id, jobs![i]!]));
-    const state = async (id: string) => (await prisma.email.findUniqueOrThrow({ where: { id } }));
+    const state = async (id: string) => await prisma.email.findUniqueOrThrow({ where: { id } });
     expect(byEmail.get(ok1)!.state).toBe('completed');
     expect(byEmail.get(ok2)!.state).toBe('completed');
     expect((await state(ok1)).processingState).toBe('COMPLETED');
@@ -379,17 +486,28 @@ describe('delivery invariant (S6-03)', () => {
     expect((await state(terminal)).processingState).toBe('FAILED');
     // Retryable work is retried, then recorded as exhausted at the final permitted delivery.
     expect(byEmail.get(exhausted)!).toMatchObject({ state: 'failed', retryCount: 1 });
-    expect(await state(exhausted)).toMatchObject({ processingState: 'FAILED', processingRetryable: false });
-    expect(vi.mocked(EmailAIPipeline.processEmail).mock.calls.filter(([, id]) => id === exhausted)).toHaveLength(2);
+    expect(await state(exhausted)).toMatchObject({
+      processingState: 'FAILED',
+      processingRetryable: false,
+    });
+    expect(
+      vi.mocked(EmailAIPipeline.processEmail).mock.calls.filter(([, id]) => id === exhausted),
+    ).toHaveLength(2);
     // S6-R06: pgboss.job.output holds only the sanitized category.
     expect(byEmail.get(exhausted)!.output).toEqual({
-      name: 'EmailJobFailure', message: 'RetryableAIError', stack: 'EmailJobFailure: RetryableAIError',
+      name: 'EmailJobFailure',
+      message: 'RetryableAIError',
+      stack: 'EmailJobFailure: RetryableAIError',
     });
     expect(byEmail.get(raw)!.state).toBe('failed');
     expect(byEmail.get(raw)!.output).toEqual({
-      name: 'EmailJobFailure', message: 'ProcessingError', stack: 'EmailJobFailure: ProcessingError',
+      name: 'EmailJobFailure',
+      message: 'ProcessingError',
+      stack: 'EmailJobFailure: ProcessingError',
     });
-    const stored = await prisma.$queryRaw<{ output: unknown }[]>`SELECT output FROM pgboss.job WHERE name = ${EMAIL_PROCESSING_JOB}`;
+    const stored = await prisma.$queryRaw<
+      { output: unknown }[]
+    >`SELECT output FROM pgboss.job WHERE name = ${EMAIL_PROCESSING_JOB}`;
     expect(JSON.stringify(stored)).not.toContain('private');
   }, 60_000);
 });

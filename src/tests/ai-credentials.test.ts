@@ -22,7 +22,9 @@ describe('AI credential sealing', () => {
     const sealed = sealApiKey(OWNER, KEY);
     expect(sealed).toMatch(/^v1:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$/);
     expect(sealed).not.toContain('SENTINEL');
-    expect(Buffer.from(sealed.split(':')[2], 'base64').toString('latin1')).not.toContain('SENTINEL');
+    expect(Buffer.from(sealed.split(':')[2], 'base64').toString('latin1')).not.toContain(
+      'SENTINEL',
+    );
     expect(openApiKey(OWNER, sealed)).toBe(KEY);
   });
 
@@ -81,8 +83,16 @@ describe('production configuration for AI credentials', () => {
   });
 
   it.each([
-    ['missing', { AI_CREDENTIAL_ENCRYPTION_KEY: undefined }, 'AI_CREDENTIAL_ENCRYPTION_KEY must be'],
-    ['malformed', { AI_CREDENTIAL_ENCRYPTION_KEY: 'short' }, 'AI_CREDENTIAL_ENCRYPTION_KEY must be'],
+    [
+      'missing',
+      { AI_CREDENTIAL_ENCRYPTION_KEY: undefined },
+      'AI_CREDENTIAL_ENCRYPTION_KEY must be',
+    ],
+    [
+      'malformed',
+      { AI_CREDENTIAL_ENCRYPTION_KEY: 'short' },
+      'AI_CREDENTIAL_ENCRYPTION_KEY must be',
+    ],
     ['shared with Gmail', { AI_CREDENTIAL_ENCRYPTION_KEY: 'A1'.repeat(32) }, 'must differ'],
   ])('rejects a %s AI key', (_label, change, message) => {
     expect(() => validateProductionConfig({ ...base, ...change })).toThrow(message);
@@ -90,8 +100,16 @@ describe('production configuration for AI credentials', () => {
 
   it.each([
     ['a hosted Gemini key', { GEMINI_API_KEY: 'x' }, 'GEMINI_API_KEY is no longer used'],
-    ['a hosted model override', { GEMINI_EXTRACTION_MODEL: 'x' }, 'GEMINI_EXTRACTION_MODEL is no longer used'],
-    ['the old global limit', { AI_DAILY_CALL_LIMIT: '100' }, 'replaced by AI_USER_DAILY_CALL_LIMIT'],
+    [
+      'a hosted model override',
+      { GEMINI_EXTRACTION_MODEL: 'x' },
+      'GEMINI_EXTRACTION_MODEL is no longer used',
+    ],
+    [
+      'the old global limit',
+      { AI_DAILY_CALL_LIMIT: '100' },
+      'replaced by AI_USER_DAILY_CALL_LIMIT',
+    ],
     ['an invalid per-user limit', { AI_USER_DAILY_CALL_LIMIT: '9000' }, 'from 0 to 5000'],
     ['a non-numeric per-user limit', { AI_USER_DAILY_CALL_LIMIT: '-1' }, 'from 0 to 5000'],
   ])('refuses to start with %s', (_label, change, message) => {
@@ -99,8 +117,12 @@ describe('production configuration for AI credentials', () => {
   });
 
   it('accepts the per-user limit, including 0 as the kill switch', () => {
-    expect(() => validateProductionConfig({ ...base, AI_USER_DAILY_CALL_LIMIT: '0' })).not.toThrow();
-    expect(() => validateProductionConfig({ ...base, AI_USER_DAILY_CALL_LIMIT: '500' })).not.toThrow();
+    expect(() =>
+      validateProductionConfig({ ...base, AI_USER_DAILY_CALL_LIMIT: '0' }),
+    ).not.toThrow();
+    expect(() =>
+      validateProductionConfig({ ...base, AI_USER_DAILY_CALL_LIMIT: '500' }),
+    ).not.toThrow();
   });
 });
 
@@ -111,15 +133,15 @@ describe('required startup secrets', () => {
   };
 
   it('rejects a missing secret and names the variable', () => {
-    expect(() => validateRequiredSecrets({ ...valid, AI_CREDENTIAL_ENCRYPTION_KEY: undefined })).toThrow(
-      'AI_CREDENTIAL_ENCRYPTION_KEY is missing or not 64 hex characters',
-    );
+    expect(() =>
+      validateRequiredSecrets({ ...valid, AI_CREDENTIAL_ENCRYPTION_KEY: undefined }),
+    ).toThrow('AI_CREDENTIAL_ENCRYPTION_KEY is missing or not 64 hex characters');
   });
 
   it('rejects a malformed secret', () => {
-    expect(() => validateRequiredSecrets({ ...valid, GMAIL_TOKEN_ENCRYPTION_KEY: 'short' })).toThrow(
-      'GMAIL_TOKEN_ENCRYPTION_KEY is missing or not 64 hex characters',
-    );
+    expect(() =>
+      validateRequiredSecrets({ ...valid, GMAIL_TOKEN_ENCRYPTION_KEY: 'short' }),
+    ).toThrow('GMAIL_TOKEN_ENCRYPTION_KEY is missing or not 64 hex characters');
   });
 
   it('rejects shared encryption keys', () => {

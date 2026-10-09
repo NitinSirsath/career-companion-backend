@@ -83,32 +83,34 @@ export async function runOperation<T>(request: OperationRequest<T>): Promise<Ope
   const access = await request.access();
   const model = access.models[contract.role];
   const now = new Date();
-  await prisma.$transaction(async (tx) => {
-    // Compare-and-set on the observed attempts: exactly one worker can claim each attempt.
-    const claim = await tx.aIOperation.updateMany({
-      where: {
-        id: existing.id,
-        status: { in: ['PENDING', 'RETRYABLE'] },
-        attempts: existing.attempts,
-        OR: [{ retryAfter: null }, { retryAfter: { lte: now } }],
-      },
-      data: {
-        status: 'PROCESSING',
-        attempts: { increment: 1 },
-        startedAt: now,
-        errorCode: null,
-        provider: access.provider,
-        model: model.id,
-      },
+  await prisma
+    .$transaction(async (tx) => {
+      // Compare-and-set on the observed attempts: exactly one worker can claim each attempt.
+      const claim = await tx.aIOperation.updateMany({
+        where: {
+          id: existing.id,
+          status: { in: ['PENDING', 'RETRYABLE'] },
+          attempts: existing.attempts,
+          OR: [{ retryAfter: null }, { retryAfter: { lte: now } }],
+        },
+        data: {
+          status: 'PROCESSING',
+          attempts: { increment: 1 },
+          startedAt: now,
+          errorCode: null,
+          provider: access.provider,
+          model: model.id,
+        },
+      });
+      if (claim.count !== 1) throw new RetryableAIError('AI operation not ready');
+      await reserveUserCall(tx, userId, now);
+    })
+    .catch((err: unknown) => {
+      if (err instanceof AIAccessError)
+        logEvent('ai_call_deferred', { userId, emailId, operation, version, reason: err.reason });
+      if (err instanceof AIProviderError) err.operationStage = operation;
+      throw err;
     });
-    if (claim.count !== 1) throw new RetryableAIError('AI operation not ready');
-    await reserveUserCall(tx, userId, now);
-  }).catch((err: unknown) => {
-    if (err instanceof AIAccessError)
-      logEvent('ai_call_deferred', { userId, emailId, operation, version, reason: err.reason });
-    if (err instanceof AIProviderError) err.operationStage = operation;
-    throw err;
-  });
   logEvent('ai_call_started', {
     userId,
     emailId,
@@ -159,7 +161,8 @@ export function failureKind(err: unknown): ProviderFailure | null {
 }
 
 export function failureError(kind: ProviderFailure['kind'], message: string): AIProviderError {
-  if (kind === 'INVALID_OUTPUT') return new SchemaValidationFailure(message, 'Structured response failed validation');
+  if (kind === 'INVALID_OUTPUT')
+    return new SchemaValidationFailure(message, 'Structured response failed validation');
   if (kind === 'INVALID_REQUEST') return new TerminalAIError(message);
   if (kind === 'OUTCOME_UNKNOWN') return new AIOutcomeUnknownError();
   return new TerminalAIError(message);
@@ -185,11 +188,21 @@ async function recordFailure(
   if (failure?.usage) await recordTokens(access.userId, now, failure.usage);
   let thrown: unknown;
   await prisma.$transaction(async (tx) => {
-    if (kind === 'KEY_REJECTED' || kind === 'ACCOUNT_OR_BILLING' || kind === 'MODEL_UNAVAILABLE' || kind === 'RATE_LIMITED') {
+    if (
+      kind === 'KEY_REJECTED' ||
+      kind === 'ACCOUNT_OR_BILLING' ||
+      kind === 'MODEL_UNAVAILABLE' ||
+      kind === 'RATE_LIMITED'
+    ) {
       // Refused before any work was done: the claim is released and the attempt is not charged.
       await tx.aIOperation.updateMany({
         where: { id: existing.id, status: 'PROCESSING' },
-        data: { status: existing.status, attempts: { decrement: 1 }, errorCode: kind, retryAfter: null },
+        data: {
+          status: existing.status,
+          attempts: { decrement: 1 },
+          errorCode: kind,
+          retryAfter: null,
+        },
       });
       const resumesAt = await noteProviderFailure(tx, access, kind, now, {
         modelId,
@@ -199,7 +212,10 @@ async function recordFailure(
       return;
     }
     if (kind === 'INVALID_OUTPUT' || kind === 'INVALID_REQUEST') {
-      await tx.aIOperation.update({ where: { id: existing.id }, data: { status: 'FAILED', errorCode: kind } });
+      await tx.aIOperation.update({
+        where: { id: existing.id },
+        data: { status: 'FAILED', errorCode: kind },
+      });
       thrown =
         kind === 'INVALID_OUTPUT'
           ? new SchemaValidationFailure(failure!.message, 'Structured response failed validation')
