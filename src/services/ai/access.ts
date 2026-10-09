@@ -53,6 +53,7 @@ export interface ConfigurationState {
   revision: number;
 }
 
+/** Stored problems that only the user can fix; AI work waits until they do. */
 export const NEEDS_ATTENTION_ISSUES: readonly AIAccessIssue[] = [
   'KEY_REJECTED',
   'ACCOUNT_OR_BILLING',
