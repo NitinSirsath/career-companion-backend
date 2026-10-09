@@ -1,0 +1,36 @@
+name: Format once (temporary)
+# Runs Prettier on style/COM-152-prettier and commits only its output.
+# Lives only on the throwaway branch tmp/COM-152-format, which is deleted afterwards.
+on:
+  push:
+    branches: [tmp/COM-152-format]
+permissions:
+  contents: write
+concurrency:
+  group: format-once
+  cancel-in-progress: false
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: style/COM-152-prettier
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # Run twice: Prettier changes a few call chains again on a second pass.
+      - run: npm run format && npm run format && npm run format:check
+      - name: Commit only Prettier output
+        run: |
+          if git diff --quiet; then echo 'Nothing to format.'; exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -u
+          git commit -m 'style: format all files with Prettier (no logic change)'
+          git push origin HEAD:style/COM-152-prettier
