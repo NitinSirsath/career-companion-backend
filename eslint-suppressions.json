@@ -1,0 +1,191 @@
+{
+  "src/contracts/application.ts": {
+    "no-nested-ternary": {
+      "count": 1
+    }
+  },
+  "src/db/prisma.ts": {
+    "no-restricted-properties": {
+      "count": 1
+    }
+  },
+  "src/eval/ai/run.ts": {
+    "no-nested-ternary": {
+      "count": 2
+    }
+  },
+  "src/eval/ai/score.ts": {
+    "no-nested-ternary": {
+      "count": 1
+    }
+  },
+  "src/eval/ai/temporal.ts": {
+    "no-nested-ternary": {
+      "count": 1
+    }
+  },
+  "src/index.ts": {
+    "no-restricted-properties": {
+      "count": 17
+    }
+  },
+  "src/jobs/emailProcessingJob.ts": {
+    "no-nested-ternary": {
+      "count": 1
+    }
+  },
+  "src/jobs/notificationJob.ts": {
+    "no-nested-ternary": {
+      "count": 1
+    },
+    "no-restricted-properties": {
+      "count": 2
+    }
+  },
+  "src/mcp/config.ts": {
+    "no-restricted-properties": {
+      "count": 1
+    }
+  },
+  "src/middleware/auth.ts": {
+    "no-restricted-properties": {
+      "count": 2
+    }
+  },
+  "src/routes/auth.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-properties": {
+      "count": 7
+    }
+  },
+  "src/routes/gmail.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-properties": {
+      "count": 5
+    }
+  },
+  "src/services/agenda.ts": {
+    "no-nested-ternary": {
+      "count": 3
+    },
+    "no-restricted-properties": {
+      "count": 2
+    }
+  },
+  "src/services/ai/access.ts": {
+    "no-restricted-properties": {
+      "count": 1
+    }
+  },
+  "src/services/ai/credentials.ts": {
+    "no-restricted-properties": {
+      "count": 1
+    }
+  },
+  "src/services/ai/pipeline.ts": {
+    "no-restricted-properties": {
+      "count": 1
+    }
+  },
+  "src/services/ai/settings.ts": {
+    "no-nested-ternary": {
+      "count": 2
+    }
+  },
+  "src/services/ai/triage.ts": {
+    "no-nested-ternary": {
+      "count": 2
+    },
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-properties": {
+      "count": 3
+    }
+  },
+  "src/services/ai/usage.ts": {
+    "no-restricted-properties": {
+      "count": 1
+    }
+  },
+  "src/services/application.ts": {
+    "no-nested-ternary": {
+      "count": 3
+    }
+  },
+  "src/services/externalSubmission.ts": {
+    "no-restricted-properties": {
+      "count": 1
+    }
+  },
+  "src/services/gmailClient.ts": {
+    "no-restricted-properties": {
+      "count": 3
+    }
+  },
+  "src/services/gmailSchedule.ts": {
+    "no-restricted-properties": {
+      "count": 1
+    }
+  },
+  "src/services/gmailSync.ts": {
+    "no-nested-ternary": {
+      "count": 3
+    },
+    "no-restricted-imports": {
+      "count": 2
+    }
+  },
+  "src/services/matcher.ts": {
+    "no-nested-ternary": {
+      "count": 1
+    },
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "src/services/notifications/DiscordProvider.ts": {
+    "no-restricted-properties": {
+      "count": 1
+    }
+  },
+  "src/services/queue.ts": {
+    "no-restricted-properties": {
+      "count": 1
+    }
+  },
+  "src/tests/application-discovery.test.ts": {
+    "no-nested-ternary": {
+      "count": 1
+    }
+  },
+  "src/tests/application-status.test.ts": {
+    "no-nested-ternary": {
+      "count": 1
+    }
+  },
+  "src/tests/gmail-ingestion.test.ts": {
+    "no-nested-ternary": {
+      "count": 1
+    }
+  },
+  "src/tests/gmail-scheduled-sync.test.ts": {
+    "no-nested-ternary": {
+      "count": 1
+    }
+  },
+  "src/tests/helpers/fakeProviderClient.ts": {
+    "no-nested-ternary": {
+      "count": 1
+    }
+  },
+  "src/utils/gmailTokenEncryption.ts": {
+    "no-restricted-properties": {
+      "count": 1
+    }
+  }
+}
