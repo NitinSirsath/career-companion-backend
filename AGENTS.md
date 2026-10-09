@@ -26,10 +26,12 @@ https://github.com/NitinSirsath/career-companion-docs/blob/main/docs/engineering
 - Services (`src/services/`): business rules as plain exported functions. Don't add classes with static methods.
 - Errors: reuse the area's existing error class; don't add new error classes.
 - Contracts: change `src/contracts/` here; the frontend copies them with `npm run sync-contracts`.
+- Config: only `src/utils/config.ts` reads `process.env`. Add a getter there for a new variable.
 - Build only what the ticket needs. No parameters only for tests (like `now = new Date()`); tests use `vi.setSystemTime()`.
 - One home per rule or constant: search before writing a helper.
 - No nested ternaries, no `any`, avoid `!`. Comments say why; no ticket IDs in code.
 - Size is guidance: a function over ~80 lines or a file over ~500 lines is a sign to split. Explain exceptions in the PR.
 - If code you must change breaks these standards, fix that part first in a separate refactor commit.
 - Formatting: Prettier (`.prettierrc`). Run `npm run format` before committing; CI fails on unformatted code.
+- Baseline: new violations fail lint. When you fix old code, run `npx eslint src/ scripts/ prisma/seed.ts --prune-suppressions` and commit the smaller file. Never add entries.
 - Before "done": npm run typecheck && npm run lint && npm run format:check && npm test. List exceptions in the PR.
