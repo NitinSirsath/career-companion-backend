@@ -24,7 +24,7 @@ https://github.com/NitinSirsath/career-companion-docs/blob/main/docs/engineering
 
 - Routes (`src/routes/`): validate input with the contract schema, call one service, send the result. No database queries in routes. Copy `routes/ai.ts`.
 - Services (`src/services/`): business rules as plain exported functions. Don't add classes with static methods.
-- Errors: reuse the area's existing error class; don't add new error classes.
+- Errors: for an expected failure (not found, conflict, not allowed, invalid), a service throws `AppError(status, code, message, details?)` from `src/errors.ts`, and `middleware/error.ts` sends it. Don't add error classes, and don't catch errors in routes to build a response. Gmail sync and AI provider errors stay as they are.
 - Contracts: change `src/contracts/` here; the frontend copies them with `npm run sync-contracts`.
 - Config: only `src/utils/config.ts` reads `process.env`. Add a getter there for a new variable.
 - Build only what the ticket needs. No parameters only for tests (like `now = new Date()`); tests use `vi.setSystemTime()`.
