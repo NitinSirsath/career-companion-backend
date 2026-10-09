@@ -12,7 +12,6 @@ import {
   AI_CATALOG,
   AIRole,
   CatalogProvider,
-  catalogDay,
   modelsForRole,
 } from '../../contracts/aiCatalog';
 import type {
@@ -26,6 +25,7 @@ import { reofferPendingEmails } from '../gmailSync';
 import {
   AIAccess,
   CONFIGURATION_STATE,
+  NEEDS_ATTENTION_ISSUES,
   deriveAccess,
   isOffered,
   modelsFor,
@@ -65,16 +65,10 @@ export class SettingsError extends Error {
 
 // Printable ASCII without spaces: no provider key format needs more, and nothing else is accepted.
 const API_KEY = /^[\x21-\x7e]{8,512}$/;
-const NEEDS_ATTENTION_ISSUES: AIAccessIssue[] = [
-  'KEY_REJECTED',
-  'ACCOUNT_OR_BILLING',
-  'MODEL_UNAVAILABLE',
-  'KEY_UNREADABLE',
-];
-
 const iso = (date: Date | null | undefined) => (date ? date.toISOString() : null);
 
-export async function readSettings(userId: string, now = new Date()): Promise<AISettingsResponse> {
+export async function readSettings(userId: string): Promise<AISettingsResponse> {
+  const now = new Date();
   const [config, usage, waitingEmails] = await Promise.all([
     prisma.aIConfiguration.findUnique({ where: { userId }, select: CONFIGURATION_STATE }),
     prisma.aIUsageDay.findUnique({ where: { userId_day: { userId, day: utcDay(now) } } }),
@@ -82,7 +76,7 @@ export async function readSettings(userId: string, now = new Date()): Promise<AI
   ]);
   const access = deriveAccess(config, usage?.calls ?? 0, now);
   const provider = config ? AI_CATALOG.find((p) => p.id === config.provider) : undefined;
-  const models = config && provider ? modelsFor(provider, config, now) : null;
+  const models = config && provider ? modelsFor(provider, config) : null;
   return {
     configured: !!config,
     provider: config?.provider ?? null,
@@ -146,11 +140,10 @@ function chosenModel(
   role: AIRole,
   requested: string | null | undefined,
   current: string | null,
-  now: Date,
 ): string | null {
   if (requested === undefined) return current;
   if (requested === null) return null;
-  if (!modelsForRole(provider, role, catalogDay(now)).some((m) => m.id === requested))
+  if (!modelsForRole(provider, role).some((m) => m.id === requested))
     throw new SettingsError(
       400,
       'VALIDATION_ERROR',
@@ -159,31 +152,13 @@ function chosenModel(
   return requested;
 }
 
-const rejectedError = (result: Extract<VerifyResult, { result: 'REJECTED' }>) =>
-  new SettingsError(
-    422,
-    'AI_ACCESS_REJECTED',
-    'The provider refused this key or model. Nothing was saved.',
-    {
-      reason: result.kind,
-      modelId: result.modelId ?? null,
-    },
-  );
-
-export async function saveSettings(
-  userId: string,
+/** Rejects a save request that cannot be verified or saved as sent. */
+function checkSaveRequest(
   request: SaveAISettingsRequest,
-  now = new Date(),
-): Promise<SaveAISettingsResponse> {
-  const provider = offeredProvider(request.provider);
-  if (!provider)
-    throw new SettingsError(400, 'VALIDATION_ERROR', 'That AI provider is not offered.');
-  const existing = await prisma.aIConfiguration.findUnique({
-    where: { userId },
-    select: { ...CONFIGURATION_STATE, encryptedApiKey: true },
-  });
-  const switching = !existing || existing.provider !== provider.id;
-  const newKey = request.apiKey?.trim() ?? '';
+  provider: CatalogProvider,
+  newKey: string,
+  switching: boolean,
+): void {
   if (newKey && !API_KEY.test(newKey))
     throw new SettingsError(400, 'VALIDATION_ERROR', 'The API key format is not valid.');
   if (!newKey && switching)
@@ -203,63 +178,109 @@ export async function saveSettings(
       'VALIDATION_ERROR',
       'The data-use summary has changed. Review it again.',
     );
+}
 
-  let apiKey = newKey;
-  if (!apiKey) {
-    try {
-      apiKey = openApiKey(userId, existing!.encryptedApiKey);
-    } catch (err) {
-      if (!(err instanceof CredentialUnreadableError)) throw err;
-      throw new SettingsError(400, 'AI_KEY_REQUIRED', 'Enter your API key again.');
-    }
+/** Opens the saved key for a save that keeps it. A key that cannot be read must be entered again. */
+function savedKey(userId: string, saved: { encryptedApiKey: string } | null): string {
+  // checkSaveRequest already requires a new key when there is no saved setup to keep.
+  if (!saved) throw new Error('No saved AI key to keep');
+  try {
+    return openApiKey(userId, saved.encryptedApiKey);
+  } catch (err) {
+    if (!(err instanceof CredentialUnreadableError)) throw err;
+    throw new SettingsError(400, 'AI_KEY_REQUIRED', 'Enter your API key again.');
   }
-  const fastModel = chosenModel(
-    provider,
-    'fast',
-    request.models?.fast,
-    switching ? null : existing!.fastModel,
-    now,
+}
+
+/**
+ * The access state a save leaves. A new key starts from a clean state. For an unchanged key, a
+ * definitive success clears problems that need the user's attention, and an inconclusive check
+ * never overwrites what is known.
+ */
+function accessStateAfterSave(
+  keyChanged: boolean,
+  verified: boolean,
+  accessIssue: AIAccessIssue | null,
+  now: Date,
+): Prisma.AIConfigurationUncheckedUpdateInput {
+  if (keyChanged)
+    return {
+      accessIssue: null,
+      accessIssueModel: null,
+      cooldownUntil: null,
+      consecutiveFailures: 0,
+      verifiedAt: verified ? now : null,
+    };
+  if (!verified) return {};
+  if (accessIssue && NEEDS_ATTENTION_ISSUES.includes(accessIssue))
+    return { accessIssue: null, accessIssueModel: null, verifiedAt: now };
+  return { verifiedAt: now };
+}
+
+const logAccessCheck = (
+  userId: string,
+  provider: CatalogProvider,
+  on: 'save' | 'check',
+  result: VerifyResult,
+) =>
+  logEvent('ai_access_checked', {
+    userId,
+    provider: provider.id,
+    on,
+    result: result.result,
+    kind: result.result === 'REJECTED' ? result.kind : undefined,
+  });
+
+const rejectedError = (result: Extract<VerifyResult, { result: 'REJECTED' }>) =>
+  new SettingsError(
+    422,
+    'AI_ACCESS_REJECTED',
+    'The provider refused this key or model. Nothing was saved.',
+    {
+      reason: result.kind,
+      modelId: result.modelId ?? null,
+    },
   );
+
+export async function saveSettings(
+  userId: string,
+  request: SaveAISettingsRequest,
+): Promise<SaveAISettingsResponse> {
+  const now = new Date();
+  const provider = offeredProvider(request.provider);
+  if (!provider)
+    throw new SettingsError(400, 'VALIDATION_ERROR', 'That AI provider is not offered.');
+  const existing = await prisma.aIConfiguration.findUnique({
+    where: { userId },
+    select: { ...CONFIGURATION_STATE, encryptedApiKey: true },
+  });
+  // The saved setup this request changes; null when the provider is set up for the first time.
+  const current = existing?.provider === provider.id ? existing : null;
+  const switching = current === null;
+  const newKey = request.apiKey?.trim() ?? '';
+  checkSaveRequest(request, provider, newKey, switching);
+  const apiKey = newKey || savedKey(userId, current);
+
+  const fastModel = chosenModel(provider, 'fast', request.models?.fast, current?.fastModel ?? null);
   const detailedModel = chosenModel(
     provider,
     'detailed',
     request.models?.detailed,
-    switching ? null : existing!.detailedModel,
-    now,
+    current?.detailedModel ?? null,
   );
-  const { models } = modelsFor(provider, { fastModel, detailedModel }, now);
+  const { models } = modelsFor(provider, { fastModel, detailedModel });
 
   await reserveVerification(userId, now);
   const result = await createProviderClient(provider, apiKey).verifyModels([
     models.fast.id,
     models.detailed.id,
   ]);
-  const keyChanged = switching || !!newKey;
-  logEvent('ai_access_checked', {
-    userId,
-    provider: provider.id,
-    on: 'save',
-    result: result.result,
-    kind: result.result === 'REJECTED' ? result.kind : undefined,
-  });
+  logAccessCheck(userId, provider, 'save', result);
   if (result.result === 'REJECTED') throw rejectedError(result);
 
+  const keyChanged = switching || !!newKey;
   const verified = result.result === 'VERIFIED';
-  // A definitive success clears problems that need the user's attention; an inconclusive check
-  // never overwrites what is known about an unchanged key. A new key starts from a clean state.
-  const state: Prisma.AIConfigurationUncheckedUpdateInput = keyChanged
-    ? {
-        accessIssue: null,
-        accessIssueModel: null,
-        cooldownUntil: null,
-        consecutiveFailures: 0,
-        verifiedAt: verified ? now : null,
-      }
-    : verified
-      ? existing!.accessIssue && NEEDS_ATTENTION_ISSUES.includes(existing!.accessIssue)
-        ? { accessIssue: null, accessIssueModel: null, verifiedAt: now }
-        : { verifiedAt: now }
-      : {};
+  const state = accessStateAfterSave(keyChanged, verified, current?.accessIssue ?? null, now);
   const consent = request.consentDisclosure
     ? { consentDisclosure: request.consentDisclosure, consentedAt: now }
     : {};
@@ -282,7 +303,8 @@ export async function saveSettings(
         userId,
         ...fields,
         encryptedApiKey: sealApiKey(userId, newKey),
-        consentDisclosure: request.consentDisclosure!,
+        // checkSaveRequest made sure a new setup confirms this exact disclosure.
+        consentDisclosure: provider.disclosure.version,
         consentedAt: now,
         verifiedAt: verified ? now : null,
       },
@@ -296,13 +318,11 @@ export async function saveSettings(
     keyChanged,
   });
   await reofferPendingEmails(userId);
-  return { ...(await readSettings(userId, now)), verification: result.result };
+  return { ...(await readSettings(userId)), verification: result.result };
 }
 
-export async function checkSettings(
-  userId: string,
-  now = new Date(),
-): Promise<CheckAISettingsResponse> {
+export async function checkSettings(userId: string): Promise<CheckAISettingsResponse> {
+  const now = new Date();
   const config = await prisma.aIConfiguration.findUnique({
     where: { userId },
     select: { ...CONFIGURATION_STATE, encryptedApiKey: true },
@@ -326,7 +346,7 @@ export async function checkSettings(
       where: guarded,
       data: { accessIssue: 'KEY_UNREADABLE', accessIssueModel: null, lastCheckedAt: now },
     });
-    return { ...(await readSettings(userId, now)), verification: 'REJECTED' };
+    return { ...(await readSettings(userId)), verification: 'REJECTED' };
   }
   await reserveVerification(userId, now);
   const { models } = modelsFor(provider, config, now);
@@ -334,13 +354,7 @@ export async function checkSettings(
     models.fast.id,
     models.detailed.id,
   ]);
-  logEvent('ai_access_checked', {
-    userId,
-    provider: provider.id,
-    on: 'check',
-    result: result.result,
-    kind: result.result === 'REJECTED' ? result.kind : undefined,
-  });
+  logAccessCheck(userId, provider, 'check', result);
   if (result.result === 'VERIFIED') {
     // A model lookup proves access, not that a rate limit has cleared: a cooldown stays.
     const clears = config.accessIssue && NEEDS_ATTENTION_ISSUES.includes(config.accessIssue);
@@ -365,7 +379,7 @@ export async function checkSettings(
   } else {
     await prisma.aIConfiguration.updateMany({ where: guarded, data: { lastCheckedAt: now } });
   }
-  return { ...(await readSettings(userId, now)), verification: result.result };
+  return { ...(await readSettings(userId)), verification: result.result };
 }
 
 /** Removes the configuration and its sealed key. Processed data stays. Idempotent. */
@@ -388,15 +402,13 @@ const unavailable = (err: AIAccessError) =>
  * toward the safety limit, and refusals update access state like any call. Nothing is persisted
  * apart from those counts and state: no ledger row, no result.
  */
-export async function runSampleTest(
-  userId: string,
-  now = new Date(),
-): Promise<AISampleTestResponse> {
+export async function runSampleTest(userId: string): Promise<AISampleTestResponse> {
+  const now = new Date();
   const configured = await prisma.aIConfiguration.count({ where: { userId } });
   if (!configured) throw new SettingsError(404, 'AI_NOT_CONFIGURED', 'AI is not set up.');
   let access: AIAccess;
   try {
-    access = await resolveAIAccess(userId, now);
+    access = await resolveAIAccess(userId);
   } catch (err) {
     if (err instanceof AIAccessError) throw unavailable(err);
     throw err;
