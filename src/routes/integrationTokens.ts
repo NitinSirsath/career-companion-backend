@@ -12,7 +12,6 @@ import { z } from 'zod';
 import { CreateIntegrationTokenRequestSchema } from '../contracts/integrationToken';
 import { requireAuth } from '../middleware/auth';
 import {
-  IntegrationTokenError,
   createIntegrationToken,
   listIntegrationTokens,
   revokeIntegrationToken,
@@ -27,10 +26,6 @@ function handle(status: number, action: (req: Request) => Promise<unknown>) {
     try {
       res.status(status).json(await action(req));
     } catch (err) {
-      if (err instanceof IntegrationTokenError) {
-        res.status(err.status).json({ error: { code: err.code, message: err.message } });
-        return;
-      }
       next(err);
     }
   };
@@ -54,7 +49,7 @@ router.get(
 
 router.delete(
   '/:id',
-  handle(200, (req) => revokeIntegrationToken(req.auth!.user.id, z.uuid().parse(req.params.id))),
+  handle(200, (req) => revokeIntegrationToken(req.auth!.user.id, z.uuid().parse(req.params.id)),
 );
 
 export const integrationTokenRouter = router;
