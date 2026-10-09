@@ -2,7 +2,7 @@ import { CorrectEmailMatchRequestSchema } from '../contracts/email';
 import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth';
-import { MatcherService, MatchCorrectionError } from '../services/matcher';
+import { MatcherService } from '../services/matcher';
 import { ResolveAmbiguityRequestSchema, RetryEmailRequestSchema } from '../contracts/email';
 
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
@@ -18,19 +18,6 @@ router.patch('/:id/match', async (req, res, next) => {
     const body = CorrectEmailMatchRequestSchema.parse(req.body);
     res.json(await MatcherService.correctEmailMatch(req.auth!.user.id, id, body));
   } catch (error) {
-    if (error instanceof MatchCorrectionError) {
-      const status =
-        error.code === 'NOT_FOUND' || error.code === 'APPLICATION_NOT_FOUND' ? 404 : 409;
-      return res.status(status).json({
-        error: {
-          code: error.code,
-          message:
-            status === 404
-              ? 'Email or application no longer available'
-              : 'This email link changed or cannot be corrected. Refresh before trying again.',
-        },
-      });
-    }
     next(error);
   }
 });
