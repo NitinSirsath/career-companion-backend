@@ -4,10 +4,7 @@
     "input": {
       "sender": "Wide World Importers <orders@wideworldimporters.example.com>",
       "subject": "Your order #88123 has shipped",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "Hi Alex, your order of 2 ceramic mugs has shipped and should arrive by Thursday. Track your package with the link below."
     },
     "expect": {
@@ -20,10 +17,7 @@
     "input": {
       "sender": "Woodgrove Bank <alerts@woodgrovebank.example.com>",
       "subject": "Card transaction alert",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "A purchase of 42.10 EUR was made with your card ending 0000 at Fourth Coffee. If this wasn't you, contact us."
     },
     "expect": {
@@ -36,10 +30,7 @@
     "input": {
       "sender": "Jordan <jordan@example.net>",
       "subject": "Dinner Saturday?",
-      "labels": [
-        "INBOX",
-        "CATEGORY_PERSONAL"
-      ],
+      "labels": ["INBOX", "CATEGORY_PERSONAL"],
       "body": "Hey! Are you free for dinner on Saturday? Thinking of the new place near the station. Let me know!"
     },
     "expect": {
@@ -52,10 +43,7 @@
     "input": {
       "sender": "Relecloud Storage <no-reply@storage.relecloud.example.com>",
       "subject": "Your storage is 90% full",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "Your Relecloud Storage account is 90% full. Upgrade your plan or delete files to keep syncing."
     },
     "expect": {
@@ -68,10 +56,7 @@
     "input": {
       "sender": "Margie's Travel <bookings@margiestravel.example.com>",
       "subject": "Booking confirmed: Lisbon, Dec 12-16",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "Your hotel booking in Lisbon from December 12 to 16, 2026 is confirmed. Confirmation code: MT-55821."
     },
     "expect": {
@@ -84,10 +69,7 @@
     "input": {
       "sender": "Coho Winery <news@cohowinery.example.org>",
       "subject": "Autumn tasting menu",
-      "labels": [
-        "INBOX",
-        "CATEGORY_FORUMS"
-      ],
+      "labels": ["INBOX", "CATEGORY_FORUMS"],
       "body": "Join us for the autumn tasting menu every Friday in November. Book a table online."
     },
     "expect": {
@@ -100,10 +82,7 @@
     "input": {
       "sender": "Calendar <calendar-notification@example.com>",
       "subject": "Invitation: Dentist appointment @ Tue Nov 3, 2026 9am",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "You have been invited to the following event: Dentist appointment, Tuesday November 3, 2026, 9:00 AM - 9:30 AM."
     },
     "expect": {

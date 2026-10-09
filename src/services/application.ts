@@ -218,17 +218,26 @@ export class ApplicationService {
     const search = filters.q?.replace(/[\\%_]/g, '\\$&');
     const orderBy: Prisma.ApplicationOrderByWithRelationInput[] =
       filters.sort === 'applied_desc' || filters.sort === 'applied_asc'
-        ? [{ appliedAt: { sort: filters.sort === 'applied_desc' ? 'desc' : 'asc', nulls: 'last' } }, { id: 'desc' }]
+        ? [
+            {
+              appliedAt: { sort: filters.sort === 'applied_desc' ? 'desc' : 'asc', nulls: 'last' },
+            },
+            { id: 'desc' },
+          ]
         : filters.sort === 'company_asc'
           ? [{ companyName: 'asc' }, { id: 'desc' }]
           : [{ createdAt: 'desc' }, { id: 'desc' }];
     const applications = await prisma.application.findMany({
       where: {
         userId,
-        ...(filters.archive === 'all' ? {} : { archivedAt: filters.archive === 'archived' ? { not: null } : null }),
-        ...(filters.submittedVia ? {
-          externalSubmissions: { some: { userId, matchState: { in: ['LINKED', 'CREATED'] } } },
-        } : {}),
+        ...(filters.archive === 'all'
+          ? {}
+          : { archivedAt: filters.archive === 'archived' ? { not: null } : null }),
+        ...(filters.submittedVia
+          ? {
+              externalSubmissions: { some: { userId, matchState: { in: ['LINKED', 'CREATED'] } } },
+            }
+          : {}),
         AND: [
           ...(search
             ? [
@@ -244,13 +253,13 @@ export class ApplicationService {
             ? filters.effectiveStatus === 'UNKNOWN'
               ? [{ userStatus: null, aiStatus: null }]
               : [
-                {
-                  OR: [
-                    { userStatus: filters.effectiveStatus },
-                    { userStatus: null, aiStatus: filters.effectiveStatus },
-                  ],
-                },
-              ]
+                  {
+                    OR: [
+                      { userStatus: filters.effectiveStatus },
+                      { userStatus: null, aiStatus: filters.effectiveStatus },
+                    ],
+                  },
+                ]
             : []),
         ],
       },
@@ -440,7 +449,10 @@ export class ApplicationService {
         description: true,
         deadline: true,
         deadlinePrecision: true,
-        origin: true, actionRevision: true, clientRequestId: true, snoozedUntil: true,
+        origin: true,
+        actionRevision: true,
+        clientRequestId: true,
+        snoozedUntil: true,
         status: true,
         createdAt: true,
       },
@@ -454,7 +466,10 @@ export class ApplicationService {
       description: a.description,
       deadline: a.deadline,
       deadlinePrecision: a.deadlinePrecision,
-      origin: a.origin === 'USER' ? 'USER' : a.emailId ? 'EMAIL' : null, actionRevision: a.actionRevision, clientRequestId: a.clientRequestId, snoozedUntil: a.snoozedUntil?.toISOString() ?? null,
+      origin: a.origin === 'USER' ? 'USER' : a.emailId ? 'EMAIL' : null,
+      actionRevision: a.actionRevision,
+      clientRequestId: a.clientRequestId,
+      snoozedUntil: a.snoozedUntil?.toISOString() ?? null,
       status: a.status,
       createdAt: a.createdAt,
     }));

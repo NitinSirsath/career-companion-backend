@@ -31,4 +31,5 @@ https://github.com/NitinSirsath/career-companion-docs/blob/main/docs/engineering
 - No nested ternaries, no `any`, avoid `!`. Comments say why; no ticket IDs in code.
 - Size is guidance: a function over ~80 lines or a file over ~500 lines is a sign to split. Explain exceptions in the PR.
 - If code you must change breaks these standards, fix that part first in a separate refactor commit.
-- Before "done": npm run typecheck && npm run lint && npm test. List exceptions in the PR.
+- Formatting: Prettier (`.prettierrc`). Run `npm run format` before committing; CI fails on unformatted code.
+- Before "done": npm run typecheck && npm run lint && npm run format:check && npm test. List exceptions in the PR.

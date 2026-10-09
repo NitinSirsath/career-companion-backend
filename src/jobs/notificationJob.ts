@@ -57,8 +57,12 @@ export async function startNotificationWorker() {
       return;
     }
     if (action.retiredAt || action.status !== 'PENDING') return;
-    if (action.application.archivedAt || (action.snoozedUntil && action.snoozedUntil > new Date())) {
-      await suppressNotifications(prisma, [actionId]); return;
+    if (
+      action.application.archivedAt ||
+      (action.snoozedUntil && action.snoozedUntil > new Date())
+    ) {
+      await suppressNotifications(prisma, [actionId]);
+      return;
     }
 
     // Check idempotency: Did we already deliver it?
@@ -120,9 +124,21 @@ export async function startNotificationWorker() {
       logDebug('notification_skipped', { reason: 'claimed_or_terminal', actionId });
       return;
     }
-    const current = await prisma.action.findUnique({ where: { id: actionId }, include: { application: true } });
-    if (!current || current.retiredAt || current.status !== 'PENDING' || current.application.archivedAt || (current.snoozedUntil && current.snoozedUntil > new Date())) {
-      await prisma.notificationDelivery.updateMany({where:{actionId,provider:'DISCORD',status:{not:'DELIVERED'}},data:{status:'FAILED_PERMANENT',errorDetails:'USER_SUPPRESSED'}});
+    const current = await prisma.action.findUnique({
+      where: { id: actionId },
+      include: { application: true },
+    });
+    if (
+      !current ||
+      current.retiredAt ||
+      current.status !== 'PENDING' ||
+      current.application.archivedAt ||
+      (current.snoozedUntil && current.snoozedUntil > new Date())
+    ) {
+      await prisma.notificationDelivery.updateMany({
+        where: { actionId, provider: 'DISCORD', status: { not: 'DELIVERED' } },
+        data: { status: 'FAILED_PERMANENT', errorDetails: 'USER_SUPPRESSED' },
+      });
       return;
     }
     const result = await discordProvider.send(payload);

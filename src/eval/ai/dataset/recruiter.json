@@ -4,55 +4,35 @@
     "input": {
       "sender": "Priya Raman <priya.raman@northwind-robotics.example.com>",
       "subject": "Interview invitation: Senior Platform Engineer at Northwind Robotics",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "snippet": "Hi Alex, thank you for applying to the Senior Platform Engineer role at Northwind Robotics. We would like to invite you to a 45-minute video interview",
       "body": "Hi Alex,\n\nThank you for applying to the Senior Platform Engineer role at Northwind Robotics.\nWe would like to invite you to a 45-minute video interview with our engineering manager,\nDaniel Okafor, on Wednesday, November 4, 2026 at 2:00 PM Eastern Time.\n\nPlease reply by Friday, October 30, 2026 to confirm the time, or suggest another slot that week.\nThe video link will follow once you confirm.\n\nBest regards,\nPriya Raman\nTechnical Recruiter, Northwind Robotics\npriya.raman@northwind-robotics.example.com"
     },
     "expect": {
       "relevance": "RELEVANT",
       "critical": true,
-      "category": [
-        "INTERVIEW",
-        "RECRUITER"
-      ],
+      "category": ["INTERVIEW", "RECRUITER"],
       "fields": {
         "companyName": {
-          "contains": [
-            "northwind robotics"
-          ]
+          "contains": ["northwind robotics"]
         },
         "jobTitle": {
-          "contains": [
-            "platform engineer"
-          ]
+          "contains": ["platform engineer"]
         },
         "recruiterName": {
-          "contains": [
-            "priya raman"
-          ]
+          "contains": ["priya raman"]
         },
         "interviewDate": {
           "date": "2026-11-04"
         },
         "interviewTime": {
-          "contains": [
-            "2:00",
-            "14:00",
-            "2 pm",
-            "2pm"
-          ]
+          "contains": ["2:00", "14:00", "2 pm", "2pm"]
         },
         "actionRequired": {
           "equals": true
         }
       },
-      "mustBeNull": [
-        "offerInfo",
-        "rejectionInfo"
-      ]
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
     },
     "group": "recruiter"
   },
@@ -61,38 +41,24 @@
     "input": {
       "sender": "Marco Bianchi <marco@talentbridge.example.org>",
       "subject": "Backend role at a Series B fintech — open to a chat?",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "Hi Alex,\n\nI'm a recruiter at TalentBridge Partners. One of my clients, Woodgrove Payments, is hiring a Staff Backend Engineer\n(Go, PostgreSQL, remote within the EU). Your profile looks like a strong match.\n\nWould you be open to a 20-minute call this week? Let me know a time that works.\n\nMarco Bianchi\nTalentBridge Partners"
     },
     "expect": {
       "relevance": "RELEVANT",
-      "category": [
-        "RECRUITER"
-      ],
+      "category": ["RECRUITER"],
       "fields": {
         "jobTitle": {
-          "contains": [
-            "backend engineer"
-          ]
+          "contains": ["backend engineer"]
         },
         "recruiterName": {
-          "contains": [
-            "marco bianchi"
-          ]
+          "contains": ["marco bianchi"]
         },
         "actionRequired": {
           "equals": true
         }
       },
-      "mustBeNull": [
-        "offerInfo",
-        "rejectionInfo",
-        "interviewDate",
-        "assessmentDeadline"
-      ]
+      "mustBeNull": ["offerInfo", "rejectionInfo", "interviewDate", "assessmentDeadline"]
     },
     "group": "recruiter"
   },
@@ -101,37 +67,24 @@
     "input": {
       "sender": "Hannah Lee <hannah.lee@careers.contoso-analytics.example.com>",
       "subject": "Data Engineer opening at Contoso Analytics",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "Hello Alex,\n\nI lead talent acquisition for the data platform team at Contoso Analytics. We have an opening for a Data Engineer\nand your experience with streaming pipelines stood out.\n\nIf you're interested, could you send me an updated CV and your notice period?\n\nThanks,\nHannah Lee\nTalent Acquisition, Contoso Analytics"
     },
     "expect": {
       "relevance": "RELEVANT",
-      "category": [
-        "RECRUITER"
-      ],
+      "category": ["RECRUITER"],
       "fields": {
         "companyName": {
-          "contains": [
-            "contoso"
-          ]
+          "contains": ["contoso"]
         },
         "jobTitle": {
-          "contains": [
-            "data engineer"
-          ]
+          "contains": ["data engineer"]
         },
         "actionRequired": {
           "equals": true
         }
       },
-      "mustBeNull": [
-        "offerInfo",
-        "rejectionInfo",
-        "interviewDate"
-      ]
+      "mustBeNull": ["offerInfo", "rejectionInfo", "interviewDate"]
     },
     "group": "recruiter"
   },
@@ -140,35 +93,21 @@
     "input": {
       "sender": "Sam Patel <sam.patel@example.net>",
       "subject": "Intro: Alex <> Fabrikam engineering",
-      "labels": [
-        "INBOX",
-        "CATEGORY_PERSONAL"
-      ],
+      "labels": ["INBOX", "CATEGORY_PERSONAL"],
       "body": "Hi both,\n\nAlex, meet Grace Kim, Head of Engineering at Fabrikam. Grace, Alex is the engineer I mentioned who rebuilt our deploy pipeline.\nFabrikam is hiring a Senior DevOps Engineer and I think you two should talk.\n\nI'll let you take it from here.\nSam"
     },
     "expect": {
       "relevance": "RELEVANT",
-      "category": [
-        "RECRUITER",
-        "FOLLOW_UP"
-      ],
+      "category": ["RECRUITER", "FOLLOW_UP"],
       "fields": {
         "companyName": {
-          "contains": [
-            "fabrikam"
-          ]
+          "contains": ["fabrikam"]
         },
         "jobTitle": {
-          "contains": [
-            "devops"
-          ]
+          "contains": ["devops"]
         }
       },
-      "mustBeNull": [
-        "offerInfo",
-        "rejectionInfo",
-        "interviewDate"
-      ]
+      "mustBeNull": ["offerInfo", "rejectionInfo", "interviewDate"]
     },
     "group": "recruiter"
   },
@@ -177,28 +116,18 @@
     "input": {
       "sender": "Priya Raman <inmail-hit-reply@linkedin.example.com>",
       "subject": "Next steps for the Software Engineering Intern role at Tailspin Toys",
-      "labels": [
-        "INBOX",
-        "CATEGORY_SOCIAL"
-      ],
+      "labels": ["INBOX", "CATEGORY_SOCIAL"],
       "body": "Hi Alex,\n\nYour profile caught our attention for the Software Developer Intern (New Initiatives) role at Tailspin Toys. We are excited about this position.\n\nTo help us understand your profile, please submit your information using the form linked below within 24 hours.\n\nPriya Raman\nTalent Partner, Tailspin Toys"
     },
     "expect": {
       "relevance": "RELEVANT",
-      "category": [
-        "RECRUITER"
-      ],
+      "category": ["RECRUITER"],
       "fields": {
         "companyName": {
-          "contains": [
-            "Tailspin"
-          ]
+          "contains": ["Tailspin"]
         }
       },
-      "mustBeNull": [
-        "offerInfo",
-        "rejectionInfo"
-      ]
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
     },
     "group": "recruiter"
   }

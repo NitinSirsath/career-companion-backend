@@ -91,4 +91,6 @@ describe('GmailSyncService Helpers', () => {
   });
 });
 
-it('ends the attempt at least 30 seconds before queue expiry', () => { expect(GMAIL_SYNC_EXPIRE_SECONDS * 1000 - SYNC_ATTEMPT_BUDGET_MS).toBeGreaterThanOrEqual(30_000); });
+it('ends the attempt at least 30 seconds before queue expiry', () => {
+  expect(GMAIL_SYNC_EXPIRE_SECONDS * 1000 - SYNC_ATTEMPT_BUDGET_MS).toBeGreaterThanOrEqual(30_000);
+});

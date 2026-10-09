@@ -36,9 +36,13 @@ export class IntegrationTokenError extends Error {
   }
 }
 
-const hashToken = (plaintext: string) => crypto.createHash('sha256').update(plaintext).digest('hex');
+const hashToken = (plaintext: string) =>
+  crypto.createHash('sha256').update(plaintext).digest('hex');
 
-function statusOf(row: Pick<TokenRow, 'expiresAt' | 'revokedAt'>, now: Date): IntegrationTokenStatus {
+function statusOf(
+  row: Pick<TokenRow, 'expiresAt' | 'revokedAt'>,
+  now: Date,
+): IntegrationTokenStatus {
   if (row.revokedAt) return 'revoked';
   return row.expiresAt <= now ? 'expired' : 'active';
 }
@@ -92,7 +96,12 @@ export async function createIntegrationToken(
   return { integrationToken: toResponse(row, now), plaintextToken };
 }
 
-export async function listIntegrationTokens(userId: string, limit: number, offset: number, now = new Date()) {
+export async function listIntegrationTokens(
+  userId: string,
+  limit: number,
+  offset: number,
+  now = new Date(),
+) {
   const rows = await prisma.integrationToken.findMany({
     where: { userId },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -103,7 +112,11 @@ export async function listIntegrationTokens(userId: string, limit: number, offse
 }
 
 /** Immediate. Unknown or foreign IDs are 404; revoking a revoked token returns it unchanged. */
-export async function revokeIntegrationToken(userId: string, id: string, now = new Date()): Promise<IntegrationToken> {
+export async function revokeIntegrationToken(
+  userId: string,
+  id: string,
+  now = new Date(),
+): Promise<IntegrationToken> {
   const revoked = await prisma.integrationToken.updateMany({
     where: { id, userId, revokedAt: null },
     data: { revokedAt: now },
@@ -130,8 +143,13 @@ export async function verifyIntegrationToken(
   now = new Date(),
 ): Promise<VerifiedIntegrationToken | null> {
   if (!TOKEN_FORMAT.test(presented)) return null;
-  const row = await prisma.integrationToken.findUnique({ where: { tokenHash: hashToken(presented) } });
+  const row = await prisma.integrationToken.findUnique({
+    where: { tokenHash: hashToken(presented) },
+  });
   if (!row || statusOf(row, now) !== 'active') return null;
-  await prisma.integrationToken.updateMany({ where: { id: row.id, revokedAt: null }, data: { lastUsedAt: now } });
+  await prisma.integrationToken.updateMany({
+    where: { id: row.id, revokedAt: null },
+    data: { lastUsedAt: now },
+  });
   return { tokenId: row.id, userId: row.userId, scope: row.scope, expiresAt: row.expiresAt };
 }

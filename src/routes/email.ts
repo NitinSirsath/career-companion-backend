@@ -21,17 +21,15 @@ router.patch('/:id/match', async (req, res, next) => {
     if (error instanceof MatchCorrectionError) {
       const status =
         error.code === 'NOT_FOUND' || error.code === 'APPLICATION_NOT_FOUND' ? 404 : 409;
-      return res
-        .status(status)
-        .json({
-          error: {
-            code: error.code,
-            message:
-              status === 404
-                ? 'Email or application no longer available'
-                : 'This email link changed or cannot be corrected. Refresh before trying again.',
-          },
-        });
+      return res.status(status).json({
+        error: {
+          code: error.code,
+          message:
+            status === 404
+              ? 'Email or application no longer available'
+              : 'This email link changed or cannot be corrected. Refresh before trying again.',
+        },
+      });
     }
     next(error);
   }

@@ -11,15 +11,23 @@ import { ProviderClient, VERIFY_TIMEOUT_MS, VerifyResult } from './types';
  */
 export function classifyOpenAIError(err: unknown): ProviderFailure {
   if (err instanceof ProviderFailure) return err;
-  if (err instanceof APIConnectionError || err instanceof APIUserAbortError) return new ProviderFailure('OUTCOME_UNKNOWN');
-  if (!(err instanceof APIError) || typeof err.status !== 'number') return new ProviderFailure('OUTCOME_UNKNOWN');
+  if (err instanceof APIConnectionError || err instanceof APIUserAbortError)
+    return new ProviderFailure('OUTCOME_UNKNOWN');
+  if (!(err instanceof APIError) || typeof err.status !== 'number')
+    return new ProviderFailure('OUTCOME_UNKNOWN');
   const status = err.status;
   const code = typeof err.code === 'string' ? err.code : err.type;
-  const details = { status, providerCode: code ?? undefined, retryAfterMs: retryAfterMs(err.headers) };
+  const details = {
+    status,
+    providerCode: code ?? undefined,
+    retryAfterMs: retryAfterMs(err.headers),
+  };
   if (status === 401) return new ProviderFailure('KEY_REJECTED', details);
-  if (status === 429 && code === 'insufficient_quota') return new ProviderFailure('ACCOUNT_OR_BILLING', details);
+  if (status === 429 && code === 'insufficient_quota')
+    return new ProviderFailure('ACCOUNT_OR_BILLING', details);
   if (status === 403) return new ProviderFailure('ACCOUNT_OR_BILLING', details);
-  if (status === 404 || code === 'model_not_found') return new ProviderFailure('MODEL_UNAVAILABLE', details);
+  if (status === 404 || code === 'model_not_found')
+    return new ProviderFailure('MODEL_UNAVAILABLE', details);
   if (status === 429 || status === 503) return new ProviderFailure('RATE_LIMITED', details);
   if (status === 408 || status >= 500) return new ProviderFailure('OUTCOME_UNKNOWN', details);
   return new ProviderFailure('INVALID_REQUEST', details);
@@ -28,7 +36,13 @@ export function classifyOpenAIError(err: unknown): ProviderFailure {
 export function createOpenAIClient(provider: CatalogProvider, apiKey: string): ProviderClient {
   // No hidden retries (a retry could repeat a charged call). The endpoint is the catalog's, and
   // organization/project are never taken from the server's environment.
-  const client = new OpenAI({ apiKey, baseURL: provider.baseUrl, maxRetries: 0, organization: null, project: null });
+  const client = new OpenAI({
+    apiKey,
+    baseURL: provider.baseUrl,
+    maxRetries: 0,
+    organization: null,
+    project: null,
+  });
   return {
     async generateStructured({ contract, model, input }) {
       let completion;
@@ -42,7 +56,11 @@ export function createOpenAIClient(provider: CatalogProvider, apiKey: string): P
             ],
             response_format: {
               type: 'json_schema',
-              json_schema: { name: contract.schemaName, schema: strictJsonSchema(contract.schema), strict: true },
+              json_schema: {
+                name: contract.schemaName,
+                schema: strictJsonSchema(contract.schema),
+                strict: true,
+              },
             },
             max_completion_tokens: contract.maxOutputTokens,
             ...(model.temperature === null ? {} : { temperature: model.temperature }),
@@ -68,7 +86,10 @@ export function createOpenAIClient(provider: CatalogProvider, apiKey: string): P
       try {
         return { data: nullsToAbsent(JSON.parse(text), contract.schema), usage };
       } catch {
-        throw new ProviderFailure('INVALID_OUTPUT', { message: 'AI provider returned invalid JSON', usage });
+        throw new ProviderFailure('INVALID_OUTPUT', {
+          message: 'AI provider returned invalid JSON',
+          usage,
+        });
       }
     },
 

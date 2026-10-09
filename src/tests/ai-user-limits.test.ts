@@ -44,13 +44,21 @@ function run(
 }
 
 const ok = () => vi.fn().mockResolvedValue({ decision: 'yes' });
-const refuse = (kind: FailureKind, details = {}) => vi.fn().mockRejectedValue(new ProviderFailure(kind, details));
+const refuse = (kind: FailureKind, details = {}) =>
+  vi.fn().mockRejectedValue(new ProviderFailure(kind, details));
 const config = (userId: string) => prisma.aIConfiguration.findUniqueOrThrow({ where: { userId } });
 const op = (emailId: string) => prisma.aIOperation.findFirstOrThrow({ where: { emailId } });
 const usage = (userId: string) =>
   prisma.aIUsageDay.findUnique({ where: { userId_day: { userId, day: utcDay(new Date()) } } });
-const failure = (pending: Promise<unknown>) => pending.then(() => { throw new Error('expected failure'); }, (e) => e);
-const secondsFromNow = (date: Date | null) => Math.round(((date?.getTime() ?? 0) - Date.now()) / 1000);
+const failure = (pending: Promise<unknown>) =>
+  pending.then(
+    () => {
+      throw new Error('expected failure');
+    },
+    (e) => e,
+  );
+const secondsFromNow = (date: Date | null) =>
+  Math.round(((date?.getTime() ?? 0) - Date.now()) / 1000);
 
 beforeAll(async () => {
   await prisma.user.deleteMany({ where: { email: { endsWith: '@limits.test' } } });
@@ -62,7 +70,13 @@ beforeEach(async () => {
   await prisma.email.deleteMany({ where: { userId: { in: [a, b] } } });
   await prisma.aIUsageDay.deleteMany({ where: { userId: { in: [a, b] } } });
   for (const user of [a, b])
-    await configureAI(user, { cooldownUntil: null, accessIssue: null, accessIssueModel: null, consecutiveFailures: 0, revision: 0 });
+    await configureAI(user, {
+      cooldownUntil: null,
+      accessIssue: null,
+      accessIssueModel: null,
+      consecutiveFailures: 0,
+      revision: 0,
+    });
 });
 afterAll(async () => {
   await prisma.user.deleteMany({ where: { email: { endsWith: '@limits.test' } } });
@@ -93,7 +107,11 @@ describe('per-user safety limit and counts', () => {
     const emailId = await newEmail(a);
     const call = ok();
     const error = await failure(
-      run(a, emailId, call, { access: async () => { throw new AIAccessError('NOT_SET_UP'); } }),
+      run(a, emailId, call, {
+        access: async () => {
+          throw new AIAccessError('NOT_SET_UP');
+        },
+      }),
     );
     expect(error).toMatchObject({ reason: 'NOT_SET_UP' });
     expect(call).not.toHaveBeenCalled();
@@ -116,29 +134,45 @@ describe('per-user provider cooldown', () => {
     const error = await failure(run(a, emailId, refuse('RATE_LIMITED', { retryAfterMs: 5_000 })));
     expect(error).toMatchObject({ name: 'AIAccessError', reason: 'RATE_LIMITED' });
     expect(secondsFromNow(error.resumesAt)).toBe(10); // 5 s raised to the 10 s minimum
-    expect(await op(emailId)).toMatchObject({ status: 'PENDING', attempts: 0, errorCode: 'RATE_LIMITED' });
+    expect(await op(emailId)).toMatchObject({
+      status: 'PENDING',
+      attempts: 0,
+      errorCode: 'RATE_LIMITED',
+    });
     expect(await config(a)).toMatchObject({ accessIssue: 'RATE_LIMITED', consecutiveFailures: 1 });
 
     const next = ok();
-    expect(await failure(run(a, await newEmail(a), next))).toMatchObject({ reason: 'RATE_LIMITED' });
+    expect(await failure(run(a, await newEmail(a), next))).toMatchObject({
+      reason: 'RATE_LIMITED',
+    });
     expect(next).not.toHaveBeenCalled();
     await run(b, await newEmail(b), ok());
     expect(await config(b)).toMatchObject({ cooldownUntil: null, consecutiveFailures: 0 });
   });
 
   it('bounds a long retry-after to one hour', async () => {
-    const error = await failure(run(a, await newEmail(a), refuse('RATE_LIMITED', { retryAfterMs: 7_200_000 })));
+    const error = await failure(
+      run(a, await newEmail(a), refuse('RATE_LIMITED', { retryAfterMs: 7_200_000 })),
+    );
     expect(secondsFromNow(error.resumesAt)).toBe(3600);
   });
 
   it('grows with consecutive refusals up to 30 minutes and resets after a success', async () => {
     await configureAI(a, { consecutiveFailures: 2 });
-    expect(secondsFromNow((await failure(run(a, await newEmail(a), refuse('RATE_LIMITED')))).resumesAt)).toBe(240);
+    expect(
+      secondsFromNow((await failure(run(a, await newEmail(a), refuse('RATE_LIMITED')))).resumesAt),
+    ).toBe(240);
     await configureAI(a, { consecutiveFailures: 10, cooldownUntil: null });
-    expect(secondsFromNow((await failure(run(a, await newEmail(a), refuse('RATE_LIMITED')))).resumesAt)).toBe(1800);
+    expect(
+      secondsFromNow((await failure(run(a, await newEmail(a), refuse('RATE_LIMITED')))).resumesAt),
+    ).toBe(1800);
     await configureAI(a, { cooldownUntil: new Date(Date.now() - 1000) });
     await run(a, await newEmail(a), ok());
-    expect(await config(a)).toMatchObject({ accessIssue: null, cooldownUntil: null, consecutiveFailures: 0 });
+    expect(await config(a)).toMatchObject({
+      accessIssue: null,
+      cooldownUntil: null,
+      consecutiveFailures: 0,
+    });
   });
 });
 
@@ -147,7 +181,10 @@ describe('refusals and unusable outcomes', () => {
     'records %s as needing attention and releases the claim',
     async (kind) => {
       const emailId = await newEmail(a);
-      expect(await failure(run(a, emailId, refuse(kind)))).toMatchObject({ name: 'AIAccessError', reason: kind });
+      expect(await failure(run(a, emailId, refuse(kind)))).toMatchObject({
+        name: 'AIAccessError',
+        reason: kind,
+      });
       expect(await op(emailId)).toMatchObject({ status: 'PENDING', attempts: 0, errorCode: kind });
       expect(await config(a)).toMatchObject({ accessIssue: kind, cooldownUntil: null });
       // The call was sent, so it counts toward the safety limit.
@@ -157,20 +194,29 @@ describe('refusals and unusable outcomes', () => {
 
   it('names the model a MODEL_UNAVAILABLE refusal refers to', async () => {
     await failure(run(a, await newEmail(a), refuse('MODEL_UNAVAILABLE')));
-    expect(await config(a)).toMatchObject({ accessIssue: 'MODEL_UNAVAILABLE', accessIssueModel: FAST_MODEL });
+    expect(await config(a)).toMatchObject({
+      accessIssue: 'MODEL_UNAVAILABLE',
+      accessIssueModel: FAST_MODEL,
+    });
   });
 
   it('holds an unknown outcome and pauses that user briefly so an outage holds one call, not many', async () => {
     const emailId = await newEmail(a);
     const error = await failure(run(a, emailId, refuse('OUTCOME_UNKNOWN')));
     expect(error).toBeInstanceOf(AIOutcomeUnknownError);
-    expect(await op(emailId)).toMatchObject({ status: 'UNKNOWN', attempts: 1, errorCode: 'OUTCOME_UNKNOWN' });
+    expect(await op(emailId)).toMatchObject({
+      status: 'UNKNOWN',
+      attempts: 1,
+      errorCode: 'OUTCOME_UNKNOWN',
+    });
     const saved = await config(a);
     expect(saved).toMatchObject({ accessIssue: 'PROVIDER_UNAVAILABLE', consecutiveFailures: 1 });
     expect(secondsFromNow(saved.cooldownUntil)).toBe(120);
 
     const next = ok();
-    expect(await failure(run(a, await newEmail(a), next))).toMatchObject({ reason: 'PROVIDER_UNAVAILABLE' });
+    expect(await failure(run(a, await newEmail(a), next))).toMatchObject({
+      reason: 'PROVIDER_UNAVAILABLE',
+    });
     expect(next).not.toHaveBeenCalled();
     await run(b, await newEmail(b), ok());
   });
@@ -188,22 +234,44 @@ describe('refusals and unusable outcomes', () => {
     await configureAI(a, { revision: 1 });
     await failure(run(a, await newEmail(a), refuse('KEY_REJECTED'), { revision: 0 }));
     await failure(run(a, await newEmail(a), refuse('RATE_LIMITED'), { revision: 0 }));
-    expect(await config(a)).toMatchObject({ accessIssue: null, cooldownUntil: null, consecutiveFailures: 0 });
+    expect(await config(a)).toMatchObject({
+      accessIssue: null,
+      cooldownUntil: null,
+      consecutiveFailures: 0,
+    });
   });
 });
 
 describe('provenance and user-approved attempts', () => {
   it('records the provider and model at claim time and returns them on reuse', async () => {
     const emailId = await newEmail(a);
-    expect(await run(a, emailId, ok())).toEqual({ data: { decision: 'yes' }, provider: 'gemini', model: FAST_MODEL });
-    expect(await op(emailId)).toMatchObject({ provider: 'gemini', model: FAST_MODEL, status: 'COMPLETED' });
-    expect(await run(a, emailId, ok())).toEqual({ data: { decision: 'yes' }, provider: 'gemini', model: FAST_MODEL });
+    expect(await run(a, emailId, ok())).toEqual({
+      data: { decision: 'yes' },
+      provider: 'gemini',
+      model: FAST_MODEL,
+    });
+    expect(await op(emailId)).toMatchObject({
+      provider: 'gemini',
+      model: FAST_MODEL,
+      status: 'COMPLETED',
+    });
+    expect(await run(a, emailId, ok())).toEqual({
+      data: { decision: 'yes' },
+      provider: 'gemini',
+      model: FAST_MODEL,
+    });
   });
 
   it('allows exactly one call beyond the attempt limit per approval', async () => {
     const emailId = await newEmail(a);
     await prisma.aIOperation.create({
-      data: { emailId, operation: 'classification', version: 'v1', status: 'RETRYABLE', attempts: 3 },
+      data: {
+        emailId,
+        operation: 'classification',
+        version: 'v1',
+        status: 'RETRYABLE',
+        attempts: 3,
+      },
     });
     const call = refuse('OUTCOME_UNKNOWN');
     await expect(run(a, emailId, call)).rejects.toThrow('requires review');

@@ -4,12 +4,23 @@ type Node = { [key: string]: unknown };
 
 // Keywords strict structured-output dialects accept. Anything else Zod emits (for example
 // minimum/maximum) is dropped here and still enforced by the contract's Zod validation.
-const STRICT_KEPT = new Set(['type', 'properties', 'required', 'additionalProperties', 'enum', 'description', 'items', 'anyOf']);
+const STRICT_KEPT = new Set([
+  'type',
+  'properties',
+  'required',
+  'additionalProperties',
+  'enum',
+  'description',
+  'items',
+  'anyOf',
+]);
 
 function nullable(prop: Node): Node {
   const withNullEnum = Array.isArray(prop.enum) ? { enum: [...prop.enum, null] } : {};
   if (Array.isArray(prop.type))
-    return prop.type.includes('null') ? prop : { ...prop, type: [...prop.type, 'null'], ...withNullEnum };
+    return prop.type.includes('null')
+      ? prop
+      : { ...prop, type: [...prop.type, 'null'], ...withNullEnum };
   if (typeof prop.type === 'string') return { ...prop, type: [prop.type, 'null'], ...withNullEnum };
   return { anyOf: [prop, { type: 'null' }] };
 }
@@ -29,7 +40,8 @@ function strict(node: Node): Node {
     // Strict dialects require every key: an optional key is sent as nullable instead.
     const properties = out.properties as Record<string, Node>;
     const required = new Set((out.required as string[] | undefined) ?? []);
-    for (const name of Object.keys(properties)) if (!required.has(name)) properties[name] = nullable(properties[name]);
+    for (const name of Object.keys(properties))
+      if (!required.has(name)) properties[name] = nullable(properties[name]);
     out.required = Object.keys(properties);
     out.additionalProperties = false;
   }
@@ -61,7 +73,9 @@ export function optionalKeys(schema: z.ZodType): string[] {
   if (!keys) {
     const json = z.toJSONSchema(schema) as Node;
     const required = new Set((json.required as string[] | undefined) ?? []);
-    keys = Object.keys((json.properties as Node | undefined) ?? {}).filter((name) => !required.has(name));
+    keys = Object.keys((json.properties as Node | undefined) ?? {}).filter(
+      (name) => !required.has(name),
+    );
     optional.set(schema, keys);
   }
   return keys;

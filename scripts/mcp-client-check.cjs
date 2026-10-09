@@ -14,24 +14,50 @@ const { Client, StreamableHTTPClientTransport } = require('@modelcontextprotocol
 async function main() {
   const [url, flag, fixturePath] = process.argv.slice(2);
   const token = process.env.CC_MCP_TOKEN;
-  if (!url || !token) throw new Error('Usage: CC_MCP_TOKEN=… node scripts/mcp-client-check.cjs <server URL> [--send-fixture <json>]');
-  if (flag && (flag !== '--send-fixture' || !fixturePath)) throw new Error('Unknown option; use --send-fixture <json>');
+  if (!url || !token)
+    throw new Error(
+      'Usage: CC_MCP_TOKEN=… node scripts/mcp-client-check.cjs <server URL> [--send-fixture <json>]',
+    );
+  if (flag && (flag !== '--send-fixture' || !fixturePath))
+    throw new Error('Unknown option; use --send-fixture <json>');
 
-  const client = new Client({ name: 'cc-mcp-client-check', version: '1.0.0' }, { versionNegotiation: { mode: 'auto' } });
+  const client = new Client(
+    { name: 'cc-mcp-client-check', version: '1.0.0' },
+    { versionNegotiation: { mode: 'auto' } },
+  );
   try {
-    await client.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(url), {
+        requestInit: { headers: { Authorization: `Bearer ${token}` } },
+      }),
+    );
   } catch {
     // Provider errors may contain the Bearer token; do not include a cause or raw message.
-    throw new Error("Could not connect (check the URL, MCP_ALLOWED_HOSTS and that the token is active)");
+    throw new Error(
+      'Could not connect (check the URL, MCP_ALLOWED_HOSTS and that the token is active)',
+    );
   }
   const { tools } = await client.listTools();
-  console.log(JSON.stringify({ connected: true, protocolVersion: client.getNegotiatedProtocolVersion(), tools: tools.map((t) => t.name) }));
+  console.log(
+    JSON.stringify({
+      connected: true,
+      protocolVersion: client.getNegotiatedProtocolVersion(),
+      tools: tools.map((t) => t.name),
+    }),
+  );
   if (flag) {
     const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
     for (const entry of fixture.entries.filter((e) => e.status === 'applied')) {
-      const result = await client.callTool({ name: 'record_application_submission', arguments: entry.arguments });
-      const outcome = result.isError ? JSON.parse(result.content[0].text) : result.structuredContent;
-      console.log(JSON.stringify({ entry: entry.heading, expectedFirstRun: entry.expected, outcome }));
+      const result = await client.callTool({
+        name: 'record_application_submission',
+        arguments: entry.arguments,
+      });
+      const outcome = result.isError
+        ? JSON.parse(result.content[0].text)
+        : result.structuredContent;
+      console.log(
+        JSON.stringify({ entry: entry.heading, expectedFirstRun: entry.expected, outcome }),
+      );
     }
   }
   await client.close();

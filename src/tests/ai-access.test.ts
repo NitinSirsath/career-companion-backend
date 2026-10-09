@@ -1,7 +1,12 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../db/prisma';
 import { getCatalogProvider } from '../contracts/aiCatalog';
-import { ConfigurationState, deriveAccess, getAccessState, resolveAIAccess } from '../services/ai/access';
+import {
+  ConfigurationState,
+  deriveAccess,
+  getAccessState,
+  resolveAIAccess,
+} from '../services/ai/access';
 import { sealApiKey } from '../services/ai/credentials';
 import { AIAccessError } from '../services/ai/errors';
 import { createProviderClient } from '../services/ai/providers';
@@ -31,20 +36,60 @@ describe('access state precedence (plan §3.7)', () => {
   it.each([
     ['ready', base, 0, { state: 'READY', reason: null }],
     ['not set up', null, 0, { state: 'NOT_SET_UP', reason: 'NOT_SET_UP' }],
-    ['unknown provider', { ...base, provider: 'custom' }, 0, { state: 'NEEDS_ATTENTION', reason: 'PROVIDER_UNSUPPORTED' }],
-    ['key rejected', { ...base, accessIssue: 'KEY_REJECTED' }, 0, { state: 'NEEDS_ATTENTION', reason: 'KEY_REJECTED' }],
-    ['unreadable key', { ...base, accessIssue: 'KEY_UNREADABLE' }, 0, { state: 'NEEDS_ATTENTION', reason: 'KEY_UNREADABLE' }],
+    [
+      'unknown provider',
+      { ...base, provider: 'custom' },
+      0,
+      { state: 'NEEDS_ATTENTION', reason: 'PROVIDER_UNSUPPORTED' },
+    ],
+    [
+      'key rejected',
+      { ...base, accessIssue: 'KEY_REJECTED' },
+      0,
+      { state: 'NEEDS_ATTENTION', reason: 'KEY_REJECTED' },
+    ],
+    [
+      'unreadable key',
+      { ...base, accessIssue: 'KEY_UNREADABLE' },
+      0,
+      { state: 'NEEDS_ATTENTION', reason: 'KEY_UNREADABLE' },
+    ],
     [
       'model unavailable names the model',
       { ...base, accessIssue: 'MODEL_UNAVAILABLE', accessIssueModel: 'gemini-2.5-flash' },
       0,
       { state: 'NEEDS_ATTENTION', reason: 'MODEL_UNAVAILABLE', modelId: 'gemini-2.5-flash' },
     ],
-    ['rate limited', { ...base, accessIssue: 'RATE_LIMITED', cooldownUntil: later }, 0, { state: 'LIMITED', reason: 'RATE_LIMITED', resumesAt: later }],
-    ['provider unavailable', { ...base, accessIssue: 'PROVIDER_UNAVAILABLE', cooldownUntil: later }, 0, { state: 'LIMITED', reason: 'PROVIDER_UNAVAILABLE' }],
-    ['passed cooldown', { ...base, accessIssue: 'RATE_LIMITED', cooldownUntil: now }, 0, { state: 'READY' }],
-    ['safety limit', base, 10, { state: 'LIMITED', reason: 'SAFETY_LIMIT', resumesAt: nextUtcMidnight(now) }],
-    ['needs attention outranks a cooldown and the limit', { ...base, accessIssue: 'KEY_REJECTED', cooldownUntil: later }, 10, { state: 'NEEDS_ATTENTION' }],
+    [
+      'rate limited',
+      { ...base, accessIssue: 'RATE_LIMITED', cooldownUntil: later },
+      0,
+      { state: 'LIMITED', reason: 'RATE_LIMITED', resumesAt: later },
+    ],
+    [
+      'provider unavailable',
+      { ...base, accessIssue: 'PROVIDER_UNAVAILABLE', cooldownUntil: later },
+      0,
+      { state: 'LIMITED', reason: 'PROVIDER_UNAVAILABLE' },
+    ],
+    [
+      'passed cooldown',
+      { ...base, accessIssue: 'RATE_LIMITED', cooldownUntil: now },
+      0,
+      { state: 'READY' },
+    ],
+    [
+      'safety limit',
+      base,
+      10,
+      { state: 'LIMITED', reason: 'SAFETY_LIMIT', resumesAt: nextUtcMidnight(now) },
+    ],
+    [
+      'needs attention outranks a cooldown and the limit',
+      { ...base, accessIssue: 'KEY_REJECTED', cooldownUntil: later },
+      10,
+      { state: 'NEEDS_ATTENTION' },
+    ],
   ] as const)('%s', (_label, config, calls, expected) => {
     expect(deriveAccess(config as ConfigurationState | null, calls, now)).toMatchObject(expected);
   });
@@ -60,7 +105,10 @@ describe('access state precedence (plan §3.7)', () => {
     process.env.NODE_ENV = 'production';
     try {
       expect(getCatalogProvider('gemini')!.status).toBe('hidden');
-      expect(deriveAccess(base, 0, now)).toMatchObject({ state: 'NEEDS_ATTENTION', reason: 'PROVIDER_UNSUPPORTED' });
+      expect(deriveAccess(base, 0, now)).toMatchObject({
+        state: 'NEEDS_ATTENTION',
+        reason: 'PROVIDER_UNSUPPORTED',
+      });
     } finally {
       process.env.NODE_ENV = env;
     }
@@ -85,7 +133,10 @@ describe('resolving a user’s own AI access', () => {
   });
 
   const reason = (pending: Promise<unknown>) =>
-    pending.then(() => 'READY', (err: AIAccessError) => (err instanceof AIAccessError ? err.reason : err));
+    pending.then(
+      () => 'READY',
+      (err: AIAccessError) => (err instanceof AIAccessError ? err.reason : err),
+    );
 
   it('waits when the user has not set up AI (there is no Career Companion key)', async () => {
     expect(await reason(resolveAIAccess(userId))).toBe('NOT_SET_UP');
@@ -114,7 +165,9 @@ describe('resolving a user’s own AI access', () => {
     await configureAI(userId, { encryptedApiKey: sealApiKey(other, FIXTURE_KEY) }); // wrong owner
     const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     expect(await reason(resolveAIAccess(userId))).toBe('KEY_UNREADABLE');
-    expect((await prisma.aIConfiguration.findUniqueOrThrow({ where: { userId } })).accessIssue).toBe('KEY_UNREADABLE');
+    expect(
+      (await prisma.aIConfiguration.findUniqueOrThrow({ where: { userId } })).accessIssue,
+    ).toBe('KEY_UNREADABLE');
     expect(JSON.stringify(log.mock.calls)).not.toContain(FIXTURE_KEY);
     expect(createProviderClient).not.toHaveBeenCalled();
   });
@@ -123,6 +176,9 @@ describe('resolving a user’s own AI access', () => {
     await configureAI(userId, { encryptedApiKey: 'v1:not:decryptable' });
     expect(await getAccessState(userId)).toMatchObject({ state: 'READY' });
     await prisma.aIUsageDay.create({ data: { userId, day: utcDay(new Date()), calls: 100 } });
-    expect(await getAccessState(userId)).toMatchObject({ state: 'LIMITED', reason: 'SAFETY_LIMIT' });
+    expect(await getAccessState(userId)).toMatchObject({
+      state: 'LIMITED',
+      reason: 'SAFETY_LIMIT',
+    });
   });
 });

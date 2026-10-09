@@ -29,13 +29,17 @@ vi.mock('googleapis', () => {
     .mockReturnValue('https://accounts.google.com/o/oauth2/v2/auth?mock=1&state=teststate');
 
   return {
-    google: { auth: { OAuth2: vi.fn().mockImplementation(function () {
-      return {
-        generateAuthUrl: mockGenerateAuthUrl,
-        getToken: mockGetToken,
-        verifyIdToken: mockVerifyIdToken,
-      };
-    }) } },
+    google: {
+      auth: {
+        OAuth2: vi.fn().mockImplementation(function () {
+          return {
+            generateAuthUrl: mockGenerateAuthUrl,
+            getToken: mockGetToken,
+            verifyIdToken: mockVerifyIdToken,
+          };
+        }),
+      },
+    },
   };
 });
 

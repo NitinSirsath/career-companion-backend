@@ -4,7 +4,9 @@ import { runTriage } from '../services/ai/triage';
 import { logEvent } from '../utils/log';
 
 export const RELEVANCE_TRIAGE_JOB = 'relevance-triage-job';
-export interface RelevanceTriageJobData { userId: string; }
+export interface RelevanceTriageJobData {
+  userId: string;
+}
 
 export const relevanceTriageJobOptions = (userId: string) => ({
   singletonKey: `triage:${userId}`,
@@ -16,7 +18,11 @@ export const relevanceTriageJobOptions = (userId: string) => ({
 });
 
 export async function enqueueRelevanceTriage(userId: string): Promise<string | null> {
-  return (await getQueue()).send(RELEVANCE_TRIAGE_JOB, { userId }, relevanceTriageJobOptions(userId));
+  return (await getQueue()).send(
+    RELEVANCE_TRIAGE_JOB,
+    { userId },
+    relevanceTriageJobOptions(userId),
+  );
 }
 
 export const RELEVANCE_TRIAGE_WORKER_OPTIONS = { includeMetadata: true, batchSize: 1 } as const;
@@ -30,5 +36,7 @@ export async function handleRelevanceTriageJobs(jobs: JobWithMetadata<RelevanceT
     logEvent('triage_followup_suppressed', { userId });
 }
 export async function startRelevanceTriageWorker() {
-  await (await getQueue()).work(RELEVANCE_TRIAGE_JOB, RELEVANCE_TRIAGE_WORKER_OPTIONS, handleRelevanceTriageJobs);
+  await (
+    await getQueue()
+  ).work(RELEVANCE_TRIAGE_JOB, RELEVANCE_TRIAGE_WORKER_OPTIONS, handleRelevanceTriageJobs);
 }

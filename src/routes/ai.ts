@@ -35,7 +35,11 @@ function handle(action: (req: Request) => Promise<unknown>) {
     } catch (err) {
       if (err instanceof SettingsError) {
         res.status(err.status).json({
-          error: { code: err.code, message: err.message, ...(err.details ? { details: err.details } : {}) },
+          error: {
+            code: err.code,
+            message: err.message,
+            ...(err.details ? { details: err.details } : {}),
+          },
         });
         return;
       }
@@ -44,7 +48,10 @@ function handle(action: (req: Request) => Promise<unknown>) {
   };
 }
 
-router.get('/settings', handle((req) => readSettings(req.auth!.user.id)));
+router.get(
+  '/settings',
+  handle((req) => readSettings(req.auth!.user.id)),
+);
 
 router.put(
   '/settings',
@@ -67,6 +74,9 @@ router.post(
   }),
 );
 
-router.delete('/settings', handle((req) => removeSettings(req.auth!.user.id)));
+router.delete(
+  '/settings',
+  handle((req) => removeSettings(req.auth!.user.id)),
+);
 
 export const aiRouter = router;

@@ -11,9 +11,13 @@ const LOCALHOST = ['localhost', '127.0.0.1', '[::1]'];
 const HOSTNAME = /^(?:\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)$/i;
 
 export function parseHostnameList(name: string, raw: string | undefined): string[] {
-  const items = (raw ?? '').split(',').map((h) => h.trim()).filter(Boolean);
+  const items = (raw ?? '')
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean);
   for (const item of items)
-    if (!HOSTNAME.test(item)) throw new Error(`${name} must list hostnames only, without scheme, port or path`);
+    if (!HOSTNAME.test(item))
+      throw new Error(`${name} must list hostnames only, without scheme, port or path`);
   return items.map((h) => h.toLowerCase());
 }
 

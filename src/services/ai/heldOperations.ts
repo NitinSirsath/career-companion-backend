@@ -30,11 +30,18 @@ export function holdOf(op: LedgerRow, now: Date): { approvable: HoldReason | nul
   if (op.status === 'COMPLETED') return null;
   if (op.status === 'UNKNOWN') return { approvable: 'OUTCOME_UNKNOWN' };
   if (op.status === 'FAILED')
-    return { approvable: op.errorCode && INVALID_OUTPUT_CODES.includes(op.errorCode) ? 'INVALID_OUTPUT' : null };
+    return {
+      approvable:
+        op.errorCode && INVALID_OUTPUT_CODES.includes(op.errorCode) ? 'INVALID_OUTPUT' : null,
+    };
   if (op.status === 'PROCESSING')
     return {
       approvable:
-        op.startedAt && now.getTime() - op.startedAt.getTime() > STALE_PROCESSING_MS ? 'OUTCOME_UNKNOWN' : null,
+        op.startedAt && now.getTime() - op.startedAt.getTime() > STALE_PROCESSING_MS
+          ? 'OUTCOME_UNKNOWN'
+          : null,
     };
-  return op.attempts >= MAX_ATTEMPTS + op.approvedRetries ? { approvable: 'ATTEMPTS_EXHAUSTED' } : null;
+  return op.attempts >= MAX_ATTEMPTS + op.approvedRetries
+    ? { approvable: 'ATTEMPTS_EXHAUSTED' }
+    : null;
 }

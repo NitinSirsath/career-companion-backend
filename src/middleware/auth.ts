@@ -8,14 +8,12 @@ function isDevAuthAllowed(): boolean {
 export async function developmentAuthMiddleware(req: Request, res: Response, next: NextFunction) {
   try {
     if (!isDevAuthAllowed()) {
-      return res
-        .status(401)
-        .json({
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Development auth is available only in automated tests',
-          },
-        });
+      return res.status(401).json({
+        error: {
+          code: 'UNAUTHORIZED',
+          message: 'Development auth is available only in automated tests',
+        },
+      });
     }
 
     const devUserEmail = req.header('X-Development-User');

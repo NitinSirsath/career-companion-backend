@@ -31,7 +31,8 @@ export const PendingSubmissionSchema = z.object({
 });
 export type PendingSubmission = z.infer<typeof PendingSubmissionSchema>;
 
-export const ListPendingSubmissionsResponseSchema = createPaginatedResponseSchema(PendingSubmissionSchema);
+export const ListPendingSubmissionsResponseSchema =
+  createPaginatedResponseSchema(PendingSubmissionSchema);
 export type ListPendingSubmissionsResponse = z.infer<typeof ListPendingSubmissionsResponseSchema>;
 
 // ─── POST /api/submissions/:id/resolve ──────────────────────────────────────

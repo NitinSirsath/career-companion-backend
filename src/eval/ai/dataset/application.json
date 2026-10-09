@@ -4,32 +4,20 @@
     "input": {
       "sender": "Tailspin Careers <no-reply@jobs.tailspin.example.com>",
       "subject": "We received your application for Product Designer",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "Hi Alex,\n\nThanks for applying for the Product Designer position at Tailspin Toys. Our team will review your application\nand contact you if your experience matches our needs. This usually takes up to two weeks.\n\nTailspin Toys Recruiting"
     },
     "expect": {
       "relevance": "RELEVANT",
       "fields": {
         "companyName": {
-          "contains": [
-            "tailspin"
-          ]
+          "contains": ["tailspin"]
         },
         "jobTitle": {
-          "contains": [
-            "product designer"
-          ]
+          "contains": ["product designer"]
         }
       },
-      "mustBeNull": [
-        "offerInfo",
-        "rejectionInfo",
-        "interviewDate",
-        "assessmentDeadline"
-      ]
+      "mustBeNull": ["offerInfo", "rejectionInfo", "interviewDate", "assessmentDeadline"]
     },
     "group": "application"
   },
@@ -38,31 +26,20 @@
     "input": {
       "sender": "Litware Talent <talent@litware.example.org>",
       "subject": "Application confirmation - Site Reliability Engineer (Req 4471)",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "Dear Alex,\n\nYour application for Site Reliability Engineer (requisition 4471) at Litware has been submitted successfully.\nYou can track its status in the candidate portal.\n\nRegards,\nLitware Talent Team"
     },
     "expect": {
       "relevance": "RELEVANT",
       "fields": {
         "companyName": {
-          "contains": [
-            "litware"
-          ]
+          "contains": ["litware"]
         },
         "jobTitle": {
-          "contains": [
-            "site reliability"
-          ]
+          "contains": ["site reliability"]
         }
       },
-      "mustBeNull": [
-        "offerInfo",
-        "rejectionInfo",
-        "interviewDate"
-      ]
+      "mustBeNull": ["offerInfo", "rejectionInfo", "interviewDate"]
     },
     "group": "application"
   },
@@ -71,30 +48,20 @@
     "input": {
       "sender": "Proseware Hiring <hiring@proseware.example.com>",
       "subject": "Thanks for applying!",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "Hi Alex — thanks for your interest in the Frontend Engineer role at Proseware. We'll be in touch soon.\n— Proseware Hiring"
     },
     "expect": {
       "relevance": "RELEVANT",
       "fields": {
         "companyName": {
-          "contains": [
-            "proseware"
-          ]
+          "contains": ["proseware"]
         },
         "jobTitle": {
-          "contains": [
-            "frontend"
-          ]
+          "contains": ["frontend"]
         }
       },
-      "mustBeNull": [
-        "offerInfo",
-        "rejectionInfo"
-      ]
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
     },
     "group": "application"
   }

@@ -83,8 +83,11 @@ export const MessagesListResponseSchema = createPaginatedResponseSchema(EmailMes
 export type MessagesListResponse = z.infer<typeof MessagesListResponseSchema>;
 
 export const GmailSettingsPatchSchema = z.object({
-  syncLookbackDays: z.number().int().refine((value) => [1, 7, 14, 30].includes(value), {
-    message: 'syncLookbackDays must be 1, 7, 14, or 30',
-  }),
+  syncLookbackDays: z
+    .number()
+    .int()
+    .refine((value) => [1, 7, 14, 30].includes(value), {
+      message: 'syncLookbackDays must be 1, 7, 14, or 30',
+    }),
 });
 export type GmailSettingsPatch = z.infer<typeof GmailSettingsPatchSchema>;

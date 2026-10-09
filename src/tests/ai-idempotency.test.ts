@@ -42,7 +42,12 @@ const run = (call: () => Promise<{ decision: string }>) =>
     operation: 'classification',
     contract,
     access: async () => fakeAccess(userId),
-    call: async () => ({ version: 'v1', data: await call(), model: 'm', usage: { inputTokens: 1, outputTokens: 1 } }),
+    call: async () => ({
+      version: 'v1',
+      data: await call(),
+      model: 'm',
+      usage: { inputTokens: 1, outputTokens: 1 },
+    }),
   });
 describe('Durable AI external-effect boundary', () => {
   it('reuses a result on repeated execution', async () => {

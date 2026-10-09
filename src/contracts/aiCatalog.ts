@@ -90,10 +90,12 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
     disclosure: {
       version: 'gemini-draft-2026-10',
       // DRAFT pending owner approval against Google's current Gemini API terms.
-      summary: 'Your emails are processed by Google under your own Gemini API account and its terms.',
+      summary:
+        'Your emails are processed by Google under your own Gemini API account and its terms.',
       training:
         'On the free tier, Google may use what is sent to improve its products, and people may review it. With billing turned on, Google says it does not use it for that purpose.',
-      residency: 'Processed on Google infrastructure; Google does not offer a choice of region for this API.',
+      residency:
+        'Processed on Google infrastructure; Google does not offer a choice of region for this API.',
       reviewedOn: null,
     },
     models: [
@@ -172,8 +174,10 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
       version: 'openai-draft-2026-10',
       // DRAFT pending owner approval against OpenAI's current API data-use terms.
       summary: 'Your emails are processed by OpenAI under your own API account and its terms.',
-      training: 'OpenAI says it does not use API data to train its models unless you opt in. It may keep it for a limited time to monitor abuse.',
-      residency: 'Processed by OpenAI in the United States by default; regional processing is offered to some business accounts.',
+      training:
+        'OpenAI says it does not use API data to train its models unless you opt in. It may keep it for a limited time to monitor abuse.',
+      residency:
+        'Processed by OpenAI in the United States by default; regional processing is offered to some business accounts.',
       reviewedOn: null,
     },
     // Candidates pending evaluation (AI-15): small current models with strict structured output.
@@ -227,8 +231,10 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
       version: 'anthropic-draft-2026-10',
       // DRAFT pending owner approval against Anthropic's current commercial and API data terms.
       summary: 'Your emails are processed by Anthropic under your own API account and its terms.',
-      training: 'Anthropic says it does not train its models on API data by default. It may keep it for a limited time for safety monitoring.',
-      residency: "Processed on Anthropic's infrastructure; see Anthropic's terms for where data is processed.",
+      training:
+        'Anthropic says it does not train its models on API data by default. It may keep it for a limited time for safety monitoring.',
+      residency:
+        "Processed on Anthropic's infrastructure; see Anthropic's terms for where data is processed.",
       reviewedOn: null,
     },
     // Candidates pending evaluation (AI-15).
@@ -272,7 +278,11 @@ export const isRetired = (model: CatalogModel, day: string) =>
   model.retiresOn !== null && day > model.retiresOn;
 
 /** The models a user may choose for a role: current, catalog-defined, never free-form. */
-export function modelsForRole(provider: CatalogProvider, role: AIRole, day: string): CatalogModel[] {
+export function modelsForRole(
+  provider: CatalogProvider,
+  role: AIRole,
+  day: string,
+): CatalogModel[] {
   return provider.models.filter((model) => model.roles.includes(role) && !isRetired(model, day));
 }
 
@@ -295,7 +305,8 @@ export function resolveModel(
   selectedId: string | null,
   day: string,
 ): { model: CatalogModel; source: ModelSource } {
-  if (selectedId === null) return { model: recommendedModel(provider, role), source: 'RECOMMENDED' };
+  if (selectedId === null)
+    return { model: recommendedModel(provider, role), source: 'RECOMMENDED' };
   const selected = modelsForRole(provider, role, day).find((m) => m.id === selectedId);
   return selected
     ? { model: selected, source: 'SELECTED' }

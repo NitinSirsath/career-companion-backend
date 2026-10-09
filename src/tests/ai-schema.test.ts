@@ -33,11 +33,15 @@ describe('AI configuration and usage persistence', () => {
     ['unsealed key', { encryptedApiKey: 'sk-plaintext' }],
     ['negative failure count', { consecutiveFailures: -1 }],
   ])('rejects %s', async (_label, overrides) => {
-    await expect(prisma.aIConfiguration.create({ data: configuration(overrides) })).rejects.toThrow();
+    await expect(
+      prisma.aIConfiguration.create({ data: configuration(overrides) }),
+    ).rejects.toThrow();
   });
 
   it('rejects negative counters and malformed days', async () => {
-    await expect(prisma.aIUsageDay.create({ data: { userId, day: '2026-10-02', calls: -1 } })).rejects.toThrow();
+    await expect(
+      prisma.aIUsageDay.create({ data: { userId, day: '2026-10-02', calls: -1 } }),
+    ).rejects.toThrow();
     await expect(prisma.aIUsageDay.create({ data: { userId, day: 'today' } })).rejects.toThrow();
   });
 
@@ -54,7 +58,9 @@ describe('AI configuration and usage persistence', () => {
 
   it('defaults operation provenance and approvals for new ledger rows', async () => {
     const email = await prisma.email.create({ data: { userId, gmailMessageId: 'schema-op' } });
-    const op = await prisma.aIOperation.create({ data: { emailId: email.id, operation: 'classification', version: 'v' } });
+    const op = await prisma.aIOperation.create({
+      data: { emailId: email.id, operation: 'classification', version: 'v' },
+    });
     expect(op).toMatchObject({ provider: null, model: null, approvedRetries: 0 });
     await expect(
       prisma.aIOperation.update({ where: { id: op.id }, data: { approvedRetries: -1 } }),

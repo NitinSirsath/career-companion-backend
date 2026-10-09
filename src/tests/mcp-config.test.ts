@@ -17,26 +17,41 @@ const production = {
 
 describe('mcpConfig', () => {
   it('defaults to localhost hosts and no allowed origins outside production', () => {
-    expect(mcpConfig({})).toEqual({ allowedHosts: ['localhost', '127.0.0.1', '[::1]'], allowedOrigins: [] });
+    expect(mcpConfig({})).toEqual({
+      allowedHosts: ['localhost', '127.0.0.1', '[::1]'],
+      allowedOrigins: [],
+    });
   });
 
   it('parses comma-separated hostnames, trimmed and lowercased', () => {
-    expect(mcpConfig({ MCP_ALLOWED_HOSTS: ' API.example.com ,localhost', MCP_ALLOWED_ORIGINS: 'ide.example' })).toEqual({
+    expect(
+      mcpConfig({
+        MCP_ALLOWED_HOSTS: ' API.example.com ,localhost',
+        MCP_ALLOWED_ORIGINS: 'ide.example',
+      }),
+    ).toEqual({
       allowedHosts: ['api.example.com', 'localhost'],
       allowedOrigins: ['ide.example'],
     });
   });
 
-  it.each(['https://api.example.com', 'api.example.com:443', 'api.example.com/mcp', 'bad host'])('rejects %j', (value) => {
-    expect(() => parseHostnameList('MCP_ALLOWED_HOSTS', value)).toThrow('hostnames only');
-  });
+  it.each(['https://api.example.com', 'api.example.com:443', 'api.example.com/mcp', 'bad host'])(
+    'rejects %j',
+    (value) => {
+      expect(() => parseHostnameList('MCP_ALLOWED_HOSTS', value)).toThrow('hostnames only');
+    },
+  );
 });
 
 describe('production startup', () => {
   it('accepts an explicit host allowlist and a valid limit', () => {
     expect(() => validateProductionConfig(production)).not.toThrow();
-    expect(() => validateProductionConfig({ ...production, MCP_DAILY_SUBMISSION_LIMIT: '0' })).not.toThrow();
-    expect(() => validateProductionConfig({ ...production, MCP_DAILY_SUBMISSION_LIMIT: '5000' })).not.toThrow();
+    expect(() =>
+      validateProductionConfig({ ...production, MCP_DAILY_SUBMISSION_LIMIT: '0' }),
+    ).not.toThrow();
+    expect(() =>
+      validateProductionConfig({ ...production, MCP_DAILY_SUBMISSION_LIMIT: '5000' }),
+    ).not.toThrow();
   });
 
   it.each([

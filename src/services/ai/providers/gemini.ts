@@ -27,7 +27,10 @@ function toGemini(node: JsonNode): Schema {
     if (key === 'type') out.type = TYPES[value as string];
     else if (key === 'properties')
       out.properties = Object.fromEntries(
-        Object.entries(value as Record<string, JsonNode>).map(([name, child]) => [name, toGemini(child)]),
+        Object.entries(value as Record<string, JsonNode>).map(([name, child]) => [
+          name,
+          toGemini(child),
+        ]),
       );
     else if (key === 'items') out.items = toGemini(value as JsonNode);
     else if (KEPT.has(key)) out[key] = value;
@@ -51,15 +54,23 @@ export function geminiSchema(schema: z.ZodType): Schema {
  * Reads the Google API error body (`{ error: { status, details } }`, carried as the SDK error's
  * message) in memory. Only allowlisted tokens leave this function; the text is never kept.
  */
-function googleErrorBody(err: unknown): { status?: string; reason?: string; retryAfterMs?: number } {
+function googleErrorBody(err: unknown): {
+  status?: string;
+  reason?: string;
+  retryAfterMs?: number;
+} {
   try {
     const message = err instanceof Error ? err.message : '';
     const body = JSON.parse(message) as {
-      error?: { status?: unknown; details?: { '@type'?: unknown; reason?: unknown; retryDelay?: unknown }[] };
+      error?: {
+        status?: unknown;
+        details?: { '@type'?: unknown; reason?: unknown; retryDelay?: unknown }[];
+      };
     };
     const details = Array.isArray(body.error?.details) ? body.error.details : [];
     const reason = details.find((d) => typeof d.reason === 'string')?.reason as string | undefined;
-    const delay = details.find((d) => typeof d.retryDelay === 'string')?.retryDelay as string | undefined;
+    const delay = details.find((d) => typeof d.retryDelay === 'string')?.retryDelay as
+      string | undefined;
     const seconds = delay ? Number(delay.replace(/s$/, '')) : NaN;
     return {
       status: typeof body.error?.status === 'string' ? body.error.status : undefined,
@@ -84,8 +95,13 @@ export function classifyGeminiError(err: unknown): ProviderFailure {
       : undefined;
   if (status === undefined) return new ProviderFailure('OUTCOME_UNKNOWN');
   const body = googleErrorBody(err);
-  const details = { status, providerCode: body.reason ?? body.status, retryAfterMs: body.retryAfterMs };
-  if (body.reason === 'API_KEY_INVALID' || status === 401) return new ProviderFailure('KEY_REJECTED', details);
+  const details = {
+    status,
+    providerCode: body.reason ?? body.status,
+    retryAfterMs: body.retryAfterMs,
+  };
+  if (body.reason === 'API_KEY_INVALID' || status === 401)
+    return new ProviderFailure('KEY_REJECTED', details);
   if (status === 403 || body.status === 'FAILED_PRECONDITION')
     return new ProviderFailure('ACCOUNT_OR_BILLING', details);
   if (status === 404) return new ProviderFailure('MODEL_UNAVAILABLE', details);
@@ -117,7 +133,9 @@ export function createGeminiClient(provider: CatalogProvider, apiKey: string): P
               ? { thinkingConfig: { thinkingBudget: model.reasoning.thinkingBudget } }
               : {}),
             ...(model.reasoning && 'thinkingLevel' in model.reasoning
-              ? { thinkingConfig: { thinkingLevel: THINKING_LEVELS[model.reasoning.thinkingLevel] } }
+              ? {
+                  thinkingConfig: { thinkingLevel: THINKING_LEVELS[model.reasoning.thinkingLevel] },
+                }
               : {}),
             httpOptions: { timeout: model.timeoutMs },
           },
@@ -131,18 +149,27 @@ export function createGeminiClient(provider: CatalogProvider, apiKey: string): P
       };
       const text = response.text;
       if (!text)
-        throw new ProviderFailure('INVALID_OUTPUT', { message: 'AI provider returned empty response', usage });
+        throw new ProviderFailure('INVALID_OUTPUT', {
+          message: 'AI provider returned empty response',
+          usage,
+        });
       try {
         return { data: JSON.parse(text), usage };
       } catch {
-        throw new ProviderFailure('INVALID_OUTPUT', { message: 'AI provider returned invalid JSON', usage });
+        throw new ProviderFailure('INVALID_OUTPUT', {
+          message: 'AI provider returned invalid JSON',
+          usage,
+        });
       }
     },
 
     async verifyModels(modelIds): Promise<VerifyResult> {
       for (const modelId of new Set(modelIds)) {
         try {
-          await client.models.get({ model: modelId, config: { httpOptions: { timeout: VERIFY_TIMEOUT_MS } } });
+          await client.models.get({
+            model: modelId,
+            config: { httpOptions: { timeout: VERIFY_TIMEOUT_MS } },
+          });
         } catch (err) {
           const { kind } = classifyGeminiError(err);
           return (ACCESS_FAILURE_KINDS as readonly string[]).includes(kind)

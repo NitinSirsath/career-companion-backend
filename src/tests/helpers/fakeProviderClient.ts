@@ -4,12 +4,20 @@ import type { StructuredRequest, VerifyResult } from '../../services/ai/provider
 type Response = unknown | ((input: string) => unknown | Promise<unknown>);
 
 /** Deterministic provider client: answers each contract with fixed data. Never calls a network. */
-export function fakeProviderClient(responses: { classification?: Response; relevanceBatch?: Response; extraction?: Response }) {
+export function fakeProviderClient(responses: {
+  classification?: Response;
+  relevanceBatch?: Response;
+  extraction?: Response;
+}) {
   const answer = async (response: Response, input: string) =>
     typeof response === 'function' ? response(input) : response;
   const generateStructured = vi.fn(async ({ contract, input }: StructuredRequest) => ({
     data: await answer(
-      contract.schemaName === 'email_relevance' ? responses.classification : contract.schemaName === 'email_relevance_batch' ? responses.relevanceBatch : responses.extraction,
+      contract.schemaName === 'email_relevance'
+        ? responses.classification
+        : contract.schemaName === 'email_relevance_batch'
+          ? responses.relevanceBatch
+          : responses.extraction,
       input,
     ),
     usage: { inputTokens: 10, outputTokens: 5 },

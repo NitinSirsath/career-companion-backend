@@ -17,15 +17,24 @@ const using = (pattern: RegExp) =>
 
 describe('credential boundaries (BYO AI plan §8)', () => {
   it('opens a sealed key only where a provider call or verification needs it', () => {
-    expect(using(/\bopenApiKey\b/)).toEqual(['services/ai/access.ts', 'services/ai/credentials.ts', 'services/ai/settings.ts']);
+    expect(using(/\bopenApiKey\b/)).toEqual([
+      'services/ai/access.ts',
+      'services/ai/credentials.ts',
+      'services/ai/settings.ts',
+    ]);
   });
 
   it('reads the sealed key column only in those same modules', () => {
-    expect(using(/\bencryptedApiKey\b/)).toEqual(['services/ai/access.ts', 'services/ai/settings.ts']);
+    expect(using(/\bencryptedApiKey\b/)).toEqual([
+      'services/ai/access.ts',
+      'services/ai/settings.ts',
+    ]);
   });
 
   it('builds provider clients only through the single seam', () => {
-    expect(using(/from '\.\/(gemini|openai|anthropic)'|providers\/(gemini|openai|anthropic)'/)).toEqual(['services/ai/providers/index.ts']);
+    expect(
+      using(/from '\.\/(gemini|openai|anthropic)'|providers\/(gemini|openai|anthropic)'/),
+    ).toEqual(['services/ai/providers/index.ts']);
   });
 
   it('keeps provider SDKs inside the adapters', () => {

@@ -20,19 +20,34 @@ function errorBody(err: APIError): { type?: string; message?: string } {
  */
 export function classifyAnthropicError(err: unknown): ProviderFailure {
   if (err instanceof ProviderFailure) return err;
-  if (err instanceof APIConnectionError || err instanceof APIUserAbortError) return new ProviderFailure('OUTCOME_UNKNOWN');
-  if (!(err instanceof APIError) || typeof err.status !== 'number') return new ProviderFailure('OUTCOME_UNKNOWN');
+  if (err instanceof APIConnectionError || err instanceof APIUserAbortError)
+    return new ProviderFailure('OUTCOME_UNKNOWN');
+  if (!(err instanceof APIError) || typeof err.status !== 'number')
+    return new ProviderFailure('OUTCOME_UNKNOWN');
   const status = err.status;
   const { type, message } = errorBody(err);
   const details = { status, providerCode: type, retryAfterMs: retryAfterMs(err.headers) };
-  if (type === 'authentication_error' || status === 401) return new ProviderFailure('KEY_REJECTED', details);
+  if (type === 'authentication_error' || status === 401)
+    return new ProviderFailure('KEY_REJECTED', details);
   // An empty credit balance has been reported as a 400 invalid_request_error; the text is only
   // inspected here, never kept.
-  if (type === 'billing_error' || status === 402 || (status === 400 && message && /credit balance/i.test(message)))
+  if (
+    type === 'billing_error' ||
+    status === 402 ||
+    (status === 400 && message && /credit balance/i.test(message))
+  )
     return new ProviderFailure('ACCOUNT_OR_BILLING', details);
-  if (type === 'permission_error' || status === 403) return new ProviderFailure('ACCOUNT_OR_BILLING', details);
-  if (type === 'not_found_error' || status === 404) return new ProviderFailure('MODEL_UNAVAILABLE', details);
-  if (type === 'rate_limit_error' || type === 'overloaded_error' || status === 429 || status === 529 || status === 503)
+  if (type === 'permission_error' || status === 403)
+    return new ProviderFailure('ACCOUNT_OR_BILLING', details);
+  if (type === 'not_found_error' || status === 404)
+    return new ProviderFailure('MODEL_UNAVAILABLE', details);
+  if (
+    type === 'rate_limit_error' ||
+    type === 'overloaded_error' ||
+    status === 429 ||
+    status === 529 ||
+    status === 503
+  )
     return new ProviderFailure('RATE_LIMITED', details);
   if (status === 408 || status >= 500) return new ProviderFailure('OUTCOME_UNKNOWN', details);
   return new ProviderFailure('INVALID_REQUEST', details);
@@ -40,7 +55,12 @@ export function classifyAnthropicError(err: unknown): ProviderFailure {
 
 export function createAnthropicClient(provider: CatalogProvider, apiKey: string): ProviderClient {
   // No hidden retries; the endpoint is the catalog's; no token or base URL from the environment.
-  const client = new Anthropic({ apiKey, authToken: null, baseURL: provider.baseUrl, maxRetries: 0 });
+  const client = new Anthropic({
+    apiKey,
+    authToken: null,
+    baseURL: provider.baseUrl,
+    maxRetries: 0,
+  });
   return {
     async generateStructured({ contract, model, input }) {
       const schema = strictJsonSchema(contract.schema);
@@ -74,7 +94,10 @@ export function createAnthropicClient(provider: CatalogProvider, apiKey: string)
       } catch (err) {
         throw classifyAnthropicError(err);
       }
-      const usage = { inputTokens: message.usage?.input_tokens ?? null, outputTokens: message.usage?.output_tokens ?? null };
+      const usage = {
+        inputTokens: message.usage?.input_tokens ?? null,
+        outputTokens: message.usage?.output_tokens ?? null,
+      };
       if (message.stop_reason === 'max_tokens' || message.stop_reason === 'refusal')
         throw new ProviderFailure('INVALID_OUTPUT', { usage });
       let data: unknown;
@@ -84,11 +107,17 @@ export function createAnthropicClient(provider: CatalogProvider, apiKey: string)
         try {
           data = JSON.parse(text.text);
         } catch {
-          throw new ProviderFailure('INVALID_OUTPUT', { message: 'AI provider returned invalid JSON', usage });
+          throw new ProviderFailure('INVALID_OUTPUT', {
+            message: 'AI provider returned invalid JSON',
+            usage,
+          });
         }
       } else {
-        const call = message.content.find((block) => block.type === 'tool_use' && block.name === contract.schemaName);
-        if (!call || call.type !== 'tool_use') throw new ProviderFailure('INVALID_OUTPUT', { usage });
+        const call = message.content.find(
+          (block) => block.type === 'tool_use' && block.name === contract.schemaName,
+        );
+        if (!call || call.type !== 'tool_use')
+          throw new ProviderFailure('INVALID_OUTPUT', { usage });
         data = call.input;
       }
       return { data: nullsToAbsent(data, contract.schema), usage };

@@ -76,29 +76,52 @@ describe('Notification Job', () => {
 
   it('suppresses archived/snoozed work permanently and never replays it on wake or restore', async () => {
     for (const archived of [true, false]) {
-      await prisma.application.update({where:{id:app.id},data:{archivedAt:archived?new Date():null}});
-      const action=await prisma.action.create({data:{applicationId:app.id,type:'ACTION_REQUIRED',snoozedUntil:archived?null:new Date(Date.now()+3600000)}});
-      const send=vi.fn();DiscordProvider.prototype.send=send;await startNotificationWorker();
-      await workHandler([{data:{actionId:action.id}}]);
-      await prisma.application.update({where:{id:app.id},data:{archivedAt:null}});
-      await prisma.action.update({where:{id:action.id},data:{snoozedUntil:null}});
-      await workHandler([{data:{actionId:action.id}}]);
+      await prisma.application.update({
+        where: { id: app.id },
+        data: { archivedAt: archived ? new Date() : null },
+      });
+      const action = await prisma.action.create({
+        data: {
+          applicationId: app.id,
+          type: 'ACTION_REQUIRED',
+          snoozedUntil: archived ? null : new Date(Date.now() + 3600000),
+        },
+      });
+      const send = vi.fn();
+      DiscordProvider.prototype.send = send;
+      await startNotificationWorker();
+      await workHandler([{ data: { actionId: action.id } }]);
+      await prisma.application.update({ where: { id: app.id }, data: { archivedAt: null } });
+      await prisma.action.update({ where: { id: action.id }, data: { snoozedUntil: null } });
+      await workHandler([{ data: { actionId: action.id } }]);
       expect(send).not.toHaveBeenCalled();
-      expect(await prisma.notificationDelivery.findFirst({where:{actionId:action.id}})).toMatchObject({status:'FAILED_PERMANENT',errorDetails:'USER_SUPPRESSED'});
+      expect(
+        await prisma.notificationDelivery.findFirst({ where: { actionId: action.id } }),
+      ).toMatchObject({ status: 'FAILED_PERMANENT', errorDetails: 'USER_SUPPRESSED' });
     }
   });
 
-  it('rechecks archive after claiming and before the external send',async()=>{
-    const action=await prisma.action.create({data:{applicationId:app.id,type:'ACTION_REQUIRED'}});
-    const original=prisma.notificationDelivery.updateMany.bind(prisma.notificationDelivery);
-    vi.spyOn(prisma.notificationDelivery,'updateMany').mockImplementation((async(args:unknown)=>{
-      const result=await original(args as never);
-      await prisma.application.update({where:{id:app.id},data:{archivedAt:new Date()}});
+  it('rechecks archive after claiming and before the external send', async () => {
+    const action = await prisma.action.create({
+      data: { applicationId: app.id, type: 'ACTION_REQUIRED' },
+    });
+    const original = prisma.notificationDelivery.updateMany.bind(prisma.notificationDelivery);
+    vi.spyOn(prisma.notificationDelivery, 'updateMany').mockImplementation((async (
+      args: unknown,
+    ) => {
+      const result = await original(args as never);
+      await prisma.application.update({ where: { id: app.id }, data: { archivedAt: new Date() } });
       return result;
     }) as never);
-    const send=vi.fn();DiscordProvider.prototype.send=send;await startNotificationWorker();
-    try {await workHandler([{data:{actionId:action.id}}]);expect(send).not.toHaveBeenCalled();}
-    finally {await prisma.application.update({where:{id:app.id},data:{archivedAt:null}});}
+    const send = vi.fn();
+    DiscordProvider.prototype.send = send;
+    await startNotificationWorker();
+    try {
+      await workHandler([{ data: { actionId: action.id } }]);
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      await prisma.application.update({ where: { id: app.id }, data: { archivedAt: null } });
+    }
   });
 
   it('delivers notification for ACTION_REQUIRED and records delivery', async () => {

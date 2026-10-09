@@ -33,11 +33,17 @@ it('discards failed queue initialization and starts afresh on recovery', async (
 });
 
 it('keeps existing queue positions and configures triage as a ten-second per-user singleton', () => {
-  expect(QUEUE_NAMES.slice(0, 3)).toEqual(['email-processing-job', 'discord-notification-job', 'gmail-sync-job']);
+  expect(QUEUE_NAMES.slice(0, 3)).toEqual([
+    'email-processing-job',
+    'discord-notification-job',
+    'gmail-sync-job',
+  ]);
   expect(QUEUE_NAMES[3]).toBe('relevance-triage-job');
-  expect(relevanceTriageJobOptions('user-1')).toMatchObject({ singletonKey: 'triage:user-1', startAfter: 10 });
+  expect(relevanceTriageJobOptions('user-1')).toMatchObject({
+    singletonKey: 'triage:user-1',
+    startAfter: 10,
+  });
 });
-
 
 it('deduplicates triage jobs per user across queued and active states', async () => {
   const queue = await getQueue();
@@ -50,16 +56,24 @@ it('deduplicates triage jobs per user across queued and active states', async ()
   expect(await enqueueRelevanceTriage(userB)).toBeTruthy();
 
   let active!: () => void;
-  const activeReached = new Promise<void>((resolve) => { active = resolve; });
-  let release!: () => void;
-  const hold = new Promise<void>((resolve) => { release = resolve; });
-
-  const workerId = await queue.work<{ userId: string }>('relevance-triage-job', { batchSize: 1 }, async (jobs) => {
-    if (jobs[0].data.userId === userA) {
-      active();
-      await hold;
-    }
+  const activeReached = new Promise<void>((resolve) => {
+    active = resolve;
   });
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  const workerId = await queue.work<{ userId: string }>(
+    'relevance-triage-job',
+    { batchSize: 1 },
+    async (jobs) => {
+      if (jobs[0].data.userId === userA) {
+        active();
+        await hold;
+      }
+    },
+  );
 
   try {
     await prisma.$executeRawUnsafe(
@@ -70,7 +84,9 @@ it('deduplicates triage jobs per user across queued and active states', async ()
     queue.notifyWorker(workerId);
     await Promise.race([
       activeReached,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('triage job did not become active')), 10_000)),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('triage job did not become active')), 10_000),
+      ),
     ]);
     expect(await enqueueRelevanceTriage(userA)).toBeTruthy();
   } finally {

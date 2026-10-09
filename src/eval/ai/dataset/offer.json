@@ -4,37 +4,25 @@
     "input": {
       "sender": "Grace Kim <grace.kim@fabrikam.example.com>",
       "subject": "Great news from Fabrikam",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "Hi Alex,\n\nFollowing our call today, I'm delighted to confirm that we'd like to offer you the Senior DevOps Engineer role.\nYou'll receive the formal offer letter tomorrow. Let me know if you have questions in the meantime.\n\nGrace"
     },
     "expect": {
       "relevance": "RELEVANT",
       "critical": true,
-      "category": [
-        "OFFER"
-      ],
+      "category": ["OFFER"],
       "fields": {
         "companyName": {
-          "contains": [
-            "fabrikam"
-          ]
+          "contains": ["fabrikam"]
         },
         "jobTitle": {
-          "contains": [
-            "devops"
-          ]
+          "contains": ["devops"]
         },
         "offerInfo": {
           "present": true
         }
       },
-      "mustBeNull": [
-        "rejectionInfo",
-        "interviewDate"
-      ]
+      "mustBeNull": ["rejectionInfo", "interviewDate"]
     },
     "group": "offer"
   },
@@ -43,28 +31,19 @@
     "input": {
       "sender": "People Team <people@relecloud.example.com>",
       "subject": "Your offer from Relecloud",
-      "labels": [
-        "INBOX",
-        "CATEGORY_UPDATES"
-      ],
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
       "body": "Dear Alex,\n\nWe are pleased to offer you the position of Solutions Architect at Relecloud, with a start date of January 4, 2027.\nPlease review the attached offer letter and sign it by November 6, 2026 to accept.\n\nWelcome aboard,\nRelecloud People Team"
     },
     "expect": {
       "relevance": "RELEVANT",
       "critical": true,
-      "category": [
-        "OFFER"
-      ],
+      "category": ["OFFER"],
       "fields": {
         "companyName": {
-          "contains": [
-            "relecloud"
-          ]
+          "contains": ["relecloud"]
         },
         "jobTitle": {
-          "contains": [
-            "solutions architect"
-          ]
+          "contains": ["solutions architect"]
         },
         "offerInfo": {
           "present": true
@@ -76,9 +55,7 @@
           "date": "2026-11-06"
         }
       },
-      "mustBeNull": [
-        "rejectionInfo"
-      ]
+      "mustBeNull": ["rejectionInfo"]
     },
     "group": "offer"
   },
@@ -87,31 +64,22 @@
     "input": {
       "sender": "Mina Duarte <mina.duarte@wingtip.example.net>",
       "subject": "Re: Offer details",
-      "labels": [
-        "INBOX",
-        "CATEGORY_PERSONAL"
-      ],
+      "labels": ["INBOX", "CATEGORY_PERSONAL"],
       "body": "Hi Alex,\n\nThanks for your note. We can increase the signing bonus as discussed; the rest of the offer for the Mobile Engineer role stays the same.\nAn updated offer letter is attached.\n\nMina"
     },
     "expect": {
       "relevance": "RELEVANT",
       "critical": true,
-      "category": [
-        "OFFER"
-      ],
+      "category": ["OFFER"],
       "fields": {
         "jobTitle": {
-          "contains": [
-            "mobile engineer"
-          ]
+          "contains": ["mobile engineer"]
         },
         "offerInfo": {
           "present": true
         }
       },
-      "mustBeNull": [
-        "rejectionInfo"
-      ]
+      "mustBeNull": ["rejectionInfo"]
     },
     "group": "offer"
   }

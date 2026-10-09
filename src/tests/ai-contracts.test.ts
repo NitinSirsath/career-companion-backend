@@ -208,14 +208,18 @@ const FINGERPRINTS: Record<string, string> = {
 };
 const fingerprint = (contract: AIContract<unknown>) =>
   createHash('sha256')
-    .update(`${contract.version}\n${contract.instructions}\n${JSON.stringify(z.toJSONSchema(contract.schema))}`)
+    .update(
+      `${contract.version}\n${contract.instructions}\n${JSON.stringify(z.toJSONSchema(contract.schema))}`,
+    )
     .digest('hex');
 
 describe('provider-neutral AI contracts', () => {
   it('moved the prompts byte-for-byte with unchanged versions', () => {
     expect(LEGACY_CLASSIFICATION_CONTRACT.version).toBe('classification/v2');
     expect(EXTRACTION_CONTRACT.version).toBe('extraction/v2');
-    expect(LEGACY_CLASSIFICATION_CONTRACT.instructions).toBe(PROMPTS[LEGACY_CONTRACT_VERSIONS.CLASSIFICATION]);
+    expect(LEGACY_CLASSIFICATION_CONTRACT.instructions).toBe(
+      PROMPTS[LEGACY_CONTRACT_VERSIONS.CLASSIFICATION],
+    );
     expect(EXTRACTION_CONTRACT.instructions).toBe(PROMPTS[AI_CONTRACT_VERSIONS.EXTRACTION]);
   });
 
@@ -232,12 +236,9 @@ describe('provider-neutral AI contracts', () => {
     LEGACY_RELEVANCE_BATCH_CONTRACT,
     RELEVANCE_BATCH_CONTRACT,
     EXTRACTION_CONTRACT,
-  ])(
-    'keeps $version bound to one prompt and schema',
-    (contract) => {
-      expect(fingerprint(contract as AIContract<unknown>)).toBe(FINGERPRINTS[contract.version]);
-    },
-  );
+  ])('keeps $version bound to one prompt and schema', (contract) => {
+    expect(fingerprint(contract as AIContract<unknown>)).toBe(FINGERPRINTS[contract.version]);
+  });
 });
 
 describe('strict relevance contracts', () => {

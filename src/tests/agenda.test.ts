@@ -251,24 +251,49 @@ it('validates unresolved writes and paginates review without hiding uncertain it
 });
 
 it('serializes an observed edit/correction interleaving under the shared lock order', async () => {
-  const row=await project();
-  let release!:()=>void, locked!:()=>void;
-  const gate=new Promise<void>(resolve=>{release=resolve;});
-  const ready=new Promise<void>(resolve=>{locked=resolve;});
-  const holder=prisma.$transaction(async tx=>{
-    await tx.$queryRaw`SELECT id FROM emails WHERE id=${emailId}::uuid FOR UPDATE`;
-    locked();await gate;
-  },{timeout:15000});
+  const row = await project();
+  let release!: () => void, locked!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const ready = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const holder = prisma.$transaction(
+    async (tx) => {
+      await tx.$queryRaw`SELECT id FROM emails WHERE id=${emailId}::uuid FOR UPDATE`;
+      locked();
+      await gate;
+    },
+    { timeout: 15000 },
+  );
   await ready;
-  const editing=updateAgenda(userId,row.id,{expectedRevision:0,state:'CONFIRMED'});
+  const editing = updateAgenda(userId, row.id, { expectedRevision: 0, state: 'CONFIRMED' });
   try {
-    await vi.waitFor(async()=>{
-      const waiting=await prisma.$queryRaw<{n:number}[]>`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%SELECT id FROM emails%'`;
+    await vi.waitFor(async () => {
+      const waiting = await prisma.$queryRaw<
+        { n: number }[]
+      >`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%SELECT id FROM emails%'`;
       expect(waiting[0].n).toBeGreaterThan(0);
     });
-    const moving=MatcherService.correctEmailMatch(userId,emailId,{expectedMatchState:'MATCHED',expectedApplicationId:appId,applicationId:target});
-    release();await holder;await editing;await moving;
-    expect(await prisma.agendaItem.findFirst({where:{emailId,applicationId:target}})).toMatchObject({state:'CONFIRMED'});
-    expect(await prisma.agendaItem.findUnique({where:{id:row.id}})).toMatchObject({revision:2,retiredReason:'EMAIL_MOVED'});
-  } finally {release();await holder;}
+    const moving = MatcherService.correctEmailMatch(userId, emailId, {
+      expectedMatchState: 'MATCHED',
+      expectedApplicationId: appId,
+      applicationId: target,
+    });
+    release();
+    await holder;
+    await editing;
+    await moving;
+    expect(
+      await prisma.agendaItem.findFirst({ where: { emailId, applicationId: target } }),
+    ).toMatchObject({ state: 'CONFIRMED' });
+    expect(await prisma.agendaItem.findUnique({ where: { id: row.id } })).toMatchObject({
+      revision: 2,
+      retiredReason: 'EMAIL_MOVED',
+    });
+  } finally {
+    release();
+    await holder;
+  }
 });

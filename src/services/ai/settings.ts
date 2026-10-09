@@ -65,7 +65,12 @@ export class SettingsError extends Error {
 
 // Printable ASCII without spaces: no provider key format needs more, and nothing else is accepted.
 const API_KEY = /^[\x21-\x7e]{8,512}$/;
-const NEEDS_ATTENTION_ISSUES: AIAccessIssue[] = ['KEY_REJECTED', 'ACCOUNT_OR_BILLING', 'MODEL_UNAVAILABLE', 'KEY_UNREADABLE'];
+const NEEDS_ATTENTION_ISSUES: AIAccessIssue[] = [
+  'KEY_REJECTED',
+  'ACCOUNT_OR_BILLING',
+  'MODEL_UNAVAILABLE',
+  'KEY_UNREADABLE',
+];
 
 const iso = (date: Date | null | undefined) => (date ? date.toISOString() : null);
 
@@ -100,7 +105,10 @@ export async function readSettings(userId: string, now = new Date()): Promise<AI
       inputTokens: usage?.inputTokens ?? 0,
       outputTokens: usage?.outputTokens ?? 0,
     },
-    safetyLimit: { callsPerDay: userDailyCallLimit(), resetsAt: nextUtcMidnight(now).toISOString() },
+    safetyLimit: {
+      callsPerDay: userDailyCallLimit(),
+      resetsAt: nextUtcMidnight(now).toISOString(),
+    },
     waitingEmails,
     consent: config && {
       disclosure: config.consentDisclosure,
@@ -113,15 +121,24 @@ export async function readSettings(userId: string, now = new Date()): Promise<AI
 /** Counts one content-free verification against the user's daily cap. */
 async function reserveVerification(userId: string, now: Date) {
   const day = utcDay(now);
-  await prisma.aIUsageDay.upsert({ where: { userId_day: { userId, day } }, create: { userId, day }, update: {} });
+  await prisma.aIUsageDay.upsert({
+    where: { userId_day: { userId, day } },
+    create: { userId, day },
+    update: {},
+  });
   const reserved = await prisma.aIUsageDay.updateMany({
     where: { userId, day, verifications: { lt: MAX_DAILY_VERIFICATIONS } },
     data: { verifications: { increment: 1 } },
   });
   if (!reserved.count)
-    throw new SettingsError(429, 'AI_VERIFY_RATE_LIMITED', 'Too many key checks today. Try again tomorrow.', {
-      resetsAt: nextUtcMidnight(now).toISOString(),
-    });
+    throw new SettingsError(
+      429,
+      'AI_VERIFY_RATE_LIMITED',
+      'Too many key checks today. Try again tomorrow.',
+      {
+        resetsAt: nextUtcMidnight(now).toISOString(),
+      },
+    );
 }
 
 function chosenModel(
@@ -134,15 +151,24 @@ function chosenModel(
   if (requested === undefined) return current;
   if (requested === null) return null;
   if (!modelsForRole(provider, role, catalogDay(now)).some((m) => m.id === requested))
-    throw new SettingsError(400, 'VALIDATION_ERROR', `That ${role} model is not offered for this provider.`);
+    throw new SettingsError(
+      400,
+      'VALIDATION_ERROR',
+      `That ${role} model is not offered for this provider.`,
+    );
   return requested;
 }
 
 const rejectedError = (result: Extract<VerifyResult, { result: 'REJECTED' }>) =>
-  new SettingsError(422, 'AI_ACCESS_REJECTED', 'The provider refused this key or model. Nothing was saved.', {
-    reason: result.kind,
-    modelId: result.modelId ?? null,
-  });
+  new SettingsError(
+    422,
+    'AI_ACCESS_REJECTED',
+    'The provider refused this key or model. Nothing was saved.',
+    {
+      reason: result.kind,
+      modelId: result.modelId ?? null,
+    },
+  );
 
 export async function saveSettings(
   userId: string,
@@ -150,7 +176,8 @@ export async function saveSettings(
   now = new Date(),
 ): Promise<SaveAISettingsResponse> {
   const provider = offeredProvider(request.provider);
-  if (!provider) throw new SettingsError(400, 'VALIDATION_ERROR', 'That AI provider is not offered.');
+  if (!provider)
+    throw new SettingsError(400, 'VALIDATION_ERROR', 'That AI provider is not offered.');
   const existing = await prisma.aIConfiguration.findUnique({
     where: { userId },
     select: { ...CONFIGURATION_STATE, encryptedApiKey: true },
@@ -162,9 +189,20 @@ export async function saveSettings(
   if (!newKey && switching)
     throw new SettingsError(400, 'VALIDATION_ERROR', 'An API key is required for this provider.');
   if (switching && request.consentDisclosure !== provider.disclosure.version)
-    throw new SettingsError(400, 'VALIDATION_ERROR', 'Confirm the data-use summary for this provider.');
-  if (request.consentDisclosure !== undefined && request.consentDisclosure !== provider.disclosure.version)
-    throw new SettingsError(400, 'VALIDATION_ERROR', 'The data-use summary has changed. Review it again.');
+    throw new SettingsError(
+      400,
+      'VALIDATION_ERROR',
+      'Confirm the data-use summary for this provider.',
+    );
+  if (
+    request.consentDisclosure !== undefined &&
+    request.consentDisclosure !== provider.disclosure.version
+  )
+    throw new SettingsError(
+      400,
+      'VALIDATION_ERROR',
+      'The data-use summary has changed. Review it again.',
+    );
 
   let apiKey = newKey;
   if (!apiKey) {
@@ -175,12 +213,27 @@ export async function saveSettings(
       throw new SettingsError(400, 'AI_KEY_REQUIRED', 'Enter your API key again.');
     }
   }
-  const fastModel = chosenModel(provider, 'fast', request.models?.fast, switching ? null : existing!.fastModel, now);
-  const detailedModel = chosenModel(provider, 'detailed', request.models?.detailed, switching ? null : existing!.detailedModel, now);
+  const fastModel = chosenModel(
+    provider,
+    'fast',
+    request.models?.fast,
+    switching ? null : existing!.fastModel,
+    now,
+  );
+  const detailedModel = chosenModel(
+    provider,
+    'detailed',
+    request.models?.detailed,
+    switching ? null : existing!.detailedModel,
+    now,
+  );
   const { models } = modelsFor(provider, { fastModel, detailedModel }, now);
 
   await reserveVerification(userId, now);
-  const result = await createProviderClient(provider, apiKey).verifyModels([models.fast.id, models.detailed.id]);
+  const result = await createProviderClient(provider, apiKey).verifyModels([
+    models.fast.id,
+    models.detailed.id,
+  ]);
   const keyChanged = switching || !!newKey;
   logEvent('ai_access_checked', {
     userId,
@@ -195,13 +248,21 @@ export async function saveSettings(
   // A definitive success clears problems that need the user's attention; an inconclusive check
   // never overwrites what is known about an unchanged key. A new key starts from a clean state.
   const state: Prisma.AIConfigurationUncheckedUpdateInput = keyChanged
-    ? { accessIssue: null, accessIssueModel: null, cooldownUntil: null, consecutiveFailures: 0, verifiedAt: verified ? now : null }
+    ? {
+        accessIssue: null,
+        accessIssueModel: null,
+        cooldownUntil: null,
+        consecutiveFailures: 0,
+        verifiedAt: verified ? now : null,
+      }
     : verified
       ? existing!.accessIssue && NEEDS_ATTENTION_ISSUES.includes(existing!.accessIssue)
         ? { accessIssue: null, accessIssueModel: null, verifiedAt: now }
         : { verifiedAt: now }
       : {};
-  const consent = request.consentDisclosure ? { consentDisclosure: request.consentDisclosure, consentedAt: now } : {};
+  const consent = request.consentDisclosure
+    ? { consentDisclosure: request.consentDisclosure, consentedAt: now }
+    : {};
   const fields = {
     provider: provider.id,
     fastModel,
@@ -227,19 +288,33 @@ export async function saveSettings(
       },
     });
   }
-  logEvent('ai_settings_saved', { userId, provider: provider.id, verification: result.result, switched: switching, keyChanged });
+  logEvent('ai_settings_saved', {
+    userId,
+    provider: provider.id,
+    verification: result.result,
+    switched: switching,
+    keyChanged,
+  });
   await reofferPendingEmails(userId);
   return { ...(await readSettings(userId, now)), verification: result.result };
 }
 
-export async function checkSettings(userId: string, now = new Date()): Promise<CheckAISettingsResponse> {
+export async function checkSettings(
+  userId: string,
+  now = new Date(),
+): Promise<CheckAISettingsResponse> {
   const config = await prisma.aIConfiguration.findUnique({
     where: { userId },
     select: { ...CONFIGURATION_STATE, encryptedApiKey: true },
   });
   if (!config) throw new SettingsError(404, 'AI_NOT_CONFIGURED', 'AI is not set up.');
   const provider = offeredProvider(config.provider);
-  if (!provider) throw new SettingsError(409, 'AI_PROVIDER_UNSUPPORTED', 'This provider is no longer offered. Choose another provider.');
+  if (!provider)
+    throw new SettingsError(
+      409,
+      'AI_PROVIDER_UNSUPPORTED',
+      'This provider is no longer offered. Choose another provider.',
+    );
   const guarded = { userId, revision: config.revision };
   let apiKey: string;
   try {
@@ -255,7 +330,10 @@ export async function checkSettings(userId: string, now = new Date()): Promise<C
   }
   await reserveVerification(userId, now);
   const { models } = modelsFor(provider, config, now);
-  const result = await createProviderClient(provider, apiKey).verifyModels([models.fast.id, models.detailed.id]);
+  const result = await createProviderClient(provider, apiKey).verifyModels([
+    models.fast.id,
+    models.detailed.id,
+  ]);
   logEvent('ai_access_checked', {
     userId,
     provider: provider.id,
@@ -268,13 +346,21 @@ export async function checkSettings(userId: string, now = new Date()): Promise<C
     const clears = config.accessIssue && NEEDS_ATTENTION_ISSUES.includes(config.accessIssue);
     await prisma.aIConfiguration.updateMany({
       where: guarded,
-      data: { verifiedAt: now, lastCheckedAt: now, ...(clears ? { accessIssue: null, accessIssueModel: null } : {}) },
+      data: {
+        verifiedAt: now,
+        lastCheckedAt: now,
+        ...(clears ? { accessIssue: null, accessIssueModel: null } : {}),
+      },
     });
     await reofferPendingEmails(userId);
   } else if (result.result === 'REJECTED') {
     await prisma.aIConfiguration.updateMany({
       where: guarded,
-      data: { accessIssue: result.kind, accessIssueModel: result.modelId ?? null, lastCheckedAt: now },
+      data: {
+        accessIssue: result.kind,
+        accessIssueModel: result.modelId ?? null,
+        lastCheckedAt: now,
+      },
     });
   } else {
     await prisma.aIConfiguration.updateMany({ where: guarded, data: { lastCheckedAt: now } });
@@ -302,7 +388,10 @@ const unavailable = (err: AIAccessError) =>
  * toward the safety limit, and refusals update access state like any call. Nothing is persisted
  * apart from those counts and state: no ledger row, no result.
  */
-export async function runSampleTest(userId: string, now = new Date()): Promise<AISampleTestResponse> {
+export async function runSampleTest(
+  userId: string,
+  now = new Date(),
+): Promise<AISampleTestResponse> {
   const configured = await prisma.aIConfiguration.count({ where: { userId } });
   if (!configured) throw new SettingsError(404, 'AI_NOT_CONFIGURED', 'AI is not set up.');
   let access: AIAccess;
@@ -313,7 +402,13 @@ export async function runSampleTest(userId: string, now = new Date()): Promise<A
     throw err;
   }
   const usage = { calls: 0, inputTokens: 0, outputTokens: 0 };
-  const call = async <T>(model: string, invoke: () => Promise<{ data: T; usage: { inputTokens: number | null; outputTokens: number | null } }>) => {
+  const call = async <T>(
+    model: string,
+    invoke: () => Promise<{
+      data: T;
+      usage: { inputTokens: number | null; outputTokens: number | null };
+    }>,
+  ) => {
     try {
       await prisma.$transaction((tx) => reserveUserCall(tx, userId, now));
     } catch (err) {
@@ -330,18 +425,37 @@ export async function runSampleTest(userId: string, now = new Date()): Promise<A
     } catch (err) {
       const kind = err instanceof ProviderFailure ? err.kind : 'OUTCOME_UNKNOWN';
       logEvent('ai_sample_test', { userId, provider: access.provider, outcome: kind, ...usage });
-      if (kind === 'KEY_REJECTED' || kind === 'ACCOUNT_OR_BILLING' || kind === 'MODEL_UNAVAILABLE' || kind === 'RATE_LIMITED') {
+      if (
+        kind === 'KEY_REJECTED' ||
+        kind === 'ACCOUNT_OR_BILLING' ||
+        kind === 'MODEL_UNAVAILABLE' ||
+        kind === 'RATE_LIMITED'
+      ) {
         const resumesAt = await prisma.$transaction((tx) =>
-          noteProviderFailure(tx, access, kind, now, { modelId: model, retryAfterMs: (err as ProviderFailure).retryAfterMs }),
+          noteProviderFailure(tx, access, kind, now, {
+            modelId: model,
+            retryAfterMs: (err as ProviderFailure).retryAfterMs,
+          }),
         );
-        if (kind === 'RATE_LIMITED') throw unavailable(new AIAccessError('RATE_LIMITED', resumesAt));
-        throw new SettingsError(422, 'AI_ACCESS_REJECTED', 'The provider refused this key or model.', {
-          reason: kind,
-          modelId: kind === 'MODEL_UNAVAILABLE' ? model : null,
-        });
+        if (kind === 'RATE_LIMITED')
+          throw unavailable(new AIAccessError('RATE_LIMITED', resumesAt));
+        throw new SettingsError(
+          422,
+          'AI_ACCESS_REJECTED',
+          'The provider refused this key or model.',
+          {
+            reason: kind,
+            modelId: kind === 'MODEL_UNAVAILABLE' ? model : null,
+          },
+        );
       }
       if (err instanceof ProviderFailure && err.usage) await recordTokens(userId, now, err.usage);
-      throw new SettingsError(502, 'AI_SAMPLE_FAILED', 'The sample test did not return a usable result.', { kind });
+      throw new SettingsError(
+        502,
+        'AI_SAMPLE_FAILED',
+        'The sample test did not return a usable result.',
+        { kind },
+      );
     }
   };
 

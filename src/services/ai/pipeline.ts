@@ -59,7 +59,10 @@ export class EmailAIPipeline {
     const result = email.aiProcessingResult;
     // Adopt existing completed work; neither a deployment nor a sync is reprocessing consent.
     const extracted = ['extraction/v2', 'extraction/v3'].includes(result?.contractVersion ?? '');
-    const batched = !!result && RELEVANCE_BATCH_VERSIONS.includes(result.contractVersion) && result.relevanceDecision !== null;
+    const batched =
+      !!result &&
+      RELEVANCE_BATCH_VERSIONS.includes(result.contractVersion) &&
+      result.relevanceDecision !== null;
     if (result && (result.processingStatus === 'COMPLETED' || extracted)) {
       await this.finish(userId, emailId, result.relevanceDecision);
       return;
@@ -79,9 +82,7 @@ export class EmailAIPipeline {
     const strictRules = !classificationLedger.some((row) =>
       (Object.values(LEGACY_CONTRACT_VERSIONS) as string[]).includes(row.version),
     );
-    const useBatch =
-      hasBatchClassification ||
-      (triageBatchEnabled() && !hasPerEmailClassification);
+    const useBatch = hasBatchClassification || (triageBatchEnabled() && !hasPerEmailClassification);
     const batchClassified = batched && hasBatchClassification;
 
     const operations = await prisma.aIOperation.count({ where: { emailId } });
