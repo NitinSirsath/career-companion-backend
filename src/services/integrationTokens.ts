@@ -7,6 +7,7 @@
 import crypto from 'crypto';
 import { IntegrationToken as TokenRow } from '@prisma/client';
 import { prisma } from '../db/prisma';
+import { AppError } from '../errors';
 import {
   CreateIntegrationTokenRequest,
   CreateIntegrationTokenRequestSchema,
@@ -23,18 +24,6 @@ export const TOKEN_SCOPE = 'submissions:write';
 const TOKEN_FORMAT = /^ccmcp_[A-Za-z0-9_-]{43}$/;
 const DISPLAY_PREFIX_LENGTH = 12;
 const DAY_MS = 86_400_000;
-
-/** An expected, user-facing outcome of a token request. Never carries token material. */
-export class IntegrationTokenError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'IntegrationTokenError';
-  }
-}
 
 const hashToken = (plaintext: string) =>
   crypto.createHash('sha256').update(plaintext).digest('hex');
@@ -75,7 +64,7 @@ export async function createIntegrationToken(
       where: { userId, revokedAt: null, expiresAt: { gt: now } },
     });
     if (active >= INTEGRATION_TOKEN_MAX_ACTIVE)
-      throw new IntegrationTokenError(
+      throw new AppError(
         409,
         'TOKEN_LIMIT_REACHED',
         `You can have at most ${INTEGRATION_TOKEN_MAX_ACTIVE} active tokens. Revoke one first.`,
@@ -122,7 +111,7 @@ export async function revokeIntegrationToken(
     data: { revokedAt: now },
   });
   const row = await prisma.integrationToken.findFirst({ where: { id, userId } });
-  if (!row) throw new IntegrationTokenError(404, 'NOT_FOUND', 'Token not found.');
+  if (!row) throw new AppError(404, 'NOT_FOUND', 'Token not found.');
   if (revoked.count) logEvent('integration_token_revoked', { userId, tokenId: id });
   return toResponse(row, now);
 }
