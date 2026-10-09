@@ -4,7 +4,6 @@ import { lockUser, LOCK_NAMESPACE } from '../utils/advisoryLock';
 import { AppError, CHANGE_REJECTED } from '../errors';
 import { ApplicationService } from './application';
 import { suppressNotifications } from './notificationSuppression';
-
 export async function archiveApplication(userId: string, id: string, request: ArchiveApplication) {
   return prisma.$transaction(async (tx) => {
     await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
