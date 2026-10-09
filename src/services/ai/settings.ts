@@ -8,6 +8,7 @@
  */
 import { AIAccessIssue, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
+import { AppError } from '../../errors';
 import { AI_CATALOG, AIRole, CatalogProvider, modelsForRole } from '../../contracts/aiCatalog';
 import type {
   AISampleTestResponse,
@@ -44,19 +45,6 @@ import {
   utcDay,
 } from './usage';
 import { logEvent, logError } from '../../utils/log';
-
-/** An expected, user-facing outcome of a settings request. Never carries key material. */
-export class SettingsError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-    readonly details?: Record<string, unknown>,
-  ) {
-    super(message);
-    this.name = 'SettingsError';
-  }
-}
 
 // Printable ASCII without spaces: no provider key format needs more, and nothing else is accepted.
 const API_KEY = /^[\x21-\x7e]{8,512}$/;
@@ -121,7 +109,7 @@ async function reserveVerification(userId: string, now: Date) {
     data: { verifications: { increment: 1 } },
   });
   if (!reserved.count)
-    throw new SettingsError(
+    throw new AppError(
       429,
       'AI_VERIFY_RATE_LIMITED',
       'Too many key checks today. Try again tomorrow.',
@@ -140,7 +128,7 @@ function chosenModel(
   if (requested === undefined) return current;
   if (requested === null) return null;
   if (!modelsForRole(provider, role).some((m) => m.id === requested))
-    throw new SettingsError(
+    throw new AppError(
       400,
       'VALIDATION_ERROR',
       `That ${role} model is not offered for this provider.`,
@@ -149,7 +137,7 @@ function chosenModel(
 }
 
 const rejectedError = (result: Extract<VerifyResult, { result: 'REJECTED' }>) =>
-  new SettingsError(
+  new AppError(
     422,
     'AI_ACCESS_REJECTED',
     'The provider refused this key or model. Nothing was saved.',
@@ -167,20 +155,16 @@ function checkSaveRequest(
   switching: boolean,
 ): void {
   if (newKey && !API_KEY.test(newKey))
-    throw new SettingsError(400, 'VALIDATION_ERROR', 'The API key format is not valid.');
+    throw new AppError(400, 'VALIDATION_ERROR', 'The API key format is not valid.');
   if (!newKey && switching)
-    throw new SettingsError(400, 'VALIDATION_ERROR', 'An API key is required for this provider.');
+    throw new AppError(400, 'VALIDATION_ERROR', 'An API key is required for this provider.');
   if (switching && request.consentDisclosure !== provider.disclosure.version)
-    throw new SettingsError(
-      400,
-      'VALIDATION_ERROR',
-      'Confirm the data-use summary for this provider.',
-    );
+    throw new AppError(400, 'VALIDATION_ERROR', 'Confirm the data-use summary for this provider.');
   if (
     request.consentDisclosure !== undefined &&
     request.consentDisclosure !== provider.disclosure.version
   )
-    throw new SettingsError(
+    throw new AppError(
       400,
       'VALIDATION_ERROR',
       'The data-use summary has changed. Review it again.',
@@ -195,7 +179,7 @@ function savedKey(userId: string, saved: { encryptedApiKey: string } | null): st
     return openApiKey(userId, saved.encryptedApiKey);
   } catch (err) {
     if (!(err instanceof CredentialUnreadableError)) throw err;
-    throw new SettingsError(400, 'AI_KEY_REQUIRED', 'Enter your API key again.');
+    throw new AppError(400, 'AI_KEY_REQUIRED', 'Enter your API key again.');
   }
 }
 
@@ -244,8 +228,7 @@ export async function saveSettings(
 ): Promise<SaveAISettingsResponse> {
   const now = new Date();
   const provider = offeredProvider(request.provider);
-  if (!provider)
-    throw new SettingsError(400, 'VALIDATION_ERROR', 'That AI provider is not offered.');
+  if (!provider) throw new AppError(400, 'VALIDATION_ERROR', 'That AI provider is not offered.');
   const existing = await prisma.aIConfiguration.findUnique({
     where: { userId },
     select: { ...CONFIGURATION_STATE, encryptedApiKey: true },
@@ -323,10 +306,10 @@ export async function checkSettings(userId: string): Promise<CheckAISettingsResp
     where: { userId },
     select: { ...CONFIGURATION_STATE, encryptedApiKey: true },
   });
-  if (!config) throw new SettingsError(404, 'AI_NOT_CONFIGURED', 'AI is not set up.');
+  if (!config) throw new AppError(404, 'AI_NOT_CONFIGURED', 'AI is not set up.');
   const provider = offeredProvider(config.provider);
   if (!provider)
-    throw new SettingsError(
+    throw new AppError(
       409,
       'AI_PROVIDER_UNSUPPORTED',
       'This provider is no longer offered. Choose another provider.',
@@ -386,7 +369,7 @@ export async function removeSettings(userId: string): Promise<{ removed: true }>
 }
 
 const unavailable = (err: AIAccessError) =>
-  new SettingsError(409, 'AI_ACCESS_UNAVAILABLE', 'AI access cannot be used right now.', {
+  new AppError(409, 'AI_ACCESS_UNAVAILABLE', 'AI access cannot be used right now.', {
     state: stateOf(err.reason),
     reason: err.reason,
     resumesAt: iso(err.resumesAt),
@@ -401,7 +384,7 @@ const unavailable = (err: AIAccessError) =>
 export async function runSampleTest(userId: string): Promise<AISampleTestResponse> {
   const now = new Date();
   const configured = await prisma.aIConfiguration.count({ where: { userId } });
-  if (!configured) throw new SettingsError(404, 'AI_NOT_CONFIGURED', 'AI is not set up.');
+  if (!configured) throw new AppError(404, 'AI_NOT_CONFIGURED', 'AI is not set up.');
   let access: AIAccess;
   try {
     access = await resolveAIAccess(userId);
@@ -447,18 +430,13 @@ export async function runSampleTest(userId: string): Promise<AISampleTestRespons
         );
         if (kind === 'RATE_LIMITED')
           throw unavailable(new AIAccessError('RATE_LIMITED', resumesAt));
-        throw new SettingsError(
-          422,
-          'AI_ACCESS_REJECTED',
-          'The provider refused this key or model.',
-          {
-            reason: kind,
-            modelId: kind === 'MODEL_UNAVAILABLE' ? model : null,
-          },
-        );
+        throw new AppError(422, 'AI_ACCESS_REJECTED', 'The provider refused this key or model.', {
+          reason: kind,
+          modelId: kind === 'MODEL_UNAVAILABLE' ? model : null,
+        });
       }
       if (err instanceof ProviderFailure && err.usage) await recordTokens(userId, now, err.usage);
-      throw new SettingsError(
+      throw new AppError(
         502,
         'AI_SAMPLE_FAILED',
         'The sample test did not return a usable result.',
