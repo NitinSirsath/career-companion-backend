@@ -1,5 +1,5 @@
 import { suppressNotifications } from './notificationSuppression';
-import { DomainError } from './agenda';
+import { AppError, CHANGE_REJECTED } from '../errors';
 import { projectAgenda } from './agenda';
 import { Prisma, Email, Application } from '@prisma/client';
 import type { CorrectEmailMatchRequest } from '../contracts/email';
@@ -15,6 +15,11 @@ import {
 } from '@prisma/client';
 import { enqueueNotificationJob } from '../jobs/notificationJob';
 import { logEvent, logError } from '../utils/log';
+
+// Messages for a match correction that fails.
+const MATCH_GONE = 'Email or application no longer available';
+const MATCH_CHANGED =
+  'This email link changed or cannot be corrected. Refresh before trying again.';
 
 export class MatcherService {
   /**
@@ -175,7 +180,8 @@ export class MatcherService {
       });
       if (!app) throw new Error('APPLICATION_NOT_FOUND');
       if (app.archivedAt && email.applicationId !== app.id && !fromThread) {
-        if (source === 'USER_CONFIRMED') throw new DomainError('APPLICATION_ARCHIVED');
+        if (source === 'USER_CONFIRMED')
+          throw new AppError(409, 'APPLICATION_ARCHIVED', CHANGE_REJECTED);
         return null;
       }
       // Fresh state check at the write boundary (S6-03). A user link is legal only for an email
@@ -223,12 +229,12 @@ export class MatcherService {
         where: { id: emailId, userId },
         include: { aiProcessingResult: true },
       });
-      if (!email) throw new MatchCorrectionError('NOT_FOUND');
+      if (!email) throw new AppError(404, 'NOT_FOUND', MATCH_GONE);
       if (
         email.matchState !== request.expectedMatchState ||
         email.applicationId !== request.expectedApplicationId
       )
-        throw new MatchCorrectionError('MATCH_CONFLICT');
+        throw new AppError(409, 'MATCH_CONFLICT', MATCH_CHANGED);
       const target = request.applicationId;
       const events = await tx.applicationEvent.findMany({
         where: {
@@ -276,10 +282,10 @@ export class MatcherService {
           >`SELECT * FROM applications WHERE id = ANY(${affected}::uuid[]) AND "userId" = ${userId}::uuid ORDER BY id FOR UPDATE`
         : [];
       const targetApp = apps.find((a) => a.id === target);
-      if (target && !targetApp) throw new MatchCorrectionError('APPLICATION_NOT_FOUND');
-      if (targetApp?.archivedAt) throw new DomainError('APPLICATION_ARCHIVED');
+      if (target && !targetApp) throw new AppError(404, 'APPLICATION_NOT_FOUND', MATCH_GONE);
+      if (targetApp?.archivedAt) throw new AppError(409, 'APPLICATION_ARCHIVED', CHANGE_REJECTED);
       if (target && !email.aiProcessingResult)
-        throw new MatchCorrectionError('MATCH_NOT_CORRECTABLE');
+        throw new AppError(409, 'MATCH_NOT_CORRECTABLE', MATCH_CHANGED);
       const sources = apps.filter((a) => a.id !== target).map((a) => a.id);
       const retirement = {
         retiredAt: new Date(),
@@ -518,14 +524,6 @@ export async function threadDecision(db: Prisma.TransactionClient, email: Email)
   return automatic?.applicationId
     ? { kind: 'LINK' as const, applicationId: automatic.applicationId }
     : { kind: 'NONE' as const };
-}
-export class MatchCorrectionError extends Error {
-  constructor(
-    readonly code:
-      'NOT_FOUND' | 'APPLICATION_NOT_FOUND' | 'MATCH_CONFLICT' | 'MATCH_NOT_CORRECTABLE',
-  ) {
-    super(code);
-  }
 }
 
 async function applyEffects(
