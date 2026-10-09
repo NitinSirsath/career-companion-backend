@@ -8,12 +8,7 @@
  */
 import { AIAccessIssue, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
-import {
-  AI_CATALOG,
-  AIRole,
-  CatalogProvider,
-  modelsForRole,
-} from '../../contracts/aiCatalog';
+import { AI_CATALOG, AIRole, CatalogProvider, modelsForRole } from '../../contracts/aiCatalog';
 import type {
   AISampleTestResponse,
   AISettingsResponse,
@@ -65,6 +60,7 @@ export class SettingsError extends Error {
 
 // Printable ASCII without spaces: no provider key format needs more, and nothing else is accepted.
 const API_KEY = /^[\x21-\x7e]{8,512}$/;
+
 const iso = (date: Date | null | undefined) => (date ? date.toISOString() : null);
 
 export async function readSettings(userId: string): Promise<AISettingsResponse> {
@@ -152,6 +148,17 @@ function chosenModel(
   return requested;
 }
 
+const rejectedError = (result: Extract<VerifyResult, { result: 'REJECTED' }>) =>
+  new SettingsError(
+    422,
+    'AI_ACCESS_REJECTED',
+    'The provider refused this key or model. Nothing was saved.',
+    {
+      reason: result.kind,
+      modelId: result.modelId ?? null,
+    },
+  );
+
 /** Rejects a save request that cannot be verified or saved as sent. */
 function checkSaveRequest(
   request: SaveAISettingsRequest,
@@ -230,17 +237,6 @@ const logAccessCheck = (
     result: result.result,
     kind: result.result === 'REJECTED' ? result.kind : undefined,
   });
-
-const rejectedError = (result: Extract<VerifyResult, { result: 'REJECTED' }>) =>
-  new SettingsError(
-    422,
-    'AI_ACCESS_REJECTED',
-    'The provider refused this key or model. Nothing was saved.',
-    {
-      reason: result.kind,
-      modelId: result.modelId ?? null,
-    },
-  );
 
 export async function saveSettings(
   userId: string,
@@ -349,7 +345,7 @@ export async function checkSettings(userId: string): Promise<CheckAISettingsResp
     return { ...(await readSettings(userId)), verification: 'REJECTED' };
   }
   await reserveVerification(userId, now);
-  const { models } = modelsFor(provider, config, now);
+  const { models } = modelsFor(provider, config);
   const result = await createProviderClient(provider, apiKey).verifyModels([
     models.fast.id,
     models.detailed.id,
