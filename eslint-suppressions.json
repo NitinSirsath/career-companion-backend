@@ -91,11 +91,6 @@
       "count": 1
     }
   },
-  "src/services/ai/settings.ts": {
-    "no-nested-ternary": {
-      "count": 2
-    }
-  },
   "src/services/ai/triage.ts": {
     "no-nested-ternary": {
       "count": 2

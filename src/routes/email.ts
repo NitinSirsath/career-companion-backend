@@ -255,7 +255,7 @@ router.post('/:id/retry', async (req: Request, res: Response, next: NextFunction
         });
         return;
       }
-      const access = await getAccessState(userId, now);
+      const access = await getAccessState(userId);
       if (access.state !== 'READY') {
         res.status(409).json({
           error: {

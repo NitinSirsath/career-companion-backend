@@ -1,10 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AI_CATALOG,
   AI_PROVIDER_IDS,
   AI_ROLES,
   CatalogProvider,
-  catalogDay,
   getCatalogProvider,
   isRetired,
   modelsForRole,
@@ -12,9 +11,11 @@ import {
   resolveModel,
 } from '../contracts/aiCatalog';
 
-const today = catalogDay();
-
 describe('AI provider and model catalog', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('lists each known provider once, with unique model IDs', () => {
     expect(AI_CATALOG.map((p) => p.id).sort()).toEqual([...AI_PROVIDER_IDS].sort());
     for (const provider of AI_CATALOG)
@@ -56,23 +57,23 @@ describe('AI provider and model catalog', () => {
       expect(provider.disclosure.reviewedOn, provider.id).not.toBeNull();
       for (const model of provider.models) {
         expect(model.evaluation, model.id).not.toBeNull();
-        expect(isRetired(model, today), `${model.id} is past retirement`).toBe(false);
+        expect(isRetired(model), `${model.id} is past retirement`).toBe(false);
       }
     }
   });
 
   it('resolves recommended, selected and retired selections', () => {
     const gemini = getCatalogProvider('gemini')!;
-    expect(resolveModel(gemini, 'fast', null, today)).toEqual({
+    expect(resolveModel(gemini, 'fast', null)).toEqual({
       model: recommendedModel(gemini, 'fast'),
       source: 'RECOMMENDED',
     });
-    expect(resolveModel(gemini, 'fast', 'gemini-2.5-flash', today).source).toBe('SELECTED');
+    expect(resolveModel(gemini, 'fast', 'gemini-2.5-flash').source).toBe('SELECTED');
     // A model that does not serve the role, or is unknown, is never used for it.
-    expect(resolveModel(gemini, 'detailed', 'gemini-2.5-flash-lite', today).source).toBe(
+    expect(resolveModel(gemini, 'detailed', 'gemini-2.5-flash-lite').source).toBe(
       'REPLACED_RETIRED',
     );
-    expect(resolveModel(gemini, 'fast', 'free-form-model', today).source).toBe('REPLACED_RETIRED');
+    expect(resolveModel(gemini, 'fast', 'free-form-model').source).toBe('REPLACED_RETIRED');
 
     const retiring: CatalogProvider = {
       ...gemini,
@@ -80,15 +81,17 @@ describe('AI provider and model catalog', () => {
         m.id === 'gemini-2.5-flash' ? { ...m, retiresOn: '2026-01-01' } : m,
       ),
     };
-    expect(modelsForRole(retiring, 'fast', '2026-01-02').map((m) => m.id)).toEqual([
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-01-02T00:00:00Z'));
+    expect(modelsForRole(retiring, 'fast').map((m) => m.id)).toEqual([
       'gemini-2.5-flash-lite',
       'gemini-3.5-flash-lite',
       'gemini-3.8-flash',
     ]);
-    expect(resolveModel(retiring, 'fast', 'gemini-2.5-flash', '2026-01-01').source).toBe(
-      'SELECTED',
-    );
-    expect(resolveModel(retiring, 'fast', 'gemini-2.5-flash', '2026-01-02')).toMatchObject({
+    vi.setSystemTime(new Date('2026-01-01T23:59:59Z'));
+    expect(resolveModel(retiring, 'fast', 'gemini-2.5-flash').source).toBe('SELECTED');
+    vi.setSystemTime(new Date('2026-01-02T00:00:00Z'));
+    expect(resolveModel(retiring, 'fast', 'gemini-2.5-flash')).toMatchObject({
       model: { id: 'gemini-2.5-flash-lite' },
       source: 'REPLACED_RETIRED',
     });
@@ -98,10 +101,10 @@ describe('AI provider and model catalog', () => {
     const gemini = getCatalogProvider('gemini')!;
     expect(recommendedModel(gemini, 'fast').id).toBe('gemini-2.5-flash-lite');
     expect(recommendedModel(gemini, 'detailed').id).toBe('gemini-2.5-flash');
-    expect(resolveModel(gemini, 'fast', 'gemini-3.5-flash-lite', today).source).toBe('SELECTED');
-    expect(resolveModel(gemini, 'fast', 'gemini-3.8-flash', today).source).toBe('SELECTED');
-    expect(resolveModel(gemini, 'detailed', 'gemini-3.8-flash', today).source).toBe('SELECTED');
-    expect(resolveModel(gemini, 'detailed', 'gemini-3.5-flash-lite', today).source).toBe(
+    expect(resolveModel(gemini, 'fast', 'gemini-3.5-flash-lite').source).toBe('SELECTED');
+    expect(resolveModel(gemini, 'fast', 'gemini-3.8-flash').source).toBe('SELECTED');
+    expect(resolveModel(gemini, 'detailed', 'gemini-3.8-flash').source).toBe('SELECTED');
+    expect(resolveModel(gemini, 'detailed', 'gemini-3.5-flash-lite').source).toBe(
       'REPLACED_RETIRED',
     );
   });

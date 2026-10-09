@@ -271,19 +271,13 @@ export function getCatalogProvider(id: string): CatalogProvider | undefined {
   return AI_CATALOG.find((provider) => provider.id === id);
 }
 
-/** Today's date (UTC) in the catalog's YYYY-MM-DD form. */
-export const catalogDay = (now: Date = new Date()) => now.toISOString().slice(0, 10);
-
-export const isRetired = (model: CatalogModel, day: string) =>
-  model.retiresOn !== null && day > model.retiresOn;
+/** True once today's UTC date is past the model's retiresOn day. */
+export const isRetired = (model: CatalogModel) =>
+  model.retiresOn !== null && new Date().toISOString().slice(0, 10) > model.retiresOn;
 
 /** The models a user may choose for a role: current, catalog-defined, never free-form. */
-export function modelsForRole(
-  provider: CatalogProvider,
-  role: AIRole,
-  day: string,
-): CatalogModel[] {
-  return provider.models.filter((model) => model.roles.includes(role) && !isRetired(model, day));
+export function modelsForRole(provider: CatalogProvider, role: AIRole): CatalogModel[] {
+  return provider.models.filter((model) => model.roles.includes(role) && !isRetired(model));
 }
 
 export function recommendedModel(provider: CatalogProvider, role: AIRole): CatalogModel {
@@ -303,11 +297,10 @@ export function resolveModel(
   provider: CatalogProvider,
   role: AIRole,
   selectedId: string | null,
-  day: string,
 ): { model: CatalogModel; source: ModelSource } {
   if (selectedId === null)
     return { model: recommendedModel(provider, role), source: 'RECOMMENDED' };
-  const selected = modelsForRole(provider, role, day).find((m) => m.id === selectedId);
+  const selected = modelsForRole(provider, role).find((m) => m.id === selectedId);
   return selected
     ? { model: selected, source: 'SELECTED' }
     : { model: recommendedModel(provider, role), source: 'REPLACED_RETIRED' };
