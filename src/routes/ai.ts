@@ -15,7 +15,6 @@ import { z } from 'zod';
 import { SaveAISettingsRequestSchema } from '../contracts/ai';
 import { requireAuth } from '../middleware/auth';
 import {
-  SettingsError,
   checkSettings,
   readSettings,
   removeSettings,
@@ -33,16 +32,6 @@ function handle(action: (req: Request) => Promise<unknown>) {
     try {
       res.status(200).json(await action(req));
     } catch (err) {
-      if (err instanceof SettingsError) {
-        res.status(err.status).json({
-          error: {
-            code: err.code,
-            message: err.message,
-            ...(err.details ? { details: err.details } : {}),
-          },
-        });
-        return;
-      }
       next(err);
     }
   };
