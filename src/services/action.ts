@@ -8,7 +8,7 @@ import {
   SnoozeAction,
 } from '../contracts';
 import { lockUser, LOCK_NAMESPACE } from '../utils/advisoryLock';
-import { DomainError } from './agenda';
+import { AppError, CHANGE_REJECTED } from '../errors';
 import { suppressNotifications } from './notificationSuppression';
 
 const context = {
@@ -33,8 +33,8 @@ const deadlineData = (value: CreateFollowUp['deadline']) => ({
 async function lockApplication(tx: Prisma.TransactionClient, userId: string, id: string) {
   await tx.$queryRaw`SELECT id FROM applications WHERE id=${id}::uuid AND "userId"=${userId}::uuid FOR UPDATE`;
   const row = await tx.application.findFirst({ where: { id, userId } });
-  if (!row) throw new DomainError('NOT_FOUND', 404);
-  if (row.archivedAt) throw new DomainError('APPLICATION_ARCHIVED');
+  if (!row) throw new AppError(404, 'NOT_FOUND', 'Not found');
+  if (row.archivedAt) throw new AppError(409, 'APPLICATION_ARCHIVED', CHANGE_REJECTED);
   return row;
 }
 async function mutate(
@@ -51,10 +51,10 @@ async function mutate(
     await tx.$queryRaw`SELECT id FROM actions WHERE id=${id}::uuid FOR UPDATE`;
     const row = await tx.action.findUniqueOrThrow({ where: { id }, include: context });
     if (row.origin === 'USER' && revision === undefined)
-      throw new DomainError('REVISION_REQUIRED', 400);
+      throw new AppError(400, 'REVISION_REQUIRED', CHANGE_REJECTED);
     if (revision !== undefined && revision !== row.actionRevision)
-      throw new DomainError('REVISION_CONFLICT');
-    if (row.retiredAt) throw new DomainError('ACTION_RETIRED');
+      throw new AppError(409, 'REVISION_CONFLICT', CHANGE_REJECTED);
+    if (row.retiredAt) throw new AppError(409, 'ACTION_RETIRED', CHANGE_REJECTED);
     const data = await change(tx, row);
     if (!Object.keys(data).length) return serializeAction(row);
     return serializeAction(
@@ -102,7 +102,8 @@ export class ActionService {
       )
       .digest('hex');
     const replay = (row: ActionRow) => {
-      if (row.creationPayloadHash !== hash) throw new DomainError('REQUEST_CONFLICT');
+      if (row.creationPayloadHash !== hash)
+        throw new AppError(409, 'REQUEST_CONFLICT', CHANGE_REJECTED);
       return serializeAction(row);
     };
     try {
@@ -114,7 +115,7 @@ export class ActionService {
         });
         if (existing) {
           if (!(await tx.application.findFirst({ where: { id: existing.applicationId, userId } })))
-            throw new DomainError('NOT_FOUND', 404);
+            throw new AppError(404, 'NOT_FOUND', 'Not found');
           return replay(existing);
         }
         await lockApplication(tx, userId, applicationId);
@@ -139,7 +140,7 @@ export class ActionService {
           where: { clientRequestId: request.clientRequestId, application: { userId } },
           include: context,
         });
-        if (!existing) throw new DomainError('NOT_FOUND', 404);
+        if (!existing) throw new AppError(404, 'NOT_FOUND', 'Not found');
         return replay(existing);
       }
       throw error;
@@ -150,12 +151,13 @@ export class ActionService {
       where: { clientRequestId, application: { userId } },
       include: context,
     });
-    if (!row) throw new DomainError('NOT_FOUND', 404);
+    if (!row) throw new AppError(404, 'NOT_FOUND', 'Not found');
     return serializeAction(row);
   }
   static async editFollowUp(userId: string, id: string, request: EditFollowUp) {
     const result = await mutate(userId, id, request.expectedActionRevision, async (_tx, row) => {
-      if (row.origin !== 'USER' || row.emailId) throw new DomainError('EMAIL_EVIDENCE_READ_ONLY');
+      if (row.origin !== 'USER' || row.emailId)
+        throw new AppError(409, 'EMAIL_EVIDENCE_READ_ONLY', CHANGE_REJECTED);
       const dates = deadlineData(request.deadline);
       if (
         row.description === request.description &&
@@ -165,7 +167,7 @@ export class ActionService {
         return {};
       return { description: request.description, ...dates };
     });
-    if (!result) throw new DomainError('NOT_FOUND', 404);
+    if (!result) throw new AppError(404, 'NOT_FOUND', 'Not found');
     return result;
   }
   static async snooze(userId: string, id: string, request: SnoozeAction, now = new Date()) {
@@ -176,14 +178,14 @@ export class ActionService {
         until <= now ||
         until.getTime() - now.getTime() > 365 * 86400000)
     )
-      throw new DomainError('INVALID_SNOOZE', 400);
+      throw new AppError(400, 'INVALID_SNOOZE', CHANGE_REJECTED);
     const result = await mutate(userId, id, request.expectedActionRevision, async (tx, row) => {
-      if (row.status !== 'PENDING') throw new DomainError('ACTION_NOT_PENDING');
+      if (row.status !== 'PENDING') throw new AppError(409, 'ACTION_NOT_PENDING', CHANGE_REJECTED);
       if (row.snoozedUntil?.toISOString() === until?.toISOString()) return {};
       if (until) await suppressNotifications(tx, [id]);
       return { snoozedUntil: until };
     });
-    if (!result) throw new DomainError('NOT_FOUND', 404);
+    if (!result) throw new AppError(404, 'NOT_FOUND', 'Not found');
     return result;
   }
 }
