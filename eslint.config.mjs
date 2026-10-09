@@ -7,6 +7,8 @@ export default [
   { languageOptions: { globals: globals.node } },
   pluginJs.configs.recommended,
   ...tseslint.configs.recommended,
+  // Prettier adds every semicolon and owns line breaks, so this rule would only flag its output.
+  { rules: { 'no-unexpected-multiline': 'off' } },
   {
     files: ['scripts/**/*.cjs'],
     languageOptions: { sourceType: 'commonjs' },

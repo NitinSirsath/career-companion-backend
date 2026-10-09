@@ -51,6 +51,7 @@ jobs:
       - run: npm run db:generate
       - run: npm run typecheck
       - run: npm run lint
+      - run: npm run format:check
       - run: npm run build
       - run: node scripts/guarded-migrate.cjs
       - run: npm test
