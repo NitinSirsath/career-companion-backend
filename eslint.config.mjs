@@ -16,10 +16,68 @@ export default [
   },
   {
     files: ['src/**/*.ts'],
-    rules: { 'no-console': 'error' },
+    rules: {
+      // Guidance: warnings only, never fail CI.
+      'max-lines': ['warn', { max: 500, skipBlankLines: true, skipComments: true }],
+      'max-lines-per-function': ['warn', { max: 80, skipBlankLines: true, skipComments: true }],
+      complexity: ['warn', 15],
+      'max-depth': ['warn', 3],
+      'max-params': ['warn', 4],
+      // Standards: fail CI. Old violations are listed in eslint-suppressions.json.
+      'no-nested-ternary': 'error',
+      'no-console': 'error',
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'process',
+          property: 'env',
+          message: 'Read environment variables only in src/utils/config.ts.',
+        },
+      ],
+    },
   },
   {
-    files: ['src/utils/log.ts', 'src/tests/**', 'src/**/*.test.ts', 'src/eval/**'],
-    rules: { 'no-console': 'off' },
+    files: ['src/routes/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/db/prisma'],
+              message: 'Routes call services; they do not query the database.',
+            },
+          ],
+        },
+      ],
+    },
   },
+  {
+    files: ['src/services/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/jobs/*'],
+              message: 'Queue work through src/services/queue.ts, not job files.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/tests/**', 'src/**/*.test.ts', 'src/eval/**'],
+    rules: {
+      'max-lines': ['warn', { max: 800, skipBlankLines: true, skipComments: true }],
+      'max-lines-per-function': 'off',
+      complexity: 'off',
+      'no-console': 'off',
+      'no-restricted-properties': 'off',
+    },
+  },
+  { files: ['src/utils/config.ts'], rules: { 'no-restricted-properties': 'off' } },
+  { files: ['src/utils/log.ts'], rules: { 'no-console': 'off' } },
 ];
