@@ -21,6 +21,7 @@ import {
 } from './contracts';
 import { TerminalAIError } from './errors';
 import { runOperation } from './operations';
+import { agendaExtractionV3Enabled } from '../../utils/config';
 import { autoIrrelevant, classifyOne, triageBatchEnabled, relevanceThreshold } from './triage';
 
 type RelevanceOutcome = {
@@ -256,8 +257,7 @@ export async function selectExtractionContract(
     )
       throw new TerminalAIError('Extraction version requires reconciliation');
     const version =
-      rows[0]?.version ??
-      (process.env.AGENDA_EXTRACTION_V3_ENABLED === 'true' ? 'extraction/v3' : 'extraction/v2');
+      rows[0]?.version ?? (agendaExtractionV3Enabled() ? 'extraction/v3' : 'extraction/v2');
     if (!rows.length)
       await tx.aIOperation.create({ data: { emailId, operation: 'extraction', version } });
     return version === 'extraction/v3' ? EXTRACTION_V3_CONTRACT : EXTRACTION_CONTRACT;
