@@ -5,6 +5,7 @@ import { AppError } from '../errors';
 import { logEvent } from '../utils/log';
 import { getAccessState } from './ai/access';
 import { HoldReason, holdOf } from './ai/heldOperations';
+import { enqueueEmailProcessingJob } from './enqueue';
 
 // 300s expiry + ~120s detection + 60 * 2^3 backoff; also clears the
 // 15-minute uncertain AI claim threshold by five minutes.
@@ -85,14 +86,33 @@ type RetryOperation = Prisma.EmailGetPayload<{
 type HeldOperation = { op: RetryOperation; approvable: HoldReason };
 
 /**
- * Checks that a failed or stuck email may be offered to the worker again. Held operations are
- * never replayed automatically: when the outcome was uncertain or unusable, the user may approve
- * exactly one more call with `acceptPossibleDuplicateCharge`. Engineering failures and legacy
- * partial results stay with the operator.
+ * Offers a failed or stuck email to the worker again. It writes no processing state: the worker
+ * alone moves the email into PROCESSING and to its final outcome.
+ */
+export async function retryEmail(
+  userId: string,
+  emailId: string,
+  acceptPossibleDuplicateCharge: boolean | undefined,
+): Promise<void> {
+  const approval = await prepareRetry(userId, emailId, acceptPossibleDuplicateCharge);
+  const jobId = await enqueueEmailProcessingJob(userId, emailId, approval);
+  if (!jobId)
+    throw new AppError(
+      409,
+      'RETRY_RECENTLY_QUEUED',
+      'A processing attempt was queued recently. Try again in a few minutes.',
+    );
+}
+
+/**
+ * Checks that the email may be retried. Held operations are never replayed automatically: when
+ * the outcome was uncertain or unusable, the user may approve exactly one more call with
+ * `acceptPossibleDuplicateCharge`. Engineering failures and legacy partial results stay with the
+ * operator.
  *
  * Returns the approval number to queue the job with; undefined when nothing was held.
  */
-export async function prepareRetry(
+async function prepareRetry(
   userId: string,
   emailId: string,
   acceptPossibleDuplicateCharge: boolean | undefined,
