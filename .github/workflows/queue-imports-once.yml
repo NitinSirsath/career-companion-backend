@@ -1,0 +1,54 @@
+name: Queue imports once (temporary)
+# Runs the one-time codemod on refactor/COM-155-queue-in-one-place and commits only its output.
+# Lives only on the throwaway branch tmp/COM-155-queue-imports, which is deleted afterwards.
+on:
+  push:
+    branches: [tmp/COM-155-queue-imports]
+permissions:
+  contents: write
+concurrency:
+  group: queue-imports-once
+  cancel-in-progress: false
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refactor/COM-155-queue-in-one-place
+      - name: Check the hand commits
+        run: |
+          if [ "$(git rev-parse 'HEAD^{tree}')" != "b079206ba0d3aef490bf7bd7a312598c50a9100c" ]; then
+            echo "The hand commits do not match the reviewed files. Nothing was changed."
+            exit 1
+          fi
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - name: Run the codemod, Prettier and the lint baseline prune
+        run: |
+          git fetch --depth=1 origin tmp/COM-155-queue-imports
+          git show FETCH_HEAD:tmp/queue-imports.cjs > "$RUNNER_TEMP/queue-imports.cjs"
+          node "$RUNNER_TEMP/queue-imports.cjs"
+          npm run format
+          npx eslint src/ scripts/ prisma/seed.ts --prune-suppressions
+          if [ -n "$(tail -c1 eslint-suppressions.json)" ]; then echo >> eslint-suppressions.json; fi
+      - run: npm run typecheck && npm run lint && npm run format:check
+      - name: Commit only the reviewed result
+        run: |
+          git add -u
+          if [ "$(git write-tree)" != "bacf9d7368a00eab1fe1d710e669627059eea9bb" ]; then
+            echo "The result does not match the reviewed tree. Nothing was pushed."
+            git status --short
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'refactor: imports and test mocks follow the queue functions (COM-155 step 4)'
+          git push origin HEAD:refactor/COM-155-queue-in-one-place
