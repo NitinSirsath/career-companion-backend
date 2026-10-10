@@ -10,8 +10,8 @@ import {
   ListApplicationsResponseSchema,
   deriveStatus,
 } from '../contracts';
-import { MatcherService } from '../services/matcher';
-import { GmailFetcherService } from '../services/gmailFetcher';
+import { applyMatch } from '../services/matcher';
+import * as gmailFetcher from '../services/gmailFetcher';
 import { createProviderClient } from '../services/ai/providers';
 import { enqueueNotificationJob } from '../jobs/notificationJob';
 import { getQueue } from '../services/queue';
@@ -334,8 +334,8 @@ describe('PATCH /api/applications/:id/status', () => {
     await getQueue(); // the pgboss schema exists, so a zero job delta is meaningful
     vi.mocked(getQueue).mockClear();
     vi.mocked(enqueueNotificationJob).mockClear();
-    const metadata = vi.spyOn(GmailFetcherService, 'fetchMessageMetadata');
-    const body = vi.spyOn(GmailFetcherService, 'fetchMessageBody');
+    const metadata = vi.spyOn(gmailFetcher, 'fetchMessageMetadata');
+    const body = vi.spyOn(gmailFetcher, 'fetchMessageBody');
     const gemini = vi.mocked(createProviderClient);
     gemini.mockClear();
     const before = await sideEffectCounts();
@@ -375,12 +375,7 @@ describe('AI and manual state stay separate', () => {
         offerInfo: 'Offer',
       },
     });
-    await MatcherService.applyMatch(
-      email.id,
-      application.id,
-      result as AIProcessingResult,
-      'AI_AUTO',
-    );
+    await applyMatch(email.id, application.id, result as AIProcessingResult, 'AI_AUTO');
     const after = await row(application.id);
     expect(after.aiStatus).toBe('OFFER');
     expect(after.userStatus).toBe('REJECTED');

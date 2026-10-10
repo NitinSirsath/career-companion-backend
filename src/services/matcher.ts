@@ -21,449 +21,447 @@ const MATCH_GONE = 'Email or application no longer available';
 const MATCH_CHANGED =
   'This email link changed or cannot be corrected. Refresh before trying again.';
 
-export class MatcherService {
-  /**
-   * Run the matching logic for an email.
-   * Returns the applicationId if matched, or undefined.
-   */
-  static async matchEmailToApplication(emailId: string): Promise<void> {
-    const email = await prisma.email.findUnique({
-      where: { id: emailId },
-      include: { aiProcessingResult: true },
-    });
+/**
+ * Run the matching logic for an email.
+ * Returns the applicationId if matched, or undefined.
+ */
+export async function matchEmailToApplication(emailId: string): Promise<void> {
+  const email = await prisma.email.findUnique({
+    where: { id: emailId },
+    include: { aiProcessingResult: true },
+  });
 
-    if (!email || !email.aiProcessingResult) {
-      return;
-    }
-
-    const { aiProcessingResult, userId, matchConfirmedBy, applicationId } = email;
-
-    if (matchConfirmedBy === MatchConfirmationSource.USER_CONFIRMED && !applicationId) return;
-
-    if (matchConfirmedBy === MatchConfirmationSource.USER_CONFIRMED && applicationId) {
-      // Re-apply the match using the existing user-confirmed application to allow
-      // new AI data (e.g. actions/state) to be recorded, but PRESERVE the user's decision.
-      await this.applyMatch(
-        email.id,
-        applicationId,
-        aiProcessingResult,
-        MatchConfirmationSource.USER_CONFIRMED,
-      );
-      return;
-    }
-
-    if (email.matchState === 'MATCHED' && applicationId) {
-      await this.applyMatch(email.id, applicationId, aiProcessingResult, 'AI_AUTO');
-      return;
-    }
-    if (email.matchState === 'IGNORED') return;
-
-    // 1. Thread Match
-    const decision = await threadDecision(prisma, email);
-    if (decision.kind === 'STOP') return;
-    if (
-      decision.kind === 'LINK' &&
-      (await this.applyMatch(email.id, decision.applicationId, aiProcessingResult, 'AI_AUTO', true))
-    )
-      return;
-
-    // 2. Company + Role Match
-    const companyName = aiProcessingResult.companyName;
-    const role = aiProcessingResult.jobTitle;
-
-    if (!companyName) {
-      // If we don't have a company name, we can't do a deterministic match
-      return;
-    }
-
-    // Normalize
-    const normalizedCompany = this.normalize(companyName);
-    const normalizedRole = role ? this.normalize(role) : null;
-
-    // Find candidate applications for this user
-    const applications = await prisma.application.findMany({
-      where: { userId, archivedAt: null },
-    });
-
-    const candidates = applications.filter((app) => {
-      const appCompany = this.normalize(app.companyName);
-      if (appCompany !== normalizedCompany) return false;
-
-      if (normalizedRole && app.jobTitle) {
-        const appRole = this.normalize(app.jobTitle);
-        if (appRole !== normalizedRole) return false;
-      }
-
-      return true;
-    });
-
-    if (candidates.length === 1) {
-      // Exact match
-      await this.applyMatch(
-        email.id,
-        candidates[0].id,
-        aiProcessingResult,
-        MatchConfirmationSource.AI_AUTO,
-      );
-    } else if (candidates.length > 1) {
-      const current = await prisma.$transaction(async (tx) => {
-        await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
-        await tx.$queryRaw`SELECT id FROM emails WHERE id = ${email.id}::uuid FOR UPDATE`;
-        const fresh = await tx.email.findUniqueOrThrow({ where: { id: email.id } });
-        if (fresh.matchState === 'MATCHED' || fresh.matchState === 'IGNORED')
-          return { kind: 'NONE' as const };
-        const decision = await threadDecision(tx, fresh);
-        if (decision.kind === 'LINK') return decision;
-        await tx.email.updateMany({
-          where: {
-            id: email.id,
-            matchState: { in: ['UNMATCHED', 'AMBIGUOUS'] },
-            OR: [{ matchConfirmedBy: null }, { matchConfirmedBy: { not: 'USER_CONFIRMED' } }],
-          },
-          data: { matchState: decision.kind === 'STOP' ? 'UNMATCHED' : 'AMBIGUOUS' },
-        });
-        return decision;
-      });
-      if (current.kind === 'LINK')
-        await this.applyMatch(email.id, current.applicationId, aiProcessingResult, 'AI_AUTO', true);
-    }
+  if (!email || !email.aiProcessingResult) {
+    return;
   }
 
-  private static normalize(str: string): string {
-    return str
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '')
-      .trim();
-  }
+  const { aiProcessingResult, userId, matchConfirmedBy, applicationId } = email;
 
-  public static async applyMatch(
-    emailId: string,
-    applicationId: string,
-    aiResult: AIProcessingResult,
-    source: MatchConfirmationSource,
-    fromThread = false,
-  ) {
-    const owner = await prisma.email.findUnique({
-      where: { id: emailId },
-      select: { userId: true },
-    });
-    if (!owner) throw new Error('EMAIL_NOT_FOUND');
-    const actionId = await prisma.$transaction(async (tx) => {
-      await lockUser(tx, LOCK_NAMESPACE.emailMatches, owner.userId);
-      // Serialize domain effects for this email and application, inside the DB transaction.
-      await tx.$queryRaw`SELECT id FROM emails WHERE id = ${emailId}::uuid FOR UPDATE`;
-      const email = await tx.email.findUnique({ where: { id: emailId } });
-      if (!email || aiResult.emailId !== emailId) throw new Error('EMAIL_NOT_FOUND');
-      if (
-        source === MatchConfirmationSource.AI_AUTO &&
-        email.matchConfirmedBy === MatchConfirmationSource.USER_CONFIRMED
-      )
-        return null;
-      if (source === 'AI_AUTO') {
-        if (
-          email.matchState === 'IGNORED' ||
-          (email.matchState === 'MATCHED' && email.applicationId !== applicationId)
-        )
-          return null;
-        if (email.matchState !== 'MATCHED') {
-          const current = await threadDecision(tx, email);
-          if (current.kind === 'STOP') return null;
-          if (current.kind === 'LINK') {
-            applicationId = current.applicationId;
-            fromThread = true;
-          } else if (fromThread) return undefined;
-        }
-      }
-      await tx.$queryRaw`SELECT id FROM applications WHERE id = ${applicationId}::uuid AND "userId" = ${email.userId}::uuid FOR UPDATE`;
-      const app = await tx.application.findFirst({
-        where: { id: applicationId, userId: email.userId },
-      });
-      if (!app) throw new Error('APPLICATION_NOT_FOUND');
-      if (app.archivedAt && email.applicationId !== app.id && !fromThread) {
-        if (source === 'USER_CONFIRMED')
-          throw new AppError(409, 'APPLICATION_ARCHIVED', CHANGE_REJECTED);
-        return null;
-      }
-      // Fresh state check at the write boundary (S6-03). A user link is legal only for an email
-      // that is still unresolved, or as a replay of the same confirmed link. A resolution whose
-      // pre-lock read was overtaken by another decision (another user link, an ignore, or a
-      // completed automatic match) fails exactly as it would sequentially; effects never move.
-      if (
-        source === MatchConfirmationSource.USER_CONFIRMED &&
-        !(
-          email.matchState === EmailMatchState.UNMATCHED ||
-          email.matchState === EmailMatchState.AMBIGUOUS ||
-          (email.matchConfirmedBy === source && email.applicationId === applicationId)
-        )
-      )
-        throw new Error('INVALID_MATCH_STATE');
-      await tx.email.update({
-        where: { id: emailId },
-        data: {
-          applicationId,
-          matchState: EmailMatchState.MATCHED,
-          matchConfirmedBy: source,
-        },
-      });
-      return applyEffects(tx, email, app, aiResult);
-    });
-    if (actionId) {
-      try {
-        await enqueueNotificationJob(actionId);
-      } catch {
-        logError('notification_enqueue_failed', { actionId });
-      }
-    }
-    return actionId !== undefined;
-  }
+  if (matchConfirmedBy === MatchConfirmationSource.USER_CONFIRMED && !applicationId) return;
 
-  static async correctEmailMatch(
-    userId: string,
-    emailId: string,
-    request: CorrectEmailMatchRequest,
-  ) {
-    const result = await prisma.$transaction(async (tx) => {
-      await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
-      await tx.$queryRaw`SELECT id FROM emails WHERE id = ${emailId}::uuid AND "userId" = ${userId}::uuid FOR UPDATE`;
-      const email = await tx.email.findFirst({
-        where: { id: emailId, userId },
-        include: { aiProcessingResult: true },
-      });
-      if (!email) throw new AppError(404, 'NOT_FOUND', MATCH_GONE);
-      if (
-        email.matchState !== request.expectedMatchState ||
-        email.applicationId !== request.expectedApplicationId
-      )
-        throw new AppError(409, 'MATCH_CONFLICT', MATCH_CHANGED);
-      const target = request.applicationId;
-      const events = await tx.applicationEvent.findMany({
-        where: {
-          emailId,
-          retiredAt: null,
-          externalSubmissionId: null,
-          type: { not: 'AUTOMATION_SUBMITTED' },
-          application: { userId },
-        },
-        select: { applicationId: true },
-      });
-      const actions = await tx.action.findMany({
-        where: { emailId, retiredAt: null, application: { userId } },
-        select: { applicationId: true, status: true, snoozedUntil: true },
-      });
-      const agenda = await tx.agendaItem.findMany({
-        where: { emailId, userId, retiredAt: null },
-        orderBy: { id: 'asc' },
-      });
-      const priorActions = actions.length
-        ? actions
-        : await tx.action.findMany({
-            where: { emailId, application: { userId }, retiredAt: { not: null } },
-            orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-            take: 1,
-          });
-      const priorAgenda = agenda.length
-        ? agenda
-        : await tx.agendaItem.findMany({
-            where: { emailId, userId },
-            orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-          });
-      const affected = [
-        ...new Set([
-          ...(email.applicationId ? [email.applicationId] : []),
-          ...events.map((e) => e.applicationId),
-          ...actions.map((a) => a.applicationId),
-          ...agenda.map((a) => a.applicationId),
-          ...(target ? [target] : []),
-        ]),
-      ].sort();
-      const apps = affected.length
-        ? await tx.$queryRaw<
-            Application[]
-          >`SELECT * FROM applications WHERE id = ANY(${affected}::uuid[]) AND "userId" = ${userId}::uuid ORDER BY id FOR UPDATE`
-        : [];
-      const targetApp = apps.find((a) => a.id === target);
-      if (target && !targetApp) throw new AppError(404, 'APPLICATION_NOT_FOUND', MATCH_GONE);
-      if (targetApp?.archivedAt) throw new AppError(409, 'APPLICATION_ARCHIVED', CHANGE_REJECTED);
-      if (target && !email.aiProcessingResult)
-        throw new AppError(409, 'MATCH_NOT_CORRECTABLE', MATCH_CHANGED);
-      const sources = apps.filter((a) => a.id !== target).map((a) => a.id);
-      const retirement = {
-        retiredAt: new Date(),
-        retiredReason: target ? ('EMAIL_MOVED' as const) : ('EMAIL_UNLINKED' as const),
-      };
-      const retiredEvents = await tx.applicationEvent.updateMany({
-        where: {
-          emailId,
-          applicationId: { in: sources },
-          retiredAt: null,
-          externalSubmissionId: null,
-          type: { not: 'AUTOMATION_SUBMITTED' },
-        },
-        data: retirement,
-      });
-      const retiredActions = await tx.action.updateMany({
-        where: { emailId, applicationId: { in: sources }, retiredAt: null },
-        data: { ...retirement, actionRevision: { increment: 1 } },
-      });
-      await tx.agendaItem.updateMany({
-        where: { emailId, userId, applicationId: { in: sources }, retiredAt: null },
-        data: { ...retirement, revision: { increment: 1 } },
-      });
-      const updated = await tx.email.update({
-        where: { id: emailId },
-        data: {
-          applicationId: target,
-          matchState: target ? 'MATCHED' : 'IGNORED',
-          matchConfirmedBy: 'USER_CONFIRMED',
-        },
-        select: { id: true, matchState: true, matchConfirmedBy: true, applicationId: true },
-      });
-      if (targetApp && email.aiProcessingResult) {
-        const carried = priorActions.some((a) => a.status === 'COMPLETED')
-          ? 'COMPLETED'
-          : priorActions.some((a) => a.status === 'DISMISSED')
-            ? 'DISMISSED'
-            : 'PENDING';
-        await applyEffects(
-          tx,
-          email,
-          targetApp,
-          email.aiProcessingResult,
-          true,
-          carried,
-          priorActions.find((a) => a.status === 'PENDING' && a.snoozedUntil)?.snoozedUntil ?? null,
-        );
-        await projectAgenda(tx, email, targetApp, email.aiProcessingResult, true, priorAgenda);
-      }
-      for (const id of sources) {
-        const remaining = await tx.aIProcessingResult.findMany({
-          where: { email: { userId, applicationId: id, matchState: 'MATCHED' } },
-        });
-        const aiStatus = aiStatusFromEvidence(remaining);
-        if (apps.find((a) => a.id === id)!.aiStatus !== aiStatus)
-          await tx.application.update({ where: { id }, data: { aiStatus } });
-      }
-      return {
-        email: updated,
-        affectedApplicationIds: apps.map((a) => a.id),
-        fromApplicationIds: sources,
-        retiredEvents: retiredEvents.count,
-        retiredActions: retiredActions.count,
-      };
-    });
-    logEvent('email_match_corrected', {
-      emailId,
-      kind: request.applicationId ? 'MOVE' : 'UNLINK',
-      fromApplicationIds: result.fromApplicationIds,
-      toApplicationId: request.applicationId,
-      retiredEvents: result.retiredEvents,
-      retiredActions: result.retiredActions,
-    });
-    return { email: result.email, affectedApplicationIds: result.affectedApplicationIds };
-  }
-
-  public static async getAmbiguousMatches(userId: string, limit: number = 20, offset: number = 0) {
-    return prisma.email.findMany({
-      where: {
-        userId,
-        matchState: EmailMatchState.AMBIGUOUS,
-      },
-      take: limit + 1,
-      skip: offset,
-      include: {
-        aiProcessingResult: true,
-      },
-      orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
-    });
-  }
-
-  /**
-   * Get relevant emails that had zero candidate applications during matching.
-   * These need user-driven resolution to link them to an existing application.
-   */
-  public static async getUnmatchedEmails(userId: string, limit: number = 20, offset: number = 0) {
-    return prisma.email.findMany({
-      where: {
-        userId,
-        relevanceState: EmailRelevanceState.RELEVANT,
-        matchState: EmailMatchState.UNMATCHED,
-      },
-      take: limit + 1,
-      skip: offset,
-      include: {
-        aiProcessingResult: true,
-      },
-      orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
-    });
-  }
-
-  /**
-   * Resolve an email that needs human-in-the-loop matching.
-   * Supports both AMBIGUOUS (multiple candidates) and UNMATCHED (zero candidates) emails.
-   *
-   * For AMBIGUOUS: applicationId can be null (→ IGNORED) or a valid application ID.
-   * For UNMATCHED: applicationId must be non-null (linking to an application is mandatory).
-   */
-  public static async resolveEmailMatch(
-    userId: string,
-    emailId: string,
-    applicationId: string | null,
-  ): Promise<void> {
-    const email = await prisma.email.findUnique({
-      where: { id: emailId, userId }, // isolation check
-      include: { aiProcessingResult: true },
-    });
-
-    if (!email) {
-      throw new Error('EMAIL_NOT_FOUND');
-    }
-
-    // Validate match state — only AMBIGUOUS and UNMATCHED can be resolved
-    if (
-      email.matchState !== EmailMatchState.AMBIGUOUS &&
-      email.matchState !== EmailMatchState.UNMATCHED
-    ) {
-      throw new Error('INVALID_MATCH_STATE');
-    }
-
-    // UNMATCHED emails require an applicationId (linking is mandatory)
-    if (email.matchState === EmailMatchState.UNMATCHED && !applicationId) {
-      throw new Error('APPLICATION_REQUIRED_FOR_UNMATCHED');
-    }
-
-    if (!applicationId) {
-      // No match — only valid for AMBIGUOUS emails
-      const ignored = await prisma.$transaction(async (tx) => {
-        await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
-        return tx.email.updateMany({
-          where: { id: emailId, userId, matchState: 'AMBIGUOUS' },
-          data: { matchState: 'IGNORED', matchConfirmedBy: 'USER_CONFIRMED' },
-        });
-      });
-      if (!ignored.count) throw new Error('INVALID_MATCH_STATE');
-      return;
-    }
-
-    // Ownership check for application
-    const app = await prisma.application.findUnique({
-      where: { id: applicationId, userId }, // isolation check
-    });
-
-    if (!app) {
-      throw new Error('APPLICATION_NOT_FOUND');
-    }
-
-    if (!email.aiProcessingResult) {
-      throw new Error('NO_AI_RESULT');
-    }
-
-    await this.applyMatch(
+  if (matchConfirmedBy === MatchConfirmationSource.USER_CONFIRMED && applicationId) {
+    // Re-apply the match using the existing user-confirmed application to allow
+    // new AI data (e.g. actions/state) to be recorded, but PRESERVE the user's decision.
+    await applyMatch(
       email.id,
       applicationId,
-      email.aiProcessingResult,
+      aiProcessingResult,
       MatchConfirmationSource.USER_CONFIRMED,
     );
+    return;
   }
+
+  if (email.matchState === 'MATCHED' && applicationId) {
+    await applyMatch(email.id, applicationId, aiProcessingResult, 'AI_AUTO');
+    return;
+  }
+  if (email.matchState === 'IGNORED') return;
+
+  // 1. Thread Match
+  const decision = await threadDecision(prisma, email);
+  if (decision.kind === 'STOP') return;
+  if (
+    decision.kind === 'LINK' &&
+    (await applyMatch(email.id, decision.applicationId, aiProcessingResult, 'AI_AUTO', true))
+  )
+    return;
+
+  // 2. Company + Role Match
+  const companyName = aiProcessingResult.companyName;
+  const role = aiProcessingResult.jobTitle;
+
+  if (!companyName) {
+    // If we don't have a company name, we can't do a deterministic match
+    return;
+  }
+
+  // Normalize
+  const normalizedCompany = normalize(companyName);
+  const normalizedRole = role ? normalize(role) : null;
+
+  // Find candidate applications for this user
+  const applications = await prisma.application.findMany({
+    where: { userId, archivedAt: null },
+  });
+
+  const candidates = applications.filter((app) => {
+    const appCompany = normalize(app.companyName);
+    if (appCompany !== normalizedCompany) return false;
+
+    if (normalizedRole && app.jobTitle) {
+      const appRole = normalize(app.jobTitle);
+      if (appRole !== normalizedRole) return false;
+    }
+
+    return true;
+  });
+
+  if (candidates.length === 1) {
+    // Exact match
+    await applyMatch(
+      email.id,
+      candidates[0].id,
+      aiProcessingResult,
+      MatchConfirmationSource.AI_AUTO,
+    );
+  } else if (candidates.length > 1) {
+    const current = await prisma.$transaction(async (tx) => {
+      await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
+      await tx.$queryRaw`SELECT id FROM emails WHERE id = ${email.id}::uuid FOR UPDATE`;
+      const fresh = await tx.email.findUniqueOrThrow({ where: { id: email.id } });
+      if (fresh.matchState === 'MATCHED' || fresh.matchState === 'IGNORED')
+        return { kind: 'NONE' as const };
+      const decision = await threadDecision(tx, fresh);
+      if (decision.kind === 'LINK') return decision;
+      await tx.email.updateMany({
+        where: {
+          id: email.id,
+          matchState: { in: ['UNMATCHED', 'AMBIGUOUS'] },
+          OR: [{ matchConfirmedBy: null }, { matchConfirmedBy: { not: 'USER_CONFIRMED' } }],
+        },
+        data: { matchState: decision.kind === 'STOP' ? 'UNMATCHED' : 'AMBIGUOUS' },
+      });
+      return decision;
+    });
+    if (current.kind === 'LINK')
+      await applyMatch(email.id, current.applicationId, aiProcessingResult, 'AI_AUTO', true);
+  }
+}
+
+function normalize(str: string): string {
+  return str
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+}
+
+export async function applyMatch(
+  emailId: string,
+  applicationId: string,
+  aiResult: AIProcessingResult,
+  source: MatchConfirmationSource,
+  fromThread = false,
+) {
+  const owner = await prisma.email.findUnique({
+    where: { id: emailId },
+    select: { userId: true },
+  });
+  if (!owner) throw new Error('EMAIL_NOT_FOUND');
+  const actionId = await prisma.$transaction(async (tx) => {
+    await lockUser(tx, LOCK_NAMESPACE.emailMatches, owner.userId);
+    // Serialize domain effects for this email and application, inside the DB transaction.
+    await tx.$queryRaw`SELECT id FROM emails WHERE id = ${emailId}::uuid FOR UPDATE`;
+    const email = await tx.email.findUnique({ where: { id: emailId } });
+    if (!email || aiResult.emailId !== emailId) throw new Error('EMAIL_NOT_FOUND');
+    if (
+      source === MatchConfirmationSource.AI_AUTO &&
+      email.matchConfirmedBy === MatchConfirmationSource.USER_CONFIRMED
+    )
+      return null;
+    if (source === 'AI_AUTO') {
+      if (
+        email.matchState === 'IGNORED' ||
+        (email.matchState === 'MATCHED' && email.applicationId !== applicationId)
+      )
+        return null;
+      if (email.matchState !== 'MATCHED') {
+        const current = await threadDecision(tx, email);
+        if (current.kind === 'STOP') return null;
+        if (current.kind === 'LINK') {
+          applicationId = current.applicationId;
+          fromThread = true;
+        } else if (fromThread) return undefined;
+      }
+    }
+    await tx.$queryRaw`SELECT id FROM applications WHERE id = ${applicationId}::uuid AND "userId" = ${email.userId}::uuid FOR UPDATE`;
+    const app = await tx.application.findFirst({
+      where: { id: applicationId, userId: email.userId },
+    });
+    if (!app) throw new Error('APPLICATION_NOT_FOUND');
+    if (app.archivedAt && email.applicationId !== app.id && !fromThread) {
+      if (source === 'USER_CONFIRMED')
+        throw new AppError(409, 'APPLICATION_ARCHIVED', CHANGE_REJECTED);
+      return null;
+    }
+    // Fresh state check at the write boundary (S6-03). A user link is legal only for an email
+    // that is still unresolved, or as a replay of the same confirmed link. A resolution whose
+    // pre-lock read was overtaken by another decision (another user link, an ignore, or a
+    // completed automatic match) fails exactly as it would sequentially; effects never move.
+    if (
+      source === MatchConfirmationSource.USER_CONFIRMED &&
+      !(
+        email.matchState === EmailMatchState.UNMATCHED ||
+        email.matchState === EmailMatchState.AMBIGUOUS ||
+        (email.matchConfirmedBy === source && email.applicationId === applicationId)
+      )
+    )
+      throw new Error('INVALID_MATCH_STATE');
+    await tx.email.update({
+      where: { id: emailId },
+      data: {
+        applicationId,
+        matchState: EmailMatchState.MATCHED,
+        matchConfirmedBy: source,
+      },
+    });
+    return applyEffects(tx, email, app, aiResult);
+  });
+  if (actionId) {
+    try {
+      await enqueueNotificationJob(actionId);
+    } catch {
+      logError('notification_enqueue_failed', { actionId });
+    }
+  }
+  return actionId !== undefined;
+}
+
+export async function correctEmailMatch(
+  userId: string,
+  emailId: string,
+  request: CorrectEmailMatchRequest,
+) {
+  const result = await prisma.$transaction(async (tx) => {
+    await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
+    await tx.$queryRaw`SELECT id FROM emails WHERE id = ${emailId}::uuid AND "userId" = ${userId}::uuid FOR UPDATE`;
+    const email = await tx.email.findFirst({
+      where: { id: emailId, userId },
+      include: { aiProcessingResult: true },
+    });
+    if (!email) throw new AppError(404, 'NOT_FOUND', MATCH_GONE);
+    if (
+      email.matchState !== request.expectedMatchState ||
+      email.applicationId !== request.expectedApplicationId
+    )
+      throw new AppError(409, 'MATCH_CONFLICT', MATCH_CHANGED);
+    const target = request.applicationId;
+    const events = await tx.applicationEvent.findMany({
+      where: {
+        emailId,
+        retiredAt: null,
+        externalSubmissionId: null,
+        type: { not: 'AUTOMATION_SUBMITTED' },
+        application: { userId },
+      },
+      select: { applicationId: true },
+    });
+    const actions = await tx.action.findMany({
+      where: { emailId, retiredAt: null, application: { userId } },
+      select: { applicationId: true, status: true, snoozedUntil: true },
+    });
+    const agenda = await tx.agendaItem.findMany({
+      where: { emailId, userId, retiredAt: null },
+      orderBy: { id: 'asc' },
+    });
+    const priorActions = actions.length
+      ? actions
+      : await tx.action.findMany({
+          where: { emailId, application: { userId }, retiredAt: { not: null } },
+          orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+          take: 1,
+        });
+    const priorAgenda = agenda.length
+      ? agenda
+      : await tx.agendaItem.findMany({
+          where: { emailId, userId },
+          orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        });
+    const affected = [
+      ...new Set([
+        ...(email.applicationId ? [email.applicationId] : []),
+        ...events.map((e) => e.applicationId),
+        ...actions.map((a) => a.applicationId),
+        ...agenda.map((a) => a.applicationId),
+        ...(target ? [target] : []),
+      ]),
+    ].sort();
+    const apps = affected.length
+      ? await tx.$queryRaw<
+          Application[]
+        >`SELECT * FROM applications WHERE id = ANY(${affected}::uuid[]) AND "userId" = ${userId}::uuid ORDER BY id FOR UPDATE`
+      : [];
+    const targetApp = apps.find((a) => a.id === target);
+    if (target && !targetApp) throw new AppError(404, 'APPLICATION_NOT_FOUND', MATCH_GONE);
+    if (targetApp?.archivedAt) throw new AppError(409, 'APPLICATION_ARCHIVED', CHANGE_REJECTED);
+    if (target && !email.aiProcessingResult)
+      throw new AppError(409, 'MATCH_NOT_CORRECTABLE', MATCH_CHANGED);
+    const sources = apps.filter((a) => a.id !== target).map((a) => a.id);
+    const retirement = {
+      retiredAt: new Date(),
+      retiredReason: target ? ('EMAIL_MOVED' as const) : ('EMAIL_UNLINKED' as const),
+    };
+    const retiredEvents = await tx.applicationEvent.updateMany({
+      where: {
+        emailId,
+        applicationId: { in: sources },
+        retiredAt: null,
+        externalSubmissionId: null,
+        type: { not: 'AUTOMATION_SUBMITTED' },
+      },
+      data: retirement,
+    });
+    const retiredActions = await tx.action.updateMany({
+      where: { emailId, applicationId: { in: sources }, retiredAt: null },
+      data: { ...retirement, actionRevision: { increment: 1 } },
+    });
+    await tx.agendaItem.updateMany({
+      where: { emailId, userId, applicationId: { in: sources }, retiredAt: null },
+      data: { ...retirement, revision: { increment: 1 } },
+    });
+    const updated = await tx.email.update({
+      where: { id: emailId },
+      data: {
+        applicationId: target,
+        matchState: target ? 'MATCHED' : 'IGNORED',
+        matchConfirmedBy: 'USER_CONFIRMED',
+      },
+      select: { id: true, matchState: true, matchConfirmedBy: true, applicationId: true },
+    });
+    if (targetApp && email.aiProcessingResult) {
+      const carried = priorActions.some((a) => a.status === 'COMPLETED')
+        ? 'COMPLETED'
+        : priorActions.some((a) => a.status === 'DISMISSED')
+          ? 'DISMISSED'
+          : 'PENDING';
+      await applyEffects(
+        tx,
+        email,
+        targetApp,
+        email.aiProcessingResult,
+        true,
+        carried,
+        priorActions.find((a) => a.status === 'PENDING' && a.snoozedUntil)?.snoozedUntil ?? null,
+      );
+      await projectAgenda(tx, email, targetApp, email.aiProcessingResult, true, priorAgenda);
+    }
+    for (const id of sources) {
+      const remaining = await tx.aIProcessingResult.findMany({
+        where: { email: { userId, applicationId: id, matchState: 'MATCHED' } },
+      });
+      const aiStatus = aiStatusFromEvidence(remaining);
+      if (apps.find((a) => a.id === id)!.aiStatus !== aiStatus)
+        await tx.application.update({ where: { id }, data: { aiStatus } });
+    }
+    return {
+      email: updated,
+      affectedApplicationIds: apps.map((a) => a.id),
+      fromApplicationIds: sources,
+      retiredEvents: retiredEvents.count,
+      retiredActions: retiredActions.count,
+    };
+  });
+  logEvent('email_match_corrected', {
+    emailId,
+    kind: request.applicationId ? 'MOVE' : 'UNLINK',
+    fromApplicationIds: result.fromApplicationIds,
+    toApplicationId: request.applicationId,
+    retiredEvents: result.retiredEvents,
+    retiredActions: result.retiredActions,
+  });
+  return { email: result.email, affectedApplicationIds: result.affectedApplicationIds };
+}
+
+export async function getAmbiguousMatches(userId: string, limit: number = 20, offset: number = 0) {
+  return prisma.email.findMany({
+    where: {
+      userId,
+      matchState: EmailMatchState.AMBIGUOUS,
+    },
+    take: limit + 1,
+    skip: offset,
+    include: {
+      aiProcessingResult: true,
+    },
+    orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
+  });
+}
+
+/**
+ * Get relevant emails that had zero candidate applications during matching.
+ * These need user-driven resolution to link them to an existing application.
+ */
+export async function getUnmatchedEmails(userId: string, limit: number = 20, offset: number = 0) {
+  return prisma.email.findMany({
+    where: {
+      userId,
+      relevanceState: EmailRelevanceState.RELEVANT,
+      matchState: EmailMatchState.UNMATCHED,
+    },
+    take: limit + 1,
+    skip: offset,
+    include: {
+      aiProcessingResult: true,
+    },
+    orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
+  });
+}
+
+/**
+ * Resolve an email that needs human-in-the-loop matching.
+ * Supports both AMBIGUOUS (multiple candidates) and UNMATCHED (zero candidates) emails.
+ *
+ * For AMBIGUOUS: applicationId can be null (→ IGNORED) or a valid application ID.
+ * For UNMATCHED: applicationId must be non-null (linking to an application is mandatory).
+ */
+export async function resolveEmailMatch(
+  userId: string,
+  emailId: string,
+  applicationId: string | null,
+): Promise<void> {
+  const email = await prisma.email.findUnique({
+    where: { id: emailId, userId }, // isolation check
+    include: { aiProcessingResult: true },
+  });
+
+  if (!email) {
+    throw new Error('EMAIL_NOT_FOUND');
+  }
+
+  // Validate match state — only AMBIGUOUS and UNMATCHED can be resolved
+  if (
+    email.matchState !== EmailMatchState.AMBIGUOUS &&
+    email.matchState !== EmailMatchState.UNMATCHED
+  ) {
+    throw new Error('INVALID_MATCH_STATE');
+  }
+
+  // UNMATCHED emails require an applicationId (linking is mandatory)
+  if (email.matchState === EmailMatchState.UNMATCHED && !applicationId) {
+    throw new Error('APPLICATION_REQUIRED_FOR_UNMATCHED');
+  }
+
+  if (!applicationId) {
+    // No match — only valid for AMBIGUOUS emails
+    const ignored = await prisma.$transaction(async (tx) => {
+      await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
+      return tx.email.updateMany({
+        where: { id: emailId, userId, matchState: 'AMBIGUOUS' },
+        data: { matchState: 'IGNORED', matchConfirmedBy: 'USER_CONFIRMED' },
+      });
+    });
+    if (!ignored.count) throw new Error('INVALID_MATCH_STATE');
+    return;
+  }
+
+  // Ownership check for application
+  const app = await prisma.application.findUnique({
+    where: { id: applicationId, userId }, // isolation check
+  });
+
+  if (!app) {
+    throw new Error('APPLICATION_NOT_FOUND');
+  }
+
+  if (!email.aiProcessingResult) {
+    throw new Error('NO_AI_RESULT');
+  }
+
+  await applyMatch(
+    email.id,
+    applicationId,
+    email.aiProcessingResult,
+    MatchConfirmationSource.USER_CONFIRMED,
+  );
 }
 export function inferState(aiResult: AIProcessingResult): ApplicationStatus | null {
   if (aiResult.rejectionInfo || aiResult.category === 'REJECTION')

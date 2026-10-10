@@ -5,9 +5,9 @@ import { resolveTemporal } from '../contracts/temporal';
 import { AgendaQuerySchema } from '../contracts/agenda';
 import { candidateEnvelope, verifiedCandidates } from '../services/ai/temporal';
 import { readAgenda, updateAgenda } from '../services/agenda';
-import { selectExtractionContract, EmailAIPipeline } from '../services/ai/pipeline';
-import { MatcherService } from '../services/matcher';
-import { GmailFetcherService } from '../services/gmailFetcher';
+import { selectExtractionContract, processEmail } from '../services/ai/pipeline';
+import { correctEmailMatch, matchEmailToApplication } from '../services/matcher';
+import * as gmailFetcher from '../services/gmailFetcher';
 vi.mock('../jobs/notificationJob', () => ({
   enqueueNotificationJob: vi.fn(() => {
     throw Error('Unexpected notification');
@@ -69,7 +69,7 @@ afterAll(async () => {
   await prisma.user.deleteMany({ where: { id: { in: [userId, foreign] } } });
 });
 async function project() {
-  await MatcherService.matchEmailToApplication(emailId);
+  await matchEmailToApplication(emailId);
   return prisma.agendaItem.findFirstOrThrow({ where: { emailId, applicationId: appId } });
 }
 const query = (view: 'review' | 'upcoming' | 'past' | 'history') =>
@@ -133,14 +133,14 @@ it('pins v2 held/completed/pending claims and keeps selected v3 after disable', 
 });
 it('adopts completed v2/v3 without fetching Gmail or calling a provider', async () => {
   const fetch = vi
-    .spyOn(GmailFetcherService, 'fetchMessageMetadata')
+    .spyOn(gmailFetcher, 'fetchMessageMetadata')
     .mockRejectedValue(Error('Unexpected fetch'));
   for (const version of ['extraction/v2', 'extraction/v3']) {
     await prisma.aIProcessingResult.update({
       where: { emailId },
       data: { contractVersion: version },
     });
-    await EmailAIPipeline.processEmail(userId, emailId);
+    await processEmail(userId, emailId);
   }
   expect(fetch).not.toHaveBeenCalled();
   fetch.mockRestore();
@@ -167,7 +167,7 @@ it('projects once, confirms date-only, rejects stale no-op and isolates ownershi
 it('retains source decisions across move/unlink/restore without status or provider changes', async () => {
   const row = await project();
   await updateAgenda(userId, row.id, { expectedRevision: 0, state: 'CONFIRMED' });
-  await MatcherService.correctEmailMatch(userId, emailId, {
+  await correctEmailMatch(userId, emailId, {
     expectedMatchState: 'MATCHED',
     expectedApplicationId: appId,
     applicationId: target,
@@ -181,12 +181,12 @@ it('retains source decisions across move/unlink/restore without status or provid
     updateAgenda(userId, row.id, { expectedRevision: 2, state: 'CANCELLED' }),
   ).rejects.toMatchObject({ code: 'AGENDA_RETIRED' });
   await updateAgenda(userId, moved.id, { expectedRevision: 0, state: 'CANCELLED' });
-  await MatcherService.correctEmailMatch(userId, emailId, {
+  await correctEmailMatch(userId, emailId, {
     expectedMatchState: 'MATCHED',
     expectedApplicationId: target,
     applicationId: null,
   });
-  await MatcherService.correctEmailMatch(userId, emailId, {
+  await correctEmailMatch(userId, emailId, {
     expectedMatchState: 'IGNORED',
     expectedApplicationId: null,
     applicationId: target,
@@ -276,7 +276,7 @@ it('serializes an observed edit/correction interleaving under the shared lock or
       >`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%SELECT id FROM emails%'`;
       expect(waiting[0].n).toBeGreaterThan(0);
     });
-    const moving = MatcherService.correctEmailMatch(userId, emailId, {
+    const moving = correctEmailMatch(userId, emailId, {
       expectedMatchState: 'MATCHED',
       expectedApplicationId: appId,
       applicationId: target,

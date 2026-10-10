@@ -11,7 +11,7 @@ import { ApiError } from '@google/genai';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
 import { EmailProcessingJobData, processEmailJob } from '../jobs/emailProcessingJob';
-import { GmailFetcherService } from '../services/gmailFetcher';
+import { fetchMessageBody, fetchMessageMetadata } from '../services/gmailFetcher';
 
 const generateContent = vi.fn();
 const get = vi.fn();
@@ -96,11 +96,11 @@ beforeAll(async () => {
 });
 beforeEach(() => {
   process.env.AI_USER_DAILY_CALL_LIMIT = '1000';
-  vi.mocked(GmailFetcherService.fetchMessageMetadata).mockResolvedValue({
+  vi.mocked(fetchMessageMetadata).mockResolvedValue({
     labelIds: ['INBOX'],
     snippet: CONTENT,
   });
-  vi.mocked(GmailFetcherService.fetchMessageBody).mockResolvedValue(`Dear candidate, ${CONTENT}`);
+  vi.mocked(fetchMessageBody).mockResolvedValue(`Dear candidate, ${CONTENT}`);
 });
 afterAll(async () => {
   vi.restoreAllMocks();

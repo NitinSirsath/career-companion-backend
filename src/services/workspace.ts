@@ -99,7 +99,7 @@ export async function readWorkspaceActions(
 export async function readWorkspaceReview(userId: string, now = new Date()) {
   const [unmatched, ambiguous, pendingSubmissions] = await prisma.$transaction(
     [
-      // Same eligibility as MatcherService.getUnmatchedEmails / getAmbiguousMatches.
+      // Same eligibility as getUnmatchedEmails / getAmbiguousMatches.
       prisma.email.count({
         where: { userId, relevanceState: 'RELEVANT', matchState: 'UNMATCHED' },
       }),

@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth';
-import { ActionService } from '../services/action';
+import {
+  editFollowUp,
+  getActionByRequest,
+  getUserActions,
+  snoozeAction,
+  updateActionStatus,
+} from '../services/action';
 import { EditFollowUpSchema, SnoozeActionSchema, UpdateActionRequestSchema } from '../contracts';
 
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
@@ -19,7 +25,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const status = z.enum(['PENDING', 'COMPLETED', 'DISMISSED']).optional().parse(req.query.status);
     const { limit, offset } = getPaginationParams(req.query);
 
-    const actions = await ActionService.getUserActions(userId, status, limit, offset);
+    const actions = await getUserActions(userId, status, limit, offset);
     res.status(200).json(createPaginatedResponse(actions, limit, offset));
   } catch (err) {
     next(err);
@@ -29,7 +35,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 router.get('/by-request/:clientRequestId', async (req, res, next) => {
   try {
     res.json(
-      await ActionService.byRequest(req.auth!.user.id, z.uuid().parse(req.params.clientRequestId)),
+      await getActionByRequest(req.auth!.user.id, z.uuid().parse(req.params.clientRequestId)),
     );
   } catch (error) {
     next(error);
@@ -38,7 +44,7 @@ router.get('/by-request/:clientRequestId', async (req, res, next) => {
 router.patch('/:id/personal', async (req, res, next) => {
   try {
     res.json(
-      await ActionService.editFollowUp(
+      await editFollowUp(
         req.auth!.user.id,
         z.uuid().parse(req.params.id),
         EditFollowUpSchema.parse(req.body),
@@ -51,7 +57,7 @@ router.patch('/:id/personal', async (req, res, next) => {
 router.patch('/:id/snooze', async (req, res, next) => {
   try {
     res.json(
-      await ActionService.snooze(
+      await snoozeAction(
         req.auth!.user.id,
         z.uuid().parse(req.params.id),
         SnoozeActionSchema.parse(req.body),
@@ -72,7 +78,7 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => 
     const actionId = z.uuid().parse(req.params.id);
     const data = UpdateActionRequestSchema.parse(req.body);
 
-    const updated = await ActionService.updateActionStatus(
+    const updated = await updateActionStatus(
       userId,
       actionId,
       data.status,

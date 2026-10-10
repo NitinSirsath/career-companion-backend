@@ -4,7 +4,7 @@ import { prisma } from '../db/prisma';
 import { EmailProcessingJobData, processEmailJob } from '../jobs/emailProcessingJob';
 import { JobExtractionSchema } from '../services/ai/contracts';
 import { ProviderFailure } from '../services/ai/errors';
-import { GmailFetcherService } from '../services/gmailFetcher';
+import { fetchMessageBody, fetchMessageMetadata } from '../services/gmailFetcher';
 import { createProviderClient } from '../services/ai/providers';
 import { configureAI } from './helpers/aiAccess';
 import { fakeProviderClient } from './helpers/fakeProviderClient';
@@ -59,13 +59,11 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   process.env.AI_USER_DAILY_CALL_LIMIT = '100';
-  vi.mocked(GmailFetcherService.fetchMessageMetadata).mockResolvedValue({
+  vi.mocked(fetchMessageMetadata).mockResolvedValue({
     labelIds: ['INBOX'],
     snippet: 'Interview invitation',
   });
-  vi.mocked(GmailFetcherService.fetchMessageBody).mockResolvedValue(
-    'Synthetic interview invitation body',
-  );
+  vi.mocked(fetchMessageBody).mockResolvedValue('Synthetic interview invitation body');
   // Each user's provider client answers for that user only.
   vi.mocked(createProviderClient).mockReset();
 });
@@ -81,12 +79,10 @@ describe('Gmail → user-provided AI → application pipeline', () => {
     const email = await prisma.email.findUniqueOrThrow({ where: { id: emailId } });
     const controller = new AbortController();
     await processEmailJob({ ...job(ready, emailId), signal: controller.signal });
-    expect(GmailFetcherService.fetchMessageMetadata).toHaveBeenCalledWith(
-      ready,
-      email.gmailMessageId,
-      { signal: controller.signal },
-    );
-    expect(GmailFetcherService.fetchMessageBody).toHaveBeenCalledWith(ready, email.gmailMessageId, {
+    expect(fetchMessageMetadata).toHaveBeenCalledWith(ready, email.gmailMessageId, {
+      signal: controller.signal,
+    });
+    expect(fetchMessageBody).toHaveBeenCalledWith(ready, email.gmailMessageId, {
       signal: controller.signal,
     });
     expect(provider.generateStructured).toHaveBeenCalledTimes(2);

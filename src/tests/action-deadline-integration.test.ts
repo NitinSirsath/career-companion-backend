@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { prisma } from '../db/prisma';
 import { app } from '../index';
-import { MatcherService } from '../services/matcher';
+import { matchEmailToApplication } from '../services/matcher';
 import { DiscordProvider } from '../services/notifications/DiscordProvider';
 vi.mock('../jobs/notificationJob', () => ({ enqueueNotificationJob: vi.fn() }));
 let owner: string | undefined;
@@ -45,7 +45,7 @@ describe('deadline persistence and API/notification boundaries', () => {
         },
       });
       const logs = vi.spyOn(console, 'log');
-      await MatcherService.matchEmailToApplication(email.id);
+      await matchEmailToApplication(email.id);
       const action = await prisma.action.findFirstOrThrow({ where: { emailId: email.id } });
       const valid = text === 'Nov 20';
       expect(action.deadline?.toISOString() ?? null).toBe(
@@ -59,7 +59,7 @@ describe('deadline persistence and API/notification boundaries', () => {
         expect(line).toBeDefined();
         expect(String(line)).not.toContain(text);
       }
-      await MatcherService.matchEmailToApplication(email.id);
+      await matchEmailToApplication(email.id);
       expect(await prisma.action.findMany({ where: { emailId: email.id } })).toEqual([action]);
       for (const path of ['/api/actions', `/api/applications/${application.id}/actions`]) {
         const response = await request(app).get(path).set('X-Development-User', user.email);

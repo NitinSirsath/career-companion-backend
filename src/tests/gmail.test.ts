@@ -1,7 +1,7 @@
 import { EMAIL_PROCESSING_STUCK_MS, emailJobOptions } from '../jobs/emailProcessingJob';
 import { STALE_PROCESSING_MS } from '../services/ai/heldOperations';
 import { GmailStatusResponseSchema } from '../contracts/gmail';
-import { GmailSyncService } from '../services/gmailSync';
+import { syncUser } from '../services/gmailSync';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Integration tests for Gmail OAuth routes (COM-19).
@@ -539,7 +539,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       const queued = await prisma.gmailConnection.findUniqueOrThrow({
         where: { userId: testUser.id },
       });
-      const result = await GmailSyncService.syncUser(testUser.id, queued.syncClaim!);
+      const result = await syncUser(testUser.id, queued.syncClaim!);
       expect(result.synced).toBe(true);
       expect(result.messagesIngested).toBe(2);
       expect(result.messagesSkipped).toBe(0);
@@ -572,10 +572,10 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       });
 
       // First sync
-      await GmailSyncService.syncUser(testUser.id);
+      await syncUser(testUser.id);
 
       // Second sync
-      const res2 = await GmailSyncService.syncUser(testUser.id);
+      const res2 = await syncUser(testUser.id);
       expect(res2.messagesIngested).toBe(0);
       expect(res2.messagesSkipped).toBe(0);
 
@@ -632,9 +632,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
         },
       });
 
-      await expect(GmailSyncService.syncUser(testUser.id)).rejects.toThrow(
-        'Gmail authorization expired',
-      );
+      await expect(syncUser(testUser.id)).rejects.toThrow('Gmail authorization expired');
 
       // Connection should be marked FAILED
       const connection = await prisma.gmailConnection.findUnique({

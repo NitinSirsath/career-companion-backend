@@ -3,7 +3,7 @@ import request from 'supertest';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
 import { ApplicationResponseSchema, ListApplicationEventsResponseSchema } from '../contracts';
-import { GmailFetcherService } from '../services/gmailFetcher';
+import * as gmailFetcher from '../services/gmailFetcher';
 
 const OWNER = 'evidence-owner@s6e.test';
 const OTHER = 'evidence-other@s6e.test';
@@ -55,7 +55,7 @@ describe('event source evidence', () => {
         provenance: 'AI said so',
       },
     });
-    const fetcher = vi.spyOn(GmailFetcherService, 'fetchMessageBody');
+    const fetcher = vi.spyOn(gmailFetcher, 'fetchMessageBody');
     const res = await events();
     expect(res.status).toBe(200);
     const page = ListApplicationEventsResponseSchema.parse(res.body);

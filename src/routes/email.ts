@@ -2,7 +2,12 @@ import { CorrectEmailMatchRequestSchema } from '../contracts/email';
 import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth';
-import { MatcherService } from '../services/matcher';
+import {
+  correctEmailMatch,
+  getAmbiguousMatches,
+  getUnmatchedEmails,
+  resolveEmailMatch,
+} from '../services/matcher';
 import { ResolveAmbiguityRequestSchema, RetryEmailRequestSchema } from '../contracts/email';
 
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
@@ -16,7 +21,7 @@ router.patch('/:id/match', async (req, res, next) => {
   try {
     const id = z.uuid().parse(req.params.id);
     const body = CorrectEmailMatchRequestSchema.parse(req.body);
-    res.json(await MatcherService.correctEmailMatch(req.auth!.user.id, id, body));
+    res.json(await correctEmailMatch(req.auth!.user.id, id, body));
   } catch (error) {
     next(error);
   }
@@ -30,7 +35,7 @@ router.get('/ambiguous', async (req: Request, res: Response, next: NextFunction)
   try {
     const userId = req.auth!.user.id;
     const { limit, offset } = getPaginationParams(req.query);
-    const emails = await MatcherService.getAmbiguousMatches(userId, limit, offset);
+    const emails = await getAmbiguousMatches(userId, limit, offset);
 
     // Map to response schema to omit any PII/raw bodies if they existed, though Prisma already doesn't load bodies
     const response = emails.map((email) => ({
@@ -67,7 +72,7 @@ router.get('/unmatched', async (req: Request, res: Response, next: NextFunction)
   try {
     const userId = req.auth!.user.id;
     const { limit, offset } = getPaginationParams(req.query);
-    const emails = await MatcherService.getUnmatchedEmails(userId, limit, offset);
+    const emails = await getUnmatchedEmails(userId, limit, offset);
 
     const response = emails.map((email) => ({
       id: email.id,
@@ -107,7 +112,7 @@ router.post('/:id/resolve', async (req: Request, res: Response, next: NextFuncti
     const data = ResolveAmbiguityRequestSchema.parse(req.body);
 
     try {
-      await MatcherService.resolveEmailMatch(userId, emailId, data.applicationId);
+      await resolveEmailMatch(userId, emailId, data.applicationId);
       res.status(200).json({ success: true });
     } catch (e) {
       const err = e as Error;

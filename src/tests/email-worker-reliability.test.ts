@@ -3,7 +3,7 @@ import request from 'supertest';
 import type { JobWithMetadata } from 'pg-boss';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
-import { EmailAIPipeline } from '../services/ai/pipeline';
+import * as aiPipeline from '../services/ai/pipeline';
 import {
   AIAccessError,
   AIOutcomeUnknownError,
@@ -100,14 +100,14 @@ describe('email worker attributable outcomes', () => {
 
   it('passes the delivery cancellation signal into the email pipeline', async () => {
     const controller = new AbortController();
-    const run = vi.spyOn(EmailAIPipeline, 'processEmail').mockResolvedValue(undefined);
+    const run = vi.spyOn(aiPipeline, 'processEmail').mockResolvedValue(undefined);
     const delivery = { ...job(), signal: controller.signal };
     await processEmailJob(delivery);
     expect(run).toHaveBeenCalledWith(userId, emailId, { signal: controller.signal });
   });
 
   it('schedules a retry for a retryable failure before the final attempt', async () => {
-    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(
+    vi.spyOn(aiPipeline, 'processEmail').mockRejectedValue(
       new RetryableAIError('AI operation not ready'),
     );
     await expect(processEmailJob(job(1))).rejects.toThrow();
@@ -118,7 +118,7 @@ describe('email worker attributable outcomes', () => {
   });
 
   it('marks the email FAILED when the final permitted delivery fails', async () => {
-    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(
+    vi.spyOn(aiPipeline, 'processEmail').mockRejectedValue(
       new RetryableAIError('AI operation not ready'),
     );
     await expect(processEmailJob(job(3, 3))).rejects.toThrow();
@@ -128,7 +128,7 @@ describe('email worker attributable outcomes', () => {
   });
 
   it('acknowledges terminal failures as FAILED without rethrowing', async () => {
-    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(
+    vi.spyOn(aiPipeline, 'processEmail').mockRejectedValue(
       new TerminalAIError('AI provider rejected request'),
     );
     await expect(processEmailJob(job())).resolves.toBeUndefined();
@@ -139,7 +139,7 @@ describe('email worker attributable outcomes', () => {
     const raw = Object.assign(new Error('Dear candidate, private body'), {
       meta: { body: 'private' },
     });
-    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(raw);
+    vi.spyOn(aiPipeline, 'processEmail').mockRejectedValue(raw);
     const thrown = await processEmailJob(job()).catch((e: unknown) => e);
     expect(thrown).toBeInstanceOf(EmailJobFailure);
     expect(thrown).toMatchObject({ name: 'EmailJobFailure', message: 'ProcessingError' });
@@ -149,7 +149,7 @@ describe('email worker attributable outcomes', () => {
   });
 
   it('stores an outcome-unknown provider error as not retryable; retry semantics unchanged (S6-R06)', async () => {
-    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(
+    vi.spyOn(aiPipeline, 'processEmail').mockRejectedValue(
       new AIProviderError('AI provider outcome unknown; reconciliation required', false),
     );
     await expect(processEmailJob(job(1))).rejects.toThrow('AIProviderError');
@@ -173,7 +173,7 @@ describe('email worker attributable outcomes', () => {
           processingFailedAt: new Date(),
         },
       });
-      vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(new AIAccessError(reason));
+      vi.spyOn(aiPipeline, 'processEmail').mockRejectedValue(new AIAccessError(reason));
       await expect(processEmailJob(job(1))).resolves.toBeUndefined();
       expect(await email()).toMatchObject({
         processingState: 'PENDING',
@@ -187,7 +187,7 @@ describe('email worker attributable outcomes', () => {
   );
 
   it('fails an unknown outcome at once, held for review, without a queue retry', async () => {
-    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(new AIOutcomeUnknownError());
+    vi.spyOn(aiPipeline, 'processEmail').mockRejectedValue(new AIOutcomeUnknownError());
     await expect(processEmailJob(job(0))).resolves.toBeUndefined();
     expect(await email()).toMatchObject({
       processingState: 'FAILED',
@@ -197,7 +197,7 @@ describe('email worker attributable outcomes', () => {
   });
 
   it('never persists unexpected raw error text', async () => {
-    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(
+    vi.spyOn(aiPipeline, 'processEmail').mockRejectedValue(
       new Error('Dear candidate, private body'),
     );
     await expect(processEmailJob(job())).rejects.toThrow();
@@ -208,7 +208,7 @@ describe('email worker attributable outcomes', () => {
 
   it('never downgrades a completed email', async () => {
     await prisma.email.update({ where: { id: emailId }, data: { processingState: 'COMPLETED' } });
-    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(
+    vi.spyOn(aiPipeline, 'processEmail').mockRejectedValue(
       new TerminalAIError('Email unavailable'),
     );
     await processEmailJob(job());
@@ -392,7 +392,7 @@ describe('manual email retry preserves paid claims and user decisions', () => {
 
 describe('delivery invariant (S6-03)', () => {
   it('fails an unexpected multi-job delivery without attempting or acknowledging any job', async () => {
-    const pipeline = vi.spyOn(EmailAIPipeline, 'processEmail');
+    const pipeline = vi.spyOn(aiPipeline, 'processEmail');
     await expect(handleEmailJobs([job(), { ...job(), id: 'job-extra' }])).rejects.toThrow(
       'UNEXPECTED_EMAIL_JOB_BATCH',
     );
@@ -402,7 +402,7 @@ describe('delivery invariant (S6-03)', () => {
   it('withdraws a delivery that waited for AI so the email can be re-offered at once', async () => {
     const boss = await getQueue();
     await prisma.$executeRaw`DELETE FROM pgboss.job WHERE name = ${EMAIL_PROCESSING_JOB}`;
-    vi.spyOn(EmailAIPipeline, 'processEmail').mockRejectedValue(new AIAccessError('NOT_SET_UP'));
+    vi.spyOn(aiPipeline, 'processEmail').mockRejectedValue(new AIAccessError('NOT_SET_UP'));
     const first = await boss.send(
       EMAIL_PROCESSING_JOB,
       { userId, emailId },
@@ -439,7 +439,7 @@ describe('delivery invariant (S6-03)', () => {
       ),
     );
     const [ok1, terminal, exhausted, ok2, raw] = ids;
-    vi.spyOn(EmailAIPipeline, 'processEmail').mockImplementation(async (_user, id) => {
+    vi.spyOn(aiPipeline, 'processEmail').mockImplementation(async (_user, id) => {
       if (id === terminal) throw new TerminalAIError('AI provider rejected request');
       if (id === exhausted) throw new RetryableAIError('AI operation not ready');
       if (id === raw)
@@ -491,7 +491,7 @@ describe('delivery invariant (S6-03)', () => {
       processingRetryable: false,
     });
     expect(
-      vi.mocked(EmailAIPipeline.processEmail).mock.calls.filter(([, id]) => id === exhausted),
+      vi.mocked(aiPipeline.processEmail).mock.calls.filter(([, id]) => id === exhausted),
     ).toHaveLength(2);
     // S6-R06: pgboss.job.output holds only the sanitized category.
     expect(byEmail.get(exhausted)!.output).toEqual({
