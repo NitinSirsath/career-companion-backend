@@ -1,5 +1,5 @@
 /**
- * Integration token routes for the session user (ADR-0002 decision 10; MCP-02).
+ * Integration token routes for the session user (ADR-0002 decision 10).
  *
  *   POST   /api/integration-tokens       create; the only response with the plaintext token
  *   GET    /api/integration-tokens       list, newest first, offset pagination
