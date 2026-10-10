@@ -11,11 +11,11 @@ import { frontendUrl, isProduction } from '../utils/config';
 import { logError } from '../utils/log';
 
 const router = Router();
- 
+
 const AUTH_STATE_COOKIE_NAME = 'google_login_state';
 const FRONTEND_LOGIN_PATH = '/login';
 const FRONTEND_DASHBOARD_PATH = '/';
- 
+
 warnIfGoogleLoginNotConfigured();
 
 router.get('/connect', async (req: Request, res: Response, next: NextFunction) => {
