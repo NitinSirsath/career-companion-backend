@@ -28,19 +28,18 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { google } from 'googleapis';
 import { requireAuth } from '../middleware/auth';
 import { decryptToken, loadEncryptionKey } from '../utils/gmailTokenEncryption';
-import { requestGmailSync } from '../jobs/gmailSyncJob';
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
 import { GmailSettingsPatchSchema } from '../contracts/gmail';
 import { logWarn, logError } from '../utils/log';
 import { listEmails } from '../services/email';
 import {
-  assertSyncCanStart,
   clearGmailConnection,
   connectedAccessToken,
   readGmailStatus,
   saveGmailGrant,
   setSyncLookbackDays,
 } from '../services/gmailConnection';
+import { startManualSync } from '../services/gmailSyncRequests';
 import { GmailAuthError, SyncInProgressError } from '../services/gmailSync';
 
 const router = Router();
@@ -272,8 +271,7 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
   try {
     const userId = req.auth!.user.id;
 
-    await assertSyncCanStart(userId);
-    const result = await requestGmailSync(userId);
+    const result = await startManualSync(userId);
     return res.status(202).json(result);
   } catch (err) {
     if (err instanceof SyncInProgressError) {
