@@ -25,10 +25,8 @@ import {
   isLinkedInSender,
   autoIrrelevant,
 } from '../services/ai/triage';
-import {
-  relevanceTriageJobOptions,
-  RELEVANCE_TRIAGE_WORKER_OPTIONS,
-} from '../jobs/relevanceTriageJob';
+import { RELEVANCE_TRIAGE_WORKER_OPTIONS } from '../jobs/relevanceTriageJob';
+import { relevanceTriageJobOptions } from '../services/enqueue';
 import { getQueue } from '../services/queue';
 import { parseAI_TRIAGE_BATCH_ENABLED, parseAI_TRIAGE_BATCH_SIZE } from '../utils/config';
 import { fetchMessageMetadata } from '../services/gmailFetcher';
@@ -37,12 +35,13 @@ import { processEmail } from '../services/ai/pipeline';
 import { holdOf } from '../services/ai/heldOperations';
 import { bindCapabilities } from '../services/ai/capabilities';
 import { strictJsonSchema } from '../services/ai/providers/jsonSchema';
-import { reofferPendingEmails } from '../services/gmailSync';
+import { reofferPendingEmails } from '../services/ai/offer';
 
 const send = vi.fn();
 const classify = vi.fn();
 const classifySingle = vi.fn();
-vi.mock('../jobs/emailProcessingJob', () => ({
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
   enqueueEmailProcessingJob: vi.fn(async (...args: unknown[]) => send(...args)),
 }));
 vi.mock('../services/queue', () => ({

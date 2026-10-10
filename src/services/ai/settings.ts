@@ -17,7 +17,7 @@ import type {
   SaveAISettingsRequest,
   SaveAISettingsResponse,
 } from '../../contracts/ai';
-import { reofferPendingEmails } from '../gmailSync';
+import { reofferPendingEmails } from './offer';
 import {
   AIAccess,
   CONFIGURATION_STATE,

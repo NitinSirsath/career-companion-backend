@@ -12,7 +12,10 @@ import { fakeProviderClient } from './helpers/fakeProviderClient';
 import { configureAI, fakeAccess } from './helpers/aiAccess';
 vi.mock('../services/gmailFetcher');
 vi.mock('../services/ai/providers', () => ({ createProviderClient: vi.fn() }));
-vi.mock('../jobs/notificationJob', () => ({ enqueueNotificationJob: vi.fn() }));
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
+  enqueueNotificationJob: vi.fn(),
+}));
 
 let userId: string;
 let emailId: string;

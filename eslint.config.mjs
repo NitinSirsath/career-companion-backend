@@ -61,7 +61,7 @@ export default [
           patterns: [
             {
               group: ['**/jobs/*'],
-              message: 'Queue work through src/services/queue.ts, not job files.',
+              message: 'Queue work through src/services/enqueue.ts, not job files.',
             },
           ],
         },

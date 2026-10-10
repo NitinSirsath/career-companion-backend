@@ -13,7 +13,7 @@ import {
   AIProcessingResult,
   MatchConfirmationSource,
 } from '@prisma/client';
-import { enqueueNotificationJob } from '../jobs/notificationJob';
+import { enqueueNotificationJob } from './enqueue';
 import { logEvent, logError } from '../utils/log';
 
 // Messages for a match correction that fails.

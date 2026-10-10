@@ -8,7 +8,8 @@ import { readAgenda, updateAgenda } from '../services/agenda';
 import { selectExtractionContract, processEmail } from '../services/ai/pipeline';
 import { correctEmailMatch, matchEmailToApplication } from '../services/matcher';
 import * as gmailFetcher from '../services/gmailFetcher';
-vi.mock('../jobs/notificationJob', () => ({
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
   enqueueNotificationJob: vi.fn(() => {
     throw Error('Unexpected notification');
   }),

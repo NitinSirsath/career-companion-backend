@@ -9,7 +9,8 @@ import { listApplications, updateUserStatus } from '../services/application';
 import { getAmbiguousMatches, getUnmatchedEmails } from '../services/matcher';
 import { listPendingSubmissions } from '../services/externalSubmission';
 
-vi.mock('../jobs/notificationJob', () => ({
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
   enqueueNotificationJob: vi.fn(() => {
     throw new Error('Unexpected notification');
   }),

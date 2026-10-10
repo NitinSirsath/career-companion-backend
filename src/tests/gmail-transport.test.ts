@@ -57,8 +57,8 @@ vi.mock('../services/googleTransport', async (importOriginal) => {
     },
   };
 });
-vi.mock('../jobs/emailProcessingJob', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../jobs/emailProcessingJob')>()),
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
   enqueueEmailProcessingJob: vi.fn(),
 }));
 let userId: string;

@@ -1,44 +1,10 @@
 import type { JobWithMetadata } from 'pg-boss';
+import { EMAIL_PROCESSING_JOB, EmailProcessingJobData } from '../services/enqueue';
 import { getQueue } from '../services/queue';
 import { prisma } from '../db/prisma';
 import { AIAccessError, AIProviderError, TerminalAIError } from '../services/ai/errors';
 import { processEmail } from '../services/ai/pipeline';
 import { logDebug, logEvent, logWarn, logError } from '../utils/log';
-
-export const EMAIL_PROCESSING_JOB = 'email-processing-job';
-export const EMAIL_RETRY_LIMIT = 3;
-
-export interface EmailProcessingJobData {
-  userId: string;
-  emailId: string;
-}
-
-export const emailJobOptions = (userId: string, emailId: string, approval?: number) => ({
-  // Stable idempotency identity based on (userId, emailId). A user-approved retry of a held
-  // operation has its own identity per approval: the failed delivery still holds the email's
-  // 5-minute slot, and approvals cannot race (compare-and-set) while held emails get no other jobs.
-  singletonKey:
-    approval === undefined ? `${userId}-${emailId}` : `${userId}-${emailId}-approved-${approval}`,
-  singletonSeconds: 300,
-  retryLimit: EMAIL_RETRY_LIMIT,
-  retryDelay: 60,
-  expireInSeconds: 300,
-  retryBackoff: true,
-});
-
-/** Returns the queued job ID, or null when the singleton window suppressed a new job. */
-export async function enqueueEmailProcessingJob(
-  userId: string,
-  emailId: string,
-  approval?: number,
-): Promise<string | null> {
-  const queue = await getQueue();
-  return queue.send(
-    EMAIL_PROCESSING_JOB,
-    { userId, emailId },
-    emailJobOptions(userId, emailId, approval),
-  );
-}
 
 /**
  * Persisted/logged failure description. Only application-authored AI error messages are stored;

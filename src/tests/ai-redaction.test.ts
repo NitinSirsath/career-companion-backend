@@ -10,7 +10,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { ApiError } from '@google/genai';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
-import { EmailProcessingJobData, processEmailJob } from '../jobs/emailProcessingJob';
+import { processEmailJob } from '../jobs/emailProcessingJob';
+import { EmailProcessingJobData } from '../services/enqueue';
 import { fetchMessageBody, fetchMessageMetadata } from '../services/gmailFetcher';
 
 const generateContent = vi.fn();
@@ -22,7 +23,10 @@ vi.mock('@google/genai', async (importOriginal) => ({
   }),
 }));
 vi.mock('../services/gmailFetcher');
-vi.mock('../jobs/notificationJob', () => ({ enqueueNotificationJob: vi.fn() }));
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
+  enqueueNotificationJob: vi.fn(),
+}));
 vi.mock('../services/queue', () => ({
   getQueue: vi.fn(async () => ({ send: vi.fn(async () => 'job') })),
   stopQueue: vi.fn(),

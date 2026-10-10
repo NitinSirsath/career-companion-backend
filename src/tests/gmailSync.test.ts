@@ -4,7 +4,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { extractHeaders, GmailAuthError } from '../services/gmailSync';
 import { googleAuthFailure, googleStatus } from '../services/gmailClient';
 
-vi.mock('../jobs/emailProcessingJob', () => ({
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
   enqueueEmailProcessingJob: vi.fn().mockResolvedValue(undefined),
 }));
 

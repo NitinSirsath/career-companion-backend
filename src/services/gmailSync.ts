@@ -3,10 +3,7 @@ import { randomUUID } from 'crypto';
 import { gmail_v1 } from 'googleapis';
 import { prisma } from '../db/prisma';
 import { withGmail, googleStatus, googleAuthFailure } from './gmailClient';
-import { enqueueEmailProcessingJob } from '../jobs/emailProcessingJob';
-import { enqueueRelevanceTriage } from '../jobs/relevanceTriageJob';
-import { triageBatchEnabled } from './ai/triage';
-import { getAccessState } from './ai/access';
+import { enqueueForProcessing, reofferPendingEmails } from './ai/offer';
 
 import {
   GmailAuthError,
@@ -45,47 +42,6 @@ function syncCategory(error: unknown): string {
         ? 'PROVIDER_UNAVAILABLE'
         : 'UNCLASSIFIED';
 }
-export const REOFFER_LIMIT = 100;
-
-/**
- * Re-offers up to 100 of the user's PENDING emails to the worker, newest first, so fresh mail is
- * not stuck behind a backlog. Covers the DB-insert / queue-send gap and emails that waited for AI
- * access. Does nothing while the user's AI access is not ready: those emails wait and are
- * re-offered by the next sync or after the user fixes access (no scheduler). Enqueueing is
- * idempotent per email (singleton key).
- */
-export async function reofferPendingEmails(
-  userId: string,
-  guard?: () => Promise<void>,
-): Promise<number> {
-  if ((await getAccessState(userId)).state !== 'READY') return 0;
-  const pending = await prisma.email.findMany({
-    where: { userId, processingState: 'PENDING' },
-    orderBy: [{ receivedAt: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
-    take: REOFFER_LIMIT,
-    select: {
-      id: true,
-      aiProcessingResult: { select: { id: true } },
-      aiOperations: { where: { operation: 'classification' }, select: { id: true } },
-    },
-  });
-  let triageQueued = false;
-  for (const email of pending) {
-    await guard?.();
-    // With batching on, an email with no result and no classification row goes to the batched
-    // check; every other email continues on the per-email job, which reuses or resumes its row.
-    if (triageBatchEnabled() && !email.aiProcessingResult && !email.aiOperations.length) {
-      if (!triageQueued) {
-        await enqueueRelevanceTriage(userId);
-        triageQueued = true;
-      }
-      continue;
-    }
-    await enqueueEmailProcessingJob(userId, email.id);
-  }
-  return pending.length;
-}
-
 const LEASE_MS = 5 * 60_000;
 export const syncLease = () => new Date(Date.now() + LEASE_MS);
 
@@ -209,8 +165,7 @@ export async function syncUser(userId: string, queuedClaim?: string, delivery: S
             if (existing) {
               if (existing.processingState === 'PENDING') {
                 await heartbeat();
-                if (triageBatchEnabled()) await enqueueRelevanceTriage(userId);
-                else await enqueueEmailProcessingJob(userId, existing.id);
+                await enqueueForProcessing(userId, existing.id);
               }
               messagesSkipped++;
               continue;
@@ -252,8 +207,7 @@ export async function syncUser(userId: string, queuedClaim?: string, delivery: S
             });
             if (record.processingState === 'PENDING') {
               await heartbeat();
-              if (triageBatchEnabled()) await enqueueRelevanceTriage(userId);
-              else await enqueueEmailProcessingJob(userId, record.id);
+              await enqueueForProcessing(userId, record.id);
             }
             messagesIngested++;
           }

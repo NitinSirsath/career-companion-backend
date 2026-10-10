@@ -1,7 +1,8 @@
 import type { JobWithMetadata } from 'pg-boss';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../db/prisma';
-import { EmailProcessingJobData, processEmailJob } from '../jobs/emailProcessingJob';
+import { processEmailJob } from '../jobs/emailProcessingJob';
+import { EmailProcessingJobData } from '../services/enqueue';
 import { JobExtractionSchema } from '../services/ai/contracts';
 import { ProviderFailure } from '../services/ai/errors';
 import { fetchMessageBody, fetchMessageMetadata } from '../services/gmailFetcher';
@@ -11,7 +12,10 @@ import { fakeProviderClient } from './helpers/fakeProviderClient';
 
 vi.mock('../services/gmailFetcher');
 vi.mock('../services/ai/providers', () => ({ createProviderClient: vi.fn() }));
-vi.mock('../jobs/notificationJob', () => ({ enqueueNotificationJob: vi.fn() }));
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
+  enqueueNotificationJob: vi.fn(),
+}));
 
 const extraction = JobExtractionSchema.parse({
   ...Object.fromEntries(Object.keys(JobExtractionSchema.shape).map((key) => [key, null])),

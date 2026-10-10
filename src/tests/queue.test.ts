@@ -2,7 +2,7 @@ import { afterAll, expect, it } from 'vitest';
 import { prisma } from '../db/prisma';
 import { randomUUID } from 'crypto';
 import { getQueue, getStartedQueue, stopQueue, QUEUE_NAMES } from '../services/queue';
-import { enqueueRelevanceTriage, relevanceTriageJobOptions } from '../jobs/relevanceTriageJob';
+import { enqueueRelevanceTriage, relevanceTriageJobOptions } from '../services/enqueue';
 it('shares initialization and throttles duplicate jobs using PostgreSQL', async () => {
   const [a, b] = await Promise.all([getQueue(), getQueue()]);
   expect(a).toBe(b);

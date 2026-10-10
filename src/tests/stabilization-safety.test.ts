@@ -5,7 +5,10 @@ import { app } from '../index';
 import { assertTestDatabase } from '../utils/testDatabase';
 import { validateProductionConfig } from '../utils/config';
 import { applyMatch, matchEmailToApplication } from '../services/matcher';
-vi.mock('../jobs/notificationJob', () => ({ enqueueNotificationJob: vi.fn() }));
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
+  enqueueNotificationJob: vi.fn(),
+}));
 
 it('rejects test-like credentials/hosts when the actual database is development', () => {
   for (const url of [
