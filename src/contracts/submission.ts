@@ -52,7 +52,7 @@ export const ResolveSubmissionResponseSchema = z.object({
 });
 export type ResolveSubmissionResponse = z.infer<typeof ResolveSubmissionResponseSchema>;
 
-// ─── Timeline evidence (MCP-06) ─────────────────────────────────────────────
+// ─── Timeline evidence ──────────────────────────────────────────────────────
 
 /** Bounded, owner-checked evidence behind an AUTOMATION_SUBMITTED event, as reported by the automation. */
 export const SourceSubmissionSchema = z.object({
