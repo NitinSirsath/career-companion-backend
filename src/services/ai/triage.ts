@@ -3,7 +3,13 @@ import { getAccessState, resolveAIAccess } from './access';
 import { prisma } from '../../db/prisma';
 import { fetchMessageMetadata } from '../gmailFetcher';
 import { enqueueEmailProcessingJob } from '../enqueue';
-import { AIAccessError, AIProviderError, RetryableAIError, TerminalAIError } from './errors';
+import {
+  AIAccessError,
+  AIProviderError,
+  RetryableAIError,
+  TerminalAIError,
+  aiSetting,
+} from './errors';
 import {
   AI_CONTRACT_VERSIONS,
   CLASSIFICATION_VERSIONS,
@@ -16,29 +22,25 @@ import {
 } from './contracts';
 import { noteProviderFailure, noteProviderSuccess, recordTokens, reserveUserCall } from './usage';
 import { failureError, failureKind } from './operations';
+import * as config from '../../utils/config';
 import { logEvent, logWarn } from '../../utils/log';
 
 export const TRIAGE_STALE_PROCESSING_MS = 15 * 60_000;
 export const TRIAGE_RUN_LIMIT_MS = 180_000;
 export const MAX_ATTEMPTS = 3;
 
-export function triageBatchEnabled(value = process.env.AI_TRIAGE_BATCH_ENABLED) {
-  return value === 'true';
-}
-export function triageBatchSize(value = process.env.AI_TRIAGE_BATCH_SIZE): number {
-  if (value === undefined || value === '') return 20;
-  if (!/^\d+$/.test(value)) throw new TerminalAIError('Invalid AI_TRIAGE_BATCH_SIZE');
-  const size = Number(value);
-  if (!Number.isSafeInteger(size) || size < 1 || size > 25)
-    throw new TerminalAIError('Invalid AI_TRIAGE_BATCH_SIZE');
-  return size;
-}
-export function relevanceThreshold(value = process.env.RELEVANCE_CONFIDENCE_THRESHOLD): number {
-  const threshold = Number(value ?? 0.7);
-  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1)
-    throw new TerminalAIError('Invalid relevance threshold');
-  return threshold;
-}
+// The settings of a triage run. Passing a value checks that value instead of the configured one.
+export const triageBatchEnabled = () => aiSetting(config.triageBatchEnabled);
+export const triageBatchSize = (value?: string) =>
+  aiSetting(() =>
+    value === undefined ? config.triageBatchSize() : config.parseAI_TRIAGE_BATCH_SIZE(value),
+  );
+export const relevanceThreshold = (value?: string) =>
+  aiSetting(() =>
+    value === undefined
+      ? config.relevanceThreshold()
+      : config.parseRELEVANCE_CONFIDENCE_THRESHOLD(value),
+  );
 
 type Candidate = {
   emailId: string;
