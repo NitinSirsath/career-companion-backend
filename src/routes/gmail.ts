@@ -1,9 +1,3 @@
-import {
-  createGoogleOAuthClient,
-  GOOGLE_OAUTH_TIMEOUT_MS,
-  GOOGLE_REVOKE_TIMEOUT_MS,
-  gmailCallOptions,
-} from '../services/googleTransport';
 import { SyncQueueError } from '../services/gmailSyncErrors';
 /**
  * Gmail OAuth routes (COM-19).
@@ -25,12 +19,11 @@ import { SyncQueueError } from '../services/gmailSyncErrors';
 
 import { randomBytes } from 'crypto';
 import { Router, Request, Response, NextFunction } from 'express';
-import { google } from 'googleapis';
 import { requireAuth } from '../middleware/auth';
-import { decryptToken, loadEncryptionKey } from '../utils/gmailTokenEncryption';
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
 import { GmailSettingsPatchSchema } from '../contracts/gmail';
-import { logWarn, logError } from '../utils/log';
+import { frontendUrl, isProduction } from '../utils/config';
+import { logError } from '../utils/log';
 import { listEmails } from '../services/email';
 import {
   clearGmailConnection,
@@ -40,42 +33,15 @@ import {
   setSyncLookbackDays,
 } from '../services/gmailConnection';
 import { startManualSync } from '../services/gmailSyncRequests';
+import { exchangeGmailCode, gmailConsentUrl, revokeGmailAccess } from '../services/googleOAuth';
 import { GmailAuthError, SyncInProgressError } from '../services/gmailSync';
 
 const router = Router();
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+ 
 const STATE_COOKIE_NAME = 'gmail_oauth_state';
 const FRONTEND_GMAIL_PATH = '/gmail';
-
-/**
- * Creates a Google OAuth2 client from environment configuration.
- * Throws at call-time (not module-load-time) so the server can start
- * without credentials and return 500 only when the route is actually called.
- */
-function createOAuth2Client(timeoutMs = GOOGLE_OAUTH_TIMEOUT_MS) {
-  const clientId = process.env.GMAIL_CLIENT_ID;
-  const clientSecret = process.env.GMAIL_CLIENT_SECRET;
-  const redirectUri = process.env.GMAIL_REDIRECT_URI;
-
-  if (!clientId || !clientSecret || !redirectUri) {
-    throw new Error(
-      'Gmail OAuth is not configured: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, and GMAIL_REDIRECT_URI must all be set',
-    );
-  }
-
-  return createGoogleOAuthClient({ clientId, clientSecret, redirectUri, timeoutMs });
-}
-
-/**
- * Returns the FRONTEND_URL from env, defaulting to http://localhost:3000.
- * Used for post-OAuth redirects back to the SPA.
- */
-function getFrontendUrl(): string {
-  return process.env.FRONTEND_URL?.replace(/\/$/, '') ?? 'http://localhost:3000';
-}
 
 // ─── Protect all routes with dev auth ───────────────────────────────────────
 
@@ -95,22 +61,9 @@ router.get('/status', async (req: Request, res: Response, next: NextFunction) =>
 
 router.get('/connect', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Validate that encryption key is available before starting the OAuth flow.
-    // This fails fast with a clear error rather than failing silently after the user
-    // completes the Google consent screen.
-    loadEncryptionKey();
-
-    const oauth2Client = createOAuth2Client();
-
     // Generate a cryptographically random CSRF state token (32 bytes = 64 hex chars).
     const state = `${req.auth!.user.id}.${randomBytes(32).toString('hex')}`;
-
-    const authUrl = oauth2Client.generateAuthUrl({
-      access_type: 'offline',
-      scope: GMAIL_SCOPE,
-      prompt: 'consent', // Always request consent to ensure refresh_token is returned.
-      state,
-    });
+    const authUrl = gmailConsentUrl(state);
 
     // Store state in a signed, short-lived, HttpOnly, SameSite=Lax cookie.
     // The cookie secret comes from OAUTH_STATE_COOKIE_SECRET.
@@ -120,7 +73,7 @@ router.get('/connect', async (req: Request, res: Response, next: NextFunction) =
       sameSite: 'lax',
       maxAge: 5 * 60 * 1000, // 5 minutes — enough time to complete the OAuth flow
       signed: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isProduction(),
     });
 
     return res.redirect(302, authUrl);
@@ -132,7 +85,7 @@ router.get('/connect', async (req: Request, res: Response, next: NextFunction) =
 // ─── GET /api/gmail/callback ─────────────────────────────────────────────────
 
 router.get('/callback', async (req: Request, res: Response) => {
-  const frontendGmailUrl = `${getFrontendUrl()}${FRONTEND_GMAIL_PATH}`;
+  const frontendGmailUrl = `${frontendUrl()}${FRONTEND_GMAIL_PATH}`;
 
   try {
     const userId = req.auth!.user.id;
@@ -176,30 +129,11 @@ router.get('/callback', async (req: Request, res: Response) => {
 
     // ── Exchange code for tokens ──────────────────────────────────────────
     // SECURITY: `code` is NEVER logged, even at debug level.
-    const oauth2Client = createOAuth2Client();
-    const { tokens } = await oauth2Client.getToken(code);
-
-    if (!tokens.access_token) {
-      throw new Error('Google token exchange did not return an access_token');
-    }
-
-    // ── Fetch Gmail address ───────────────────────────────────────────────
-    oauth2Client.setCredentials(tokens);
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    const profile = await gmail.users.getProfile({ userId: 'me' }, gmailCallOptions());
-    const gmailEmail = profile.data.emailAddress;
-
-    if (!gmailEmail) {
-      throw new Error('Could not determine Gmail address from Google profile');
-    }
+    const { gmailEmail, grant } = await exchangeGmailCode(code);
 
     // ── Save the grant ────────────────────────────────────────────────────
     // SECURITY: the service encrypts the tokens before it stores them.
-    const saved = await saveGmailGrant(userId, gmailEmail, {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      expiryDate: tokens.expiry_date,
-    });
+    const saved = await saveGmailGrant(userId, gmailEmail, grant);
     if (!saved) return res.redirect(302, `${frontendGmailUrl}?gmailError=account_change`);
 
     return res.redirect(302, frontendGmailUrl);
@@ -218,21 +152,9 @@ router.post('/disconnect', async (req: Request, res: Response, next: NextFunctio
 
     const accessToken = await connectedAccessToken(userId);
     if (accessToken === null) return res.status(200).json({ disconnected: true });
-
-    // ── Revoke access token (best effort) ─────────────────────────────────
-    // Revocation failure must not block the disconnect flow.
-    // The token is cleared from the DB regardless of revocation outcome.
-    try {
-      const decryptedAccessToken = decryptToken(accessToken);
-      const oauth2Client = createOAuth2Client(GOOGLE_REVOKE_TIMEOUT_MS);
-      await oauth2Client.revokeToken(decryptedAccessToken);
-    } catch (revokeErr) {
-      // Log that revocation failed, but do NOT log the token value.
-      logWarn('gmail_revocation_failed', {
-        category: revokeErr instanceof Error ? revokeErr.name : 'UnknownError',
-      });
-    }
-
+ 
+    // The token is cleared from the database whether or not Google accepted the revoke.
+    await revokeGmailAccess(accessToken);
     await clearGmailConnection(userId);
 
     return res.status(200).json({ disconnected: true });
