@@ -9,10 +9,10 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import type { AIUsage } from './contracts';
-import { AIAccessError, FailureKind, TerminalAIError } from './errors';
+import { AIAccessError, FailureKind, aiSetting } from './errors';
+import * as config from '../../utils/config';
 import { logWarn } from '../../utils/log';
 
-export const DEFAULT_USER_DAILY_CALL_LIMIT = 500;
 export const MAX_DAILY_VERIFICATIONS = 20;
 
 const RATE_LIMIT_BASE_MS = 60_000;
@@ -21,14 +21,8 @@ const MAX_COOLDOWN_MS = 30 * 60_000;
 const RETRY_AFTER_MIN_MS = 10_000;
 const RETRY_AFTER_MAX_MS = 60 * 60_000;
 
-/** AI_USER_DAILY_CALL_LIMIT: per user per UTC day, 0–5000. 0 pauses all AI calls. */
-export function userDailyCallLimit(): number {
-  const raw = process.env.AI_USER_DAILY_CALL_LIMIT;
-  const value = raw === undefined || raw === '' ? DEFAULT_USER_DAILY_CALL_LIMIT : Number(raw);
-  if (!Number.isSafeInteger(value) || value < 0 || value > 5000)
-    throw new TerminalAIError('Invalid AI_USER_DAILY_CALL_LIMIT');
-  return value;
-}
+/** AI calls per user per UTC day. 0 pauses all AI calls. */
+export const userDailyCallLimit = () => aiSetting(config.userDailyCallLimit);
 
 export const utcDay = (now: Date) => now.toISOString().slice(0, 10);
 

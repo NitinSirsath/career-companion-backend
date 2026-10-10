@@ -1,13 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../db/prisma';
-
-function isDevAuthAllowed(): boolean {
-  return process.env.NODE_ENV === 'test' && process.env.ENABLE_DEV_AUTH === 'true';
-}
+import { devAuthEnabled } from '../utils/config';
 
 export async function developmentAuthMiddleware(req: Request, res: Response, next: NextFunction) {
   try {
-    if (!isDevAuthAllowed()) {
+    if (!devAuthEnabled()) {
       return res.status(401).json({
         error: {
           code: 'UNAUTHORIZED',
@@ -49,7 +46,7 @@ export async function developmentAuthMiddleware(req: Request, res: Response, nex
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
-    if (isDevAuthAllowed() && req.header('X-Development-User')) {
+    if (devAuthEnabled() && req.header('X-Development-User')) {
       return developmentAuthMiddleware(req, res, next);
     }
 

@@ -3,10 +3,11 @@ import {
   NotificationPayload,
   NotificationResult,
 } from './NotificationProvider';
+import { discordWebhookUrl } from '../../utils/config';
 
 export class DiscordProvider implements NotificationProvider {
   async send(payload: NotificationPayload): Promise<NotificationResult> {
-    const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+    const webhookUrl = discordWebhookUrl();
     if (!webhookUrl) {
       // Configuration missing is not a retryable error. It's a permanent misconfiguration.
       return {

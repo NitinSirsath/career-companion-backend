@@ -16,6 +16,7 @@ import { CredentialUnreadableError, openApiKey } from './credentials';
 import { AIAccessError, AccessReason } from './errors';
 import { createProviderClient } from './providers';
 import { nextUtcMidnight, userDailyCallLimit, utcDay } from './usage';
+import { isProduction } from '../../utils/config';
 import { logError } from '../../utils/log';
 
 export type AccessState = 'NOT_SET_UP' | 'READY' | 'NEEDS_ATTENTION' | 'LIMITED';
@@ -63,7 +64,7 @@ export const NEEDS_ATTENTION_ISSUES: readonly AIAccessIssue[] = [
 
 /** Hidden providers are built and evaluated outside production, never offered in it. */
 export const isOffered = (provider: CatalogProvider) =>
-  provider.status === 'supported' || process.env.NODE_ENV !== 'production';
+  provider.status === 'supported' || !isProduction();
 
 export function offeredProvider(id: string): CatalogProvider | undefined {
   const provider = getCatalogProvider(id);

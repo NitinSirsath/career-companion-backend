@@ -11,6 +11,7 @@ import {
 } from './gmailSyncErrors';
 import { google, gmail_v1 } from 'googleapis';
 import { prisma } from '../db/prisma';
+import { gmailOAuth } from '../utils/config';
 import { decryptToken, encryptToken } from '../utils/gmailTokenEncryption';
 
 export function googleStatus(error: unknown): number | undefined {
@@ -32,9 +33,7 @@ export async function withGmail<T>(
   if (!connection || connection.status !== 'CONNECTED') throw new Error('Gmail is not connected');
   if (options.signal?.aborted) throw new Error('Gmail request failed');
   const oauth = createGoogleOAuthClient({
-    clientId: process.env.GMAIL_CLIENT_ID,
-    clientSecret: process.env.GMAIL_CLIENT_SECRET,
-    redirectUri: process.env.GMAIL_REDIRECT_URI,
+    ...gmailOAuth(),
     timeoutMs: GOOGLE_OAUTH_TIMEOUT_MS,
     signal: options.signal,
   });

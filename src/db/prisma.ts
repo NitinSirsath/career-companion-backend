@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { logLevel } from '../utils/config';
+import { isProduction, logLevel } from '../utils/config';
 
 // Prevent multiple instances of Prisma Client in development
 declare global {
@@ -13,6 +13,6 @@ export const prisma =
     log: logLevel() === 'debug' ? ['query', 'warn', 'error'] : ['warn', 'error'],
   });
 
-if (process.env.NODE_ENV !== 'production') {
+if (!isProduction()) {
   global.prisma = prisma;
 }

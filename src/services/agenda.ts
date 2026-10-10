@@ -6,6 +6,7 @@ import { CandidateEnvelopeSchema } from './ai/temporal';
 import { lockUser, LOCK_NAMESPACE } from '../utils/advisoryLock';
 import { createPaginatedResponse } from '../utils/pagination';
 import { AppError, CHANGE_REJECTED } from '../errors';
+import { agendaExtractionV3Enabled } from '../utils/config';
 
 const context = {
   application: { select: { companyName: true, jobTitle: true, archivedAt: true } },
@@ -60,7 +61,7 @@ export async function projectAgenda(
     }
     // Feature disable stops NEW projections, but never erases or strands existing decisions.
     const source = carried.find((row) => row.candidateKey === candidate.key);
-    if (process.env.AGENDA_EXTRACTION_V3_ENABLED !== 'true' && !source) continue;
+    if (!agendaExtractionV3Enabled() && !source) continue;
     const timing = source?.userTiming
       ? TemporalValueSchema.parse(source.userTiming)
       : candidate.temporal;
@@ -201,6 +202,6 @@ export async function readAgenda(
     ...createPaginatedResponse(items, limit, offset),
     generatedAt: now.toISOString(),
     timeZone: q.timeZone,
-    extractionEnabled: process.env.AGENDA_EXTRACTION_V3_ENABLED === 'true',
+    extractionEnabled: agendaExtractionV3Enabled(),
   };
 }
