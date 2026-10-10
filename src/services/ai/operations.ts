@@ -1,4 +1,4 @@
-import { AIOperationStatus, Prisma } from '@prisma/client';
+import { AIOperation, AIOperationStatus, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import type { AIAccess } from './access';
 import type { AIContract, AIResult } from './contracts';
@@ -48,16 +48,7 @@ export interface OperationResult<T> {
 export async function runOperation<T>(request: OperationRequest<T>): Promise<OperationResult<T>> {
   const { userId, emailId, operation, contract } = request;
   const version = contract.version;
-  const owned = await prisma.email.findFirst({
-    where: { id: emailId, userId },
-    select: { id: true },
-  });
-  if (!owned) throw new TerminalAIError('Email unavailable');
-  const key = { emailId, operation, version };
-  await prisma.aIOperation.createMany({ data: [key], skipDuplicates: true });
-  const existing = await prisma.aIOperation.findUniqueOrThrow({
-    where: { emailId_operation_version: key },
-  });
+  const existing = await openOperation(userId, { emailId, operation, version });
   if (existing.status === 'COMPLETED') {
     logDebug('ai_result_reused', { emailId, operation, version });
     return {
@@ -66,51 +57,12 @@ export async function runOperation<T>(request: OperationRequest<T>): Promise<Ope
       model: existing.model,
     };
   }
-  if (
-    ['PROCESSING', 'UNKNOWN', 'FAILED'].includes(existing.status) ||
-    existing.attempts >= MAX_ATTEMPTS + existing.approvedRetries
-  ) {
-    logWarn('ai_call_blocked', {
-      emailId,
-      operation,
-      version,
-      status: existing.status,
-      attempts: existing.attempts,
-    });
-    throw new TerminalAIError(`AI operation requires review: ${existing.status}`);
-  }
+  assertCallAllowed(existing);
 
   const access = await request.access();
   const model = access.models[contract.role];
   const now = new Date();
-  await prisma
-    .$transaction(async (tx) => {
-      // Compare-and-set on the observed attempts: exactly one worker can claim each attempt.
-      const claim = await tx.aIOperation.updateMany({
-        where: {
-          id: existing.id,
-          status: { in: ['PENDING', 'RETRYABLE'] },
-          attempts: existing.attempts,
-          OR: [{ retryAfter: null }, { retryAfter: { lte: now } }],
-        },
-        data: {
-          status: 'PROCESSING',
-          attempts: { increment: 1 },
-          startedAt: now,
-          errorCode: null,
-          provider: access.provider,
-          model: model.id,
-        },
-      });
-      if (claim.count !== 1) throw new RetryableAIError('AI operation not ready');
-      await reserveUserCall(tx, userId, now);
-    })
-    .catch((err: unknown) => {
-      if (err instanceof AIAccessError)
-        logEvent('ai_call_deferred', { userId, emailId, operation, version, reason: err.reason });
-      if (err instanceof AIProviderError) err.operationStage = operation;
-      throw err;
-    });
+  await claimAttempt(userId, existing, { provider: access.provider, model: model.id, now });
   logEvent('ai_call_started', {
     userId,
     emailId,
@@ -154,6 +106,70 @@ export async function runOperation<T>(request: OperationRequest<T>): Promise<Ope
     durationMs: Date.now() - now.getTime(),
   });
   return { data, provider: access.provider, model: model.id };
+}
+
+/** The operation's ledger row, created on first use. The email must belong to the user. */
+async function openOperation(
+  userId: string,
+  key: { emailId: string; operation: string; version: string },
+): Promise<AIOperation> {
+  const owned = await prisma.email.findFirst({
+    where: { id: key.emailId, userId },
+    select: { id: true },
+  });
+  if (!owned) throw new TerminalAIError('Email unavailable');
+  await prisma.aIOperation.createMany({ data: [key], skipDuplicates: true });
+  return prisma.aIOperation.findUniqueOrThrow({ where: { emailId_operation_version: key } });
+}
+
+/** A held operation, or one with no attempts left, is never called again without review. */
+function assertCallAllowed(existing: AIOperation) {
+  const { emailId, operation, version, status, attempts } = existing;
+  if (
+    !['PROCESSING', 'UNKNOWN', 'FAILED'].includes(status) &&
+    attempts < MAX_ATTEMPTS + existing.approvedRetries
+  )
+    return;
+  logWarn('ai_call_blocked', { emailId, operation, version, status, attempts });
+  throw new TerminalAIError(`AI operation requires review: ${status}`);
+}
+
+/** Commits the claim and reserves one call for the user, before the provider is called. */
+async function claimAttempt(
+  userId: string,
+  existing: AIOperation,
+  call: { provider: string; model: string; now: Date },
+) {
+  const { emailId, operation, version } = existing;
+  const { now } = call;
+  await prisma
+    .$transaction(async (tx) => {
+      // Compare-and-set on the observed attempts: exactly one worker can claim each attempt.
+      const claim = await tx.aIOperation.updateMany({
+        where: {
+          id: existing.id,
+          status: { in: ['PENDING', 'RETRYABLE'] },
+          attempts: existing.attempts,
+          OR: [{ retryAfter: null }, { retryAfter: { lte: now } }],
+        },
+        data: {
+          status: 'PROCESSING',
+          attempts: { increment: 1 },
+          startedAt: now,
+          errorCode: null,
+          provider: call.provider,
+          model: call.model,
+        },
+      });
+      if (claim.count !== 1) throw new RetryableAIError('AI operation not ready');
+      await reserveUserCall(tx, userId, now);
+    })
+    .catch((err: unknown) => {
+      if (err instanceof AIAccessError)
+        logEvent('ai_call_deferred', { userId, emailId, operation, version, reason: err.reason });
+      if (err instanceof AIProviderError) err.operationStage = operation;
+      throw err;
+    });
 }
 
 export function failureKind(err: unknown): ProviderFailure | null {
