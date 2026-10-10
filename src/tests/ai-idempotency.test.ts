@@ -3,10 +3,10 @@ import { z } from 'zod';
 import { prisma } from '../db/prisma';
 import { runOperation } from '../services/ai/operations';
 import { AIAccessError, ProviderFailure } from '../services/ai/errors';
-import { EmailAIPipeline } from '../services/ai/pipeline';
-import { GmailFetcherService } from '../services/gmailFetcher';
+import { processEmail } from '../services/ai/pipeline';
+import { fetchMessageBody, fetchMessageMetadata } from '../services/gmailFetcher';
 import { createProviderClient } from '../services/ai/providers';
-import { MatcherService } from '../services/matcher';
+import * as matcher from '../services/matcher';
 import { JobExtractionSchema } from '../services/ai/contracts';
 import { fakeProviderClient } from './helpers/fakeProviderClient';
 import { configureAI, fakeAccess } from './helpers/aiAccess';
@@ -141,22 +141,22 @@ describe('Durable AI external-effect boundary', () => {
         relevanceDecision: 'IRRELEVANT',
       },
     });
-    await EmailAIPipeline.processEmail(userId, emailId);
+    await processEmail(userId, emailId);
     expect(createProviderClient).not.toHaveBeenCalled();
     expect((await prisma.email.findUniqueOrThrow({ where: { id: emailId } })).processingState).toBe(
       'COMPLETED',
     );
   });
   it('filters promotions before creating any paid operation or fetching the body', async () => {
-    vi.mocked(GmailFetcherService.fetchMessageMetadata).mockResolvedValue({
+    vi.mocked(fetchMessageMetadata).mockResolvedValue({
       labelIds: ['INBOX', 'CATEGORY_PROMOTIONS'],
       snippet: null,
     });
-    vi.mocked(GmailFetcherService.fetchMessageBody).mockClear();
-    await EmailAIPipeline.processEmail(userId, emailId);
-    await EmailAIPipeline.processEmail(userId, emailId);
+    vi.mocked(fetchMessageBody).mockClear();
+    await processEmail(userId, emailId);
+    await processEmail(userId, emailId);
     expect(createProviderClient).not.toHaveBeenCalled();
-    expect(GmailFetcherService.fetchMessageBody).not.toHaveBeenCalled();
+    expect(fetchMessageBody).not.toHaveBeenCalled();
     expect(await prisma.aIOperation.count({ where: { emailId } })).toBe(0);
     expect((await prisma.email.findUniqueOrThrow({ where: { id: emailId } })).relevanceState).toBe(
       'IRRELEVANT',
@@ -172,14 +172,14 @@ describe('Durable AI external-effect boundary', () => {
       extraction,
     });
     vi.mocked(createProviderClient).mockReturnValue(client);
-    vi.mocked(GmailFetcherService.fetchMessageMetadata).mockResolvedValue({
+    vi.mocked(fetchMessageMetadata).mockResolvedValue({
       labelIds: ['INBOX'],
       snippet: null,
     });
-    vi.mocked(GmailFetcherService.fetchMessageBody).mockResolvedValue('x'.repeat(9000));
-    vi.spyOn(MatcherService, 'matchEmailToApplication').mockResolvedValue(undefined);
-    await EmailAIPipeline.processEmail(userId, emailId);
-    await EmailAIPipeline.processEmail(userId, emailId);
+    vi.mocked(fetchMessageBody).mockResolvedValue('x'.repeat(9000));
+    vi.spyOn(matcher, 'matchEmailToApplication').mockResolvedValue(undefined);
+    await processEmail(userId, emailId);
+    await processEmail(userId, emailId);
     expect(client.calls('email_relevance')).toHaveLength(1);
     expect(client.calls('job_extraction')).toHaveLength(1);
     expect(client.calls('job_extraction')[0][0].input).toHaveLength(8000);
@@ -196,16 +196,16 @@ describe('Durable AI external-effect boundary', () => {
       extraction,
     });
     vi.mocked(createProviderClient).mockReturnValue(client);
-    vi.mocked(GmailFetcherService.fetchMessageMetadata).mockResolvedValue({
+    vi.mocked(fetchMessageMetadata).mockResolvedValue({
       labelIds: ['INBOX'],
       snippet: '',
     });
-    vi.mocked(GmailFetcherService.fetchMessageBody).mockResolvedValue('bounded body');
-    vi.spyOn(MatcherService, 'matchEmailToApplication')
+    vi.mocked(fetchMessageBody).mockResolvedValue('bounded body');
+    vi.spyOn(matcher, 'matchEmailToApplication')
       .mockRejectedValueOnce(new Error('domain failure'))
       .mockResolvedValue(undefined);
-    await expect(EmailAIPipeline.processEmail(userId, emailId)).rejects.toThrow('domain failure');
-    await EmailAIPipeline.processEmail(userId, emailId);
+    await expect(processEmail(userId, emailId)).rejects.toThrow('domain failure');
+    await processEmail(userId, emailId);
     expect(client.calls('email_relevance')).toHaveLength(1);
     expect(client.calls('job_extraction')).toHaveLength(1);
   });

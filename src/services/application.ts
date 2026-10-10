@@ -173,336 +173,334 @@ function toSourceSubmission(
   };
 }
 
-export class ApplicationService {
-  static async createApplication(
-    userId: string,
-    data: CreateApplicationRequest,
-  ): Promise<ApplicationResponse> {
-    const application = await prisma.application.create({
-      data: {
-        userId,
-        companyName: data.companyName,
-        jobTitle: data.jobTitle,
-        location: data.location,
-        appliedAt: data.appliedAt ? new Date(data.appliedAt as string) : null,
-      },
-      include: enrichment,
-    });
+export async function createApplication(
+  userId: string,
+  data: CreateApplicationRequest,
+): Promise<ApplicationResponse> {
+  const application = await prisma.application.create({
+    data: {
+      userId,
+      companyName: data.companyName,
+      jobTitle: data.jobTitle,
+      location: data.location,
+      appliedAt: data.appliedAt ? new Date(data.appliedAt as string) : null,
+    },
+    include: enrichment,
+  });
 
-    return this.mapToResponse(userId, application, null); // a new application has no history
-  }
+  return mapToResponse(userId, application, null); // a new application has no history
+}
 
-  static async listApplications(
-    userId: string,
-    limit: number = 20,
-    offset: number = 0,
-    filters: ApplicationFilters = {},
-  ): Promise<ApplicationResponse[]> {
-    // Prisma's PostgreSQL contains operator uses LIKE: preserve literal %, _ and backslash.
-    const search = filters.q?.replace(/[\\%_]/g, '\\$&');
-    const orderBy: Prisma.ApplicationOrderByWithRelationInput[] =
-      filters.sort === 'applied_desc' || filters.sort === 'applied_asc'
-        ? [
-            {
-              appliedAt: { sort: filters.sort === 'applied_desc' ? 'desc' : 'asc', nulls: 'last' },
-            },
-            { id: 'desc' },
-          ]
-        : filters.sort === 'company_asc'
-          ? [{ companyName: 'asc' }, { id: 'desc' }]
-          : [{ createdAt: 'desc' }, { id: 'desc' }];
-    const applications = await prisma.application.findMany({
-      where: {
-        userId,
-        ...(filters.archive === 'all'
-          ? {}
-          : { archivedAt: filters.archive === 'archived' ? { not: null } : null }),
-        ...(filters.submittedVia
-          ? {
-              externalSubmissions: { some: { userId, matchState: { in: ['LINKED', 'CREATED'] } } },
-            }
-          : {}),
-        AND: [
-          ...(search
-            ? [
+export async function listApplications(
+  userId: string,
+  limit: number = 20,
+  offset: number = 0,
+  filters: ApplicationFilters = {},
+): Promise<ApplicationResponse[]> {
+  // Prisma's PostgreSQL contains operator uses LIKE: preserve literal %, _ and backslash.
+  const search = filters.q?.replace(/[\\%_]/g, '\\$&');
+  const orderBy: Prisma.ApplicationOrderByWithRelationInput[] =
+    filters.sort === 'applied_desc' || filters.sort === 'applied_asc'
+      ? [
+          {
+            appliedAt: { sort: filters.sort === 'applied_desc' ? 'desc' : 'asc', nulls: 'last' },
+          },
+          { id: 'desc' },
+        ]
+      : filters.sort === 'company_asc'
+        ? [{ companyName: 'asc' }, { id: 'desc' }]
+        : [{ createdAt: 'desc' }, { id: 'desc' }];
+  const applications = await prisma.application.findMany({
+    where: {
+      userId,
+      ...(filters.archive === 'all'
+        ? {}
+        : { archivedAt: filters.archive === 'archived' ? { not: null } : null }),
+      ...(filters.submittedVia
+        ? {
+            externalSubmissions: { some: { userId, matchState: { in: ['LINKED', 'CREATED'] } } },
+          }
+        : {}),
+      AND: [
+        ...(search
+          ? [
+              {
+                OR: [
+                  { companyName: { contains: search, mode: 'insensitive' as const } },
+                  { jobTitle: { contains: search, mode: 'insensitive' as const } },
+                ],
+              },
+            ]
+          : []),
+        ...(filters.effectiveStatus
+          ? filters.effectiveStatus === 'UNKNOWN'
+            ? [{ userStatus: null, aiStatus: null }]
+            : [
                 {
                   OR: [
-                    { companyName: { contains: search, mode: 'insensitive' as const } },
-                    { jobTitle: { contains: search, mode: 'insensitive' as const } },
+                    { userStatus: filters.effectiveStatus },
+                    { userStatus: null, aiStatus: filters.effectiveStatus },
                   ],
                 },
               ]
-            : []),
-          ...(filters.effectiveStatus
-            ? filters.effectiveStatus === 'UNKNOWN'
-              ? [{ userStatus: null, aiStatus: null }]
-              : [
-                  {
-                    OR: [
-                      { userStatus: filters.effectiveStatus },
-                      { userStatus: null, aiStatus: filters.effectiveStatus },
-                    ],
-                  },
-                ]
-            : []),
-        ],
-      },
-      take: limit + 1,
-      skip: offset,
-      orderBy,
-      include: enrichment,
+          : []),
+      ],
+    },
+    take: limit + 1,
+    skip: offset,
+    orderBy,
+    include: enrichment,
+  });
+
+  const recent = await loadRecentEvents(
+    prisma,
+    applications.map((app) => app.id),
+  );
+  return applications.map((app) => mapToResponse(userId, app, recent.get(app.id) ?? null));
+}
+
+export async function getApplication(
+  userId: string,
+  id: string,
+  db: Db = prisma,
+): Promise<ApplicationResponse | null> {
+  const app = await db.application.findFirst({ where: { id, userId }, include: enrichment });
+  if (!app) return null;
+  const recent = await loadRecentEvents(db, [app.id]);
+  return mapToResponse(userId, app, recent.get(app.id) ?? null);
+}
+
+/**
+ * Owned manual status correction. One transaction locks the application row by id AND owner,
+ * compares the manual revision BEFORE no-op detection, then writes only manual fields.
+ * Locks no email (compatible with matcher's email → application order), makes no external call,
+ * enqueues nothing and never touches aiStatus, events, actions or AI operation/budget records.
+ */
+export async function updateUserStatus(
+  userId: string,
+  id: string,
+  request: UpdateApplicationStatusRequest,
+): Promise<{ application: ApplicationResponse; changed: boolean }> {
+  return prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<
+      { userStatus: string | null; userStatusRevision: number; archivedAt: Date | null }[]
+    >`
+      SELECT "userStatus", "userStatusRevision", "archivedAt" FROM applications
+      WHERE id = ${id}::uuid AND "userId" = ${userId}::uuid
+      FOR UPDATE`;
+    if (!locked.length) throw new AppError(404, 'NOT_FOUND', 'Application not found');
+    const current = locked[0];
+    if (current.archivedAt) throw new AppError(409, 'APPLICATION_ARCHIVED', CHANGE_REJECTED);
+    if (current.userStatusRevision !== request.expectedUserStatusRevision)
+      throw new AppError(
+        409,
+        'STATUS_CONFLICT',
+        'The application status was changed elsewhere. Reload it before saving again.',
+      );
+
+    const changed = current.userStatus !== request.userStatus;
+    if (changed) {
+      await tx.application.update({
+        where: { id },
+        data: {
+          userStatus: request.userStatus,
+          userStatusSetAt: request.userStatus === null ? null : new Date(),
+          userStatusRevision: { increment: 1 },
+        },
+      });
+    }
+    // Same transaction snapshot as the acknowledged write.
+    const application = await getApplication(userId, id, tx);
+    if (!application) throw new AppError(404, 'NOT_FOUND', 'Application not found');
+    return { application, changed };
+  });
+}
+
+/**
+ * Returns the timeline events for a specific application.
+ * Verifies that the application belongs to the requesting user.
+ * Ordered by recording time (createdAt ASC, then id ASC) — not a recruitment chronology.
+ */
+export async function getApplicationEvents(
+  userId: string,
+  applicationId: string,
+  limit = 20,
+  offset = 0,
+): Promise<ApplicationEventResponse[] | null> {
+  // Verify ownership before returning any data
+  const app = await prisma.application.findUnique({
+    where: { id: applicationId },
+    select: { userId: true },
+  });
+
+  if (!app) return null;
+  if (app.userId !== userId) return null; // caller should return 403
+
+  const events = await prisma.applicationEvent.findMany({
+    where: { applicationId },
+    take: limit + 1,
+    skip: offset,
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], // deterministic recording order
+    select: {
+      id: true,
+      retiredAt: true,
+      retiredReason: true,
+      applicationId: true,
+      emailId: true,
+      type: true,
+      oldState: true,
+      newState: true,
+      description: true,
+      provenance: true,
+      createdAt: true,
+      email: sourceEmailSelect, // one bounded relation query for the page
+      externalSubmission: sourceSubmissionSelect, // AUTOMATION_SUBMITTED evidence only
+    },
+  });
+
+  // Provenance of the AI result behind each event: one bounded query, owned source emails only.
+  const owned = events.flatMap((e) => (e.email && e.email.userId === userId ? [e.email.id] : []));
+  const provenance = new Map(
+    (owned.length
+      ? await prisma.aIProcessingResult.findMany({
+          where: { emailId: { in: owned } },
+          select: { emailId: true, provider: true, model: true },
+        })
+      : []
+    ).map((r) => [r.emailId, { provider: r.provider, model: r.model }]),
+  );
+
+  return events.map((e) => {
+    const { sourceEmail, foreign } = toSourceEmail(userId, e.email, {
+      applicationId,
+      eventId: e.id,
     });
-
-    const recent = await loadRecentEvents(
-      prisma,
-      applications.map((app) => app.id),
-    );
-    return applications.map((app) => this.mapToResponse(userId, app, recent.get(app.id) ?? null));
-  }
-
-  static async getApplication(
-    userId: string,
-    id: string,
-    db: Db = prisma,
-  ): Promise<ApplicationResponse | null> {
-    const app = await db.application.findFirst({ where: { id, userId }, include: enrichment });
-    if (!app) return null;
-    const recent = await loadRecentEvents(db, [app.id]);
-    return this.mapToResponse(userId, app, recent.get(app.id) ?? null);
-  }
-
-  /**
-   * Owned manual status correction. One transaction locks the application row by id AND owner,
-   * compares the manual revision BEFORE no-op detection, then writes only manual fields.
-   * Locks no email (compatible with matcher's email → application order), makes no external call,
-   * enqueues nothing and never touches aiStatus, events, actions or AI operation/budget records.
-   */
-  static async updateUserStatus(
-    userId: string,
-    id: string,
-    request: UpdateApplicationStatusRequest,
-  ): Promise<{ application: ApplicationResponse; changed: boolean }> {
-    return prisma.$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<
-        { userStatus: string | null; userStatusRevision: number; archivedAt: Date | null }[]
-      >`
-        SELECT "userStatus", "userStatusRevision", "archivedAt" FROM applications
-        WHERE id = ${id}::uuid AND "userId" = ${userId}::uuid
-        FOR UPDATE`;
-      if (!locked.length) throw new AppError(404, 'NOT_FOUND', 'Application not found');
-      const current = locked[0];
-      if (current.archivedAt) throw new AppError(409, 'APPLICATION_ARCHIVED', CHANGE_REJECTED);
-      if (current.userStatusRevision !== request.expectedUserStatusRevision)
-        throw new AppError(
-          409,
-          'STATUS_CONFLICT',
-          'The application status was changed elsewhere. Reload it before saving again.',
-        );
-
-      const changed = current.userStatus !== request.userStatus;
-      if (changed) {
-        await tx.application.update({
-          where: { id },
-          data: {
-            userStatus: request.userStatus,
-            userStatusSetAt: request.userStatus === null ? null : new Date(),
-            userStatusRevision: { increment: 1 },
-          },
-        });
-      }
-      // Same transaction snapshot as the acknowledged write.
-      const application = await this.getApplication(userId, id, tx);
-      if (!application) throw new AppError(404, 'NOT_FOUND', 'Application not found');
-      return { application, changed };
-    });
-  }
-
-  /**
-   * Returns the timeline events for a specific application.
-   * Verifies that the application belongs to the requesting user.
-   * Ordered by recording time (createdAt ASC, then id ASC) — not a recruitment chronology.
-   */
-  static async getApplicationEvents(
-    userId: string,
-    applicationId: string,
-    limit = 20,
-    offset = 0,
-  ): Promise<ApplicationEventResponse[] | null> {
-    // Verify ownership before returning any data
-    const app = await prisma.application.findUnique({
-      where: { id: applicationId },
-      select: { userId: true },
-    });
-
-    if (!app) return null;
-    if (app.userId !== userId) return null; // caller should return 403
-
-    const events = await prisma.applicationEvent.findMany({
-      where: { applicationId },
-      take: limit + 1,
-      skip: offset,
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], // deterministic recording order
-      select: {
-        id: true,
-        retiredAt: true,
-        retiredReason: true,
-        applicationId: true,
-        emailId: true,
-        type: true,
-        oldState: true,
-        newState: true,
-        description: true,
-        provenance: true,
-        createdAt: true,
-        email: sourceEmailSelect, // one bounded relation query for the page
-        externalSubmission: sourceSubmissionSelect, // AUTOMATION_SUBMITTED evidence only
-      },
-    });
-
-    // Provenance of the AI result behind each event: one bounded query, owned source emails only.
-    const owned = events.flatMap((e) => (e.email && e.email.userId === userId ? [e.email.id] : []));
-    const provenance = new Map(
-      (owned.length
-        ? await prisma.aIProcessingResult.findMany({
-            where: { emailId: { in: owned } },
-            select: { emailId: true, provider: true, model: true },
-          })
-        : []
-      ).map((r) => [r.emailId, { provider: r.provider, model: r.model }]),
-    );
-
-    return events.map((e) => {
-      const { sourceEmail, foreign } = toSourceEmail(userId, e.email, {
+    return {
+      id: e.id,
+      retiredAt: e.retiredAt?.toISOString() ?? null,
+      retiredReason: e.retiredReason,
+      applicationId: e.applicationId,
+      emailId: foreign ? null : e.emailId,
+      type: e.type,
+      oldState: e.oldState as ApplicationEventResponse['oldState'],
+      newState: e.newState as ApplicationEventResponse['newState'],
+      description: e.description,
+      provenance: e.provenance,
+      createdAt: e.createdAt,
+      recordedAt: e.createdAt.toISOString(),
+      sourceEmail,
+      analyzedBy: sourceEmail ? (provenance.get(sourceEmail.id) ?? null) : null,
+      sourceSubmission: toSourceSubmission(userId, e.type, e.externalSubmission, {
         applicationId,
         eventId: e.id,
-      });
-      return {
-        id: e.id,
-        retiredAt: e.retiredAt?.toISOString() ?? null,
-        retiredReason: e.retiredReason,
-        applicationId: e.applicationId,
-        emailId: foreign ? null : e.emailId,
-        type: e.type,
-        oldState: e.oldState as ApplicationEventResponse['oldState'],
-        newState: e.newState as ApplicationEventResponse['newState'],
-        description: e.description,
-        provenance: e.provenance,
-        createdAt: e.createdAt,
-        recordedAt: e.createdAt.toISOString(),
-        sourceEmail,
-        analyzedBy: sourceEmail ? (provenance.get(sourceEmail.id) ?? null) : null,
-        sourceSubmission: toSourceSubmission(userId, e.type, e.externalSubmission, {
-          applicationId,
-          eventId: e.id,
-        }),
-      };
-    });
-  }
-
-  /**
-   * Returns the actions for a specific application.
-   * Verifies that the application belongs to the requesting user.
-   * Ordered by deadline ASC (PENDING first), then createdAt ASC.
-   */
-  static async getApplicationActions(
-    userId: string,
-    applicationId: string,
-    limit = 20,
-    offset = 0,
-  ): Promise<ApplicationActionResponse[] | null> {
-    // Verify ownership
-    const app = await prisma.application.findUnique({
-      where: { id: applicationId },
-      select: { userId: true },
-    });
-
-    if (!app) return null;
-    if (app.userId !== userId) return null;
-
-    const actions = await prisma.action.findMany({
-      where: { applicationId, retiredAt: null },
-      take: limit + 1,
-      skip: offset,
-      orderBy: [
-        { status: 'desc' }, // PENDING before DISMISSED and COMPLETED
-        { deadline: 'asc' },
-        { createdAt: 'asc' },
-        { id: 'asc' },
-      ],
-      select: {
-        id: true,
-        applicationId: true,
-        emailId: true,
-        type: true,
-        description: true,
-        deadline: true,
-        deadlinePrecision: true,
-        origin: true,
-        actionRevision: true,
-        clientRequestId: true,
-        snoozedUntil: true,
-        status: true,
-        createdAt: true,
-      },
-    });
-
-    return actions.map((a) => ({
-      id: a.id,
-      applicationId: a.applicationId,
-      emailId: a.emailId,
-      type: a.type,
-      description: a.description,
-      deadline: a.deadline,
-      deadlinePrecision: a.deadlinePrecision,
-      origin: a.origin === 'USER' ? 'USER' : a.emailId ? 'EMAIL' : null,
-      actionRevision: a.actionRevision,
-      clientRequestId: a.clientRequestId,
-      snoozedUntil: a.snoozedUntil?.toISOString() ?? null,
-      status: a.status,
-      createdAt: a.createdAt,
-    }));
-  }
-
-  /** The single response mapper for create, list, detail and status PATCH. */
-  private static mapToResponse(
-    userId: string,
-    app: EnrichedApplication,
-    recent: RecentEventRow | null,
-  ): ApplicationResponse {
-    const aiStatus = app.aiStatus as ApplicationResponse['aiStatus'];
-    const userStatus = app.userStatus as ApplicationResponse['userStatus'];
-    return {
-      id: app.id,
-      archivedAt: app.archivedAt?.toISOString() ?? null,
-      archiveRevision: app.archiveRevision,
-      companyName: app.companyName,
-      jobTitle: app.jobTitle,
-      location: app.location,
-      aiStatus,
-      userStatus,
-      userStatusSetAt: app.userStatusSetAt,
-      userStatusRevision: app.userStatusRevision,
-      ...deriveStatus(aiStatus, userStatus),
-      appliedAt: app.appliedAt,
-      createdAt: app.createdAt,
-      updatedAt: app.updatedAt,
-      recentEvent: recent
-        ? {
-            type: recent.type,
-            createdAt: recent.createdAt,
-            recordedAt: recent.createdAt.toISOString(),
-            sourceEmail: toSourceEmail(userId, recent.email, {
-              applicationId: app.id,
-              eventId: recent.id,
-            }).sourceEmail,
-            sourceSubmission: toSourceSubmission(userId, recent.type, recent.submission, {
-              applicationId: app.id,
-              eventId: recent.id,
-            }),
-          }
-        : null,
-      pendingActionCount: app._count.actions,
-      submittedVia: app._count.externalSubmissions > 0 ? 'AUTOMATION' : null,
+      }),
     };
-  }
+  });
+}
+
+/**
+ * Returns the actions for a specific application.
+ * Verifies that the application belongs to the requesting user.
+ * Ordered by deadline ASC (PENDING first), then createdAt ASC.
+ */
+export async function getApplicationActions(
+  userId: string,
+  applicationId: string,
+  limit = 20,
+  offset = 0,
+): Promise<ApplicationActionResponse[] | null> {
+  // Verify ownership
+  const app = await prisma.application.findUnique({
+    where: { id: applicationId },
+    select: { userId: true },
+  });
+
+  if (!app) return null;
+  if (app.userId !== userId) return null;
+
+  const actions = await prisma.action.findMany({
+    where: { applicationId, retiredAt: null },
+    take: limit + 1,
+    skip: offset,
+    orderBy: [
+      { status: 'desc' }, // PENDING before DISMISSED and COMPLETED
+      { deadline: 'asc' },
+      { createdAt: 'asc' },
+      { id: 'asc' },
+    ],
+    select: {
+      id: true,
+      applicationId: true,
+      emailId: true,
+      type: true,
+      description: true,
+      deadline: true,
+      deadlinePrecision: true,
+      origin: true,
+      actionRevision: true,
+      clientRequestId: true,
+      snoozedUntil: true,
+      status: true,
+      createdAt: true,
+    },
+  });
+
+  return actions.map((a) => ({
+    id: a.id,
+    applicationId: a.applicationId,
+    emailId: a.emailId,
+    type: a.type,
+    description: a.description,
+    deadline: a.deadline,
+    deadlinePrecision: a.deadlinePrecision,
+    origin: a.origin === 'USER' ? 'USER' : a.emailId ? 'EMAIL' : null,
+    actionRevision: a.actionRevision,
+    clientRequestId: a.clientRequestId,
+    snoozedUntil: a.snoozedUntil?.toISOString() ?? null,
+    status: a.status,
+    createdAt: a.createdAt,
+  }));
+}
+
+/** The single response mapper for create, list, detail and status PATCH. */
+function mapToResponse(
+  userId: string,
+  app: EnrichedApplication,
+  recent: RecentEventRow | null,
+): ApplicationResponse {
+  const aiStatus = app.aiStatus as ApplicationResponse['aiStatus'];
+  const userStatus = app.userStatus as ApplicationResponse['userStatus'];
+  return {
+    id: app.id,
+    archivedAt: app.archivedAt?.toISOString() ?? null,
+    archiveRevision: app.archiveRevision,
+    companyName: app.companyName,
+    jobTitle: app.jobTitle,
+    location: app.location,
+    aiStatus,
+    userStatus,
+    userStatusSetAt: app.userStatusSetAt,
+    userStatusRevision: app.userStatusRevision,
+    ...deriveStatus(aiStatus, userStatus),
+    appliedAt: app.appliedAt,
+    createdAt: app.createdAt,
+    updatedAt: app.updatedAt,
+    recentEvent: recent
+      ? {
+          type: recent.type,
+          createdAt: recent.createdAt,
+          recordedAt: recent.createdAt.toISOString(),
+          sourceEmail: toSourceEmail(userId, recent.email, {
+            applicationId: app.id,
+            eventId: recent.id,
+          }).sourceEmail,
+          sourceSubmission: toSourceSubmission(userId, recent.type, recent.submission, {
+            applicationId: app.id,
+            eventId: recent.id,
+          }),
+        }
+      : null,
+    pendingActionCount: app._count.actions,
+    submittedVia: app._count.externalSubmissions > 0 ? 'AUTOMATION' : null,
+  };
 }

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
-import { AIProcessingResult } from '@prisma/client';
+import { AIProcessingResult, Prisma } from '@prisma/client';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
 import {
@@ -10,9 +10,8 @@ import {
   ListApplicationsResponseSchema,
   deriveStatus,
 } from '../contracts';
-import { ApplicationService } from '../services/application';
-import { MatcherService } from '../services/matcher';
-import { GmailFetcherService } from '../services/gmailFetcher';
+import { applyMatch } from '../services/matcher';
+import * as gmailFetcher from '../services/gmailFetcher';
 import { createProviderClient } from '../services/ai/providers';
 import { enqueueNotificationJob } from '../jobs/notificationJob';
 import { getQueue } from '../services/queue';
@@ -248,9 +247,16 @@ describe('PATCH /api/applications/:id/status', () => {
   });
 
   it('rolls back when the transaction fails after the write', async () => {
+    type Work = (tx: Prisma.TransactionClient) => Promise<unknown>;
+    const original = prisma.$transaction.bind(prisma) as (work: Work) => Promise<unknown>;
+    const failAfterWork = (work: Work) =>
+      original(async (tx) => {
+        await work(tx);
+        throw new Error('boom');
+      });
     const spy = vi
-      .spyOn(ApplicationService, 'getApplication')
-      .mockRejectedValueOnce(new Error('boom'));
+      .spyOn(prisma, '$transaction')
+      .mockImplementationOnce(failAfterWork as typeof prisma.$transaction);
     const res = await patch(id, { userStatus: 'OFFER', expectedUserStatusRevision: 0 });
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe('INTERNAL_SERVER_ERROR');
@@ -328,8 +334,8 @@ describe('PATCH /api/applications/:id/status', () => {
     await getQueue(); // the pgboss schema exists, so a zero job delta is meaningful
     vi.mocked(getQueue).mockClear();
     vi.mocked(enqueueNotificationJob).mockClear();
-    const metadata = vi.spyOn(GmailFetcherService, 'fetchMessageMetadata');
-    const body = vi.spyOn(GmailFetcherService, 'fetchMessageBody');
+    const metadata = vi.spyOn(gmailFetcher, 'fetchMessageMetadata');
+    const body = vi.spyOn(gmailFetcher, 'fetchMessageBody');
     const gemini = vi.mocked(createProviderClient);
     gemini.mockClear();
     const before = await sideEffectCounts();
@@ -369,12 +375,7 @@ describe('AI and manual state stay separate', () => {
         offerInfo: 'Offer',
       },
     });
-    await MatcherService.applyMatch(
-      email.id,
-      application.id,
-      result as AIProcessingResult,
-      'AI_AUTO',
-    );
+    await applyMatch(email.id, application.id, result as AIProcessingResult, 'AI_AUTO');
     const after = await row(application.id);
     expect(after.aiStatus).toBe('OFFER');
     expect(after.userStatus).toBe('REJECTED');

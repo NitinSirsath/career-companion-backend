@@ -4,7 +4,7 @@ import { prisma } from '../db/prisma';
 import { app } from '../index';
 import { assertTestDatabase } from '../utils/testDatabase';
 import { validateProductionConfig } from '../utils/config';
-import { MatcherService } from '../services/matcher';
+import { applyMatch, matchEmailToApplication } from '../services/matcher';
 vi.mock('../jobs/notificationJob', () => ({ enqueueNotificationJob: vi.fn() }));
 
 it('rejects test-like credentials/hosts when the actual database is development', () => {
@@ -80,7 +80,7 @@ describe('Domain ownership and concurrent processing', () => {
   });
   it('rejects cross-user matching before changing email state', async () => {
     const ai = await prisma.aIProcessingResult.findUniqueOrThrow({ where: { emailId } });
-    await expect(MatcherService.applyMatch(emailId, foreignId, ai, 'AI_AUTO')).rejects.toThrow(
+    await expect(applyMatch(emailId, foreignId, ai, 'AI_AUTO')).rejects.toThrow(
       'APPLICATION_NOT_FOUND',
     );
     expect(
@@ -103,9 +103,7 @@ describe('Domain ownership and concurrent processing', () => {
     ).rejects.toThrow();
   });
   it('creates one event and one action under duplicate concurrent execution', async () => {
-    await Promise.all(
-      Array.from({ length: 5 }, () => MatcherService.matchEmailToApplication(emailId)),
-    );
+    await Promise.all(Array.from({ length: 5 }, () => matchEmailToApplication(emailId)));
     expect(await prisma.action.count({ where: { emailId } })).toBe(1);
     expect(await prisma.applicationEvent.count({ where: { emailId } })).toBe(1);
   });
@@ -114,7 +112,7 @@ describe('Domain ownership and concurrent processing', () => {
       where: { id: emailId },
       data: { applicationId: null, matchState: 'IGNORED', matchConfirmedBy: 'USER_CONFIRMED' },
     });
-    await MatcherService.matchEmailToApplication(emailId);
+    await matchEmailToApplication(emailId);
     expect((await prisma.email.findUniqueOrThrow({ where: { id: emailId } })).matchState).toBe(
       'IGNORED',
     );

@@ -1,13 +1,19 @@
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../db/prisma';
-import { ActionService } from '../services/action';
+import {
+  createFollowUp,
+  editFollowUp,
+  getActionByRequest,
+  snoozeAction,
+  updateActionStatus,
+} from '../services/action';
 import { archiveApplication } from '../services/archive';
-import { ApplicationService } from '../services/application';
+import { listApplications } from '../services/application';
 import { readWorkspaceActions } from '../services/workspace';
 import { readAgenda, updateAgenda } from '../services/agenda';
 import { AgendaQuerySchema } from '../contracts/agenda';
-import { MatcherService } from '../services/matcher';
+import { correctEmailMatch, matchEmailToApplication } from '../services/matcher';
 import { recordSubmission } from '../services/externalSubmission';
 import { candidateEnvelope } from '../services/ai/temporal';
 vi.mock('../jobs/notificationJob', () => ({ enqueueNotificationJob: vi.fn() }));
@@ -49,64 +55,64 @@ afterAll(async () => {
 it('concurrent creation and response-loss replay retain one identity even after an edit', async () => {
   const request = draft();
   const [a, b] = await Promise.all([
-    ActionService.createFollowUp(owner, appId, request),
-    ActionService.createFollowUp(owner, appId, request),
+    createFollowUp(owner, appId, request),
+    createFollowUp(owner, appId, request),
   ]);
   expect(a.id).toBe(b.id);
-  const edited = await ActionService.editFollowUp(owner, a.id, {
+  const edited = await editFollowUp(owner, a.id, {
     expectedActionRevision: 0,
     description: 'Edited personal intent',
     deadline: null,
   });
-  expect(await ActionService.createFollowUp(owner, appId, request)).toMatchObject({
+  expect(await createFollowUp(owner, appId, request)).toMatchObject({
     id: a.id,
     description: edited.description,
     actionRevision: 1,
   });
-  expect(await ActionService.byRequest(owner, request.clientRequestId)).toMatchObject({ id: a.id });
+  expect(await getActionByRequest(owner, request.clientRequestId)).toMatchObject({ id: a.id });
   await expect(
-    ActionService.createFollowUp(owner, appId, { ...request, description: 'Different' }),
+    createFollowUp(owner, appId, { ...request, description: 'Different' }),
   ).rejects.toMatchObject({ code: 'REQUEST_CONFLICT' });
-  await expect(ActionService.byRequest(foreign, request.clientRequestId)).rejects.toMatchObject({
+  await expect(getActionByRequest(foreign, request.clientRequestId)).rejects.toMatchObject({
     status: 404,
   });
-  await expect(ActionService.createFollowUp(foreign, otherApp, request)).rejects.toMatchObject({
+  await expect(createFollowUp(foreign, otherApp, request)).rejects.toMatchObject({
     status: 404,
   });
   expect(await prisma.aIOperation.count({ where: { email: { userId: owner } } })).toBe(0);
   expect(await prisma.action.count({ where: { applicationId: appId } })).toBe(1);
 });
 it('requires frozen revisions for personal work and preserves email evidence', async () => {
-  const a = await ActionService.createFollowUp(owner, appId, draft());
-  await expect(ActionService.updateActionStatus(owner, a.id, 'COMPLETED')).rejects.toMatchObject({
+  const a = await createFollowUp(owner, appId, draft());
+  await expect(updateActionStatus(owner, a.id, 'COMPLETED')).rejects.toMatchObject({
     code: 'REVISION_REQUIRED',
   });
-  await ActionService.updateActionStatus(owner, a.id, 'COMPLETED', 0);
-  await expect(ActionService.updateActionStatus(owner, a.id, 'COMPLETED', 0)).rejects.toMatchObject(
-    { code: 'REVISION_CONFLICT' },
-  );
+  await updateActionStatus(owner, a.id, 'COMPLETED', 0);
+  await expect(updateActionStatus(owner, a.id, 'COMPLETED', 0)).rejects.toMatchObject({
+    code: 'REVISION_CONFLICT',
+  });
   const legacy = await prisma.action.create({
     data: { applicationId: appId, type: 'ACTION_REQUIRED', description: 'Source text' },
   });
   await expect(
-    ActionService.editFollowUp(owner, legacy.id, {
+    editFollowUp(owner, legacy.id, {
       expectedActionRevision: 0,
       description: 'Override',
       deadline: null,
     }),
   ).rejects.toMatchObject({ code: 'EMAIL_EVIDENCE_READ_ONLY' });
-  expect(await ActionService.updateActionStatus(owner, legacy.id, 'DISMISSED')).toMatchObject({
+  expect(await updateActionStatus(owner, legacy.id, 'DISMISSED')).toMatchObject({
     actionRevision: 1,
   });
 });
 it('snooze partitions full counts, retains deadline, wakes on read and suppresses notifications durably', async () => {
   const rows = await Promise.all(
-    Array.from({ length: 25 }, () => ActionService.createFollowUp(owner, appId, draft())),
+    Array.from({ length: 25 }, () => createFollowUp(owner, appId, draft())),
   );
   const until = '2026-10-03T07:00:00.000Z';
   await Promise.all(
     rows.map((a) =>
-      ActionService.snooze(owner, a.id, { expectedActionRevision: 0, snoozedUntil: until }, now),
+      snoozeAction(owner, a.id, { expectedActionRevision: 0, snoozedUntil: until }, now),
     ),
   );
   const visible = await readWorkspaceActions(owner, query, now),
@@ -138,12 +144,12 @@ it('snooze partitions full counts, retains deadline, wakes on read and suppresse
       },
     }),
   ).toBe(25);
-  await ActionService.updateActionStatus(owner, rows[0].id, 'COMPLETED', 1);
+  await updateActionStatus(owner, rows[0].id, 'COMPLETED', 1);
   expect(
     (await prisma.action.findUniqueOrThrow({ where: { id: rows[0].id } })).snoozedUntil,
   ).toBeNull();
   await expect(
-    ActionService.snooze(
+    snoozeAction(
       owner,
       rows[1].id,
       { expectedActionRevision: 1, snoozedUntil: now.toISOString() },
@@ -151,7 +157,7 @@ it('snooze partitions full counts, retains deadline, wakes on read and suppresse
     ),
   ).rejects.toMatchObject({ code: 'INVALID_SNOOZE' });
   await expect(
-    ActionService.snooze(
+    snoozeAction(
       owner,
       rows[1].id,
       { expectedActionRevision: 1, snoozedUntil: '2028-01-01T00:00:00Z' },
@@ -194,12 +200,12 @@ async function mail(applicationId = appId) {
       ]),
     },
   });
-  await MatcherService.matchEmailToApplication(email.id);
+  await matchEmailToApplication(email.id);
   return email;
 }
 it('archive/restore preserves independent status, agenda, linked mail and receipts', async () => {
   vi.stubEnv('AGENDA_EXTRACTION_V3_ENABLED', 'true');
-  const a = await ActionService.createFollowUp(owner, appId, draft());
+  const a = await createFollowUp(owner, appId, draft());
   const e = await mail();
   const agenda = await prisma.agendaItem.findFirstOrThrow({ where: { emailId: e.id } });
   await updateAgenda(owner, agenda.id, { expectedRevision: 0, state: 'CONFIRMED' });
@@ -213,12 +219,8 @@ it('archive/restore preserves independent status, agenda, linked mail and receip
     userStatusRevision: 4,
     userStatus: 'OFFER',
   });
-  expect((await ApplicationService.listApplications(owner)).some((a) => a.id === appId)).toBe(
-    false,
-  );
-  expect(
-    (await ApplicationService.listApplications(owner, 20, 0, { archive: 'archived' }))[0].id,
-  ).toBe(appId);
+  expect((await listApplications(owner)).some((a) => a.id === appId)).toBe(false);
+  expect((await listApplications(owner, 20, 0, { archive: 'archived' }))[0].id).toBe(appId);
   expect((await readWorkspaceActions(owner, query, now)).counts.totalPending).toBe(0);
   expect(
     (await readAgenda(owner, AgendaQuerySchema.parse({ view: 'upcoming' }), 20, 0, now)).items,
@@ -234,12 +236,12 @@ it('archive/restore preserves independent status, agenda, linked mail and receip
       )
     ).items,
   ).toHaveLength(1);
-  await expect(ActionService.createFollowUp(owner, appId, draft())).rejects.toMatchObject({
+  await expect(createFollowUp(owner, appId, draft())).rejects.toMatchObject({
     code: 'APPLICATION_ARCHIVED',
   });
-  await expect(ActionService.updateActionStatus(owner, a.id, 'COMPLETED', 0)).rejects.toMatchObject(
-    { code: 'APPLICATION_ARCHIVED' },
-  );
+  await expect(updateActionStatus(owner, a.id, 'COMPLETED', 0)).rejects.toMatchObject({
+    code: 'APPLICATION_ARCHIVED',
+  });
   await expect(
     updateAgenda(owner, agenda.id, { expectedRevision: 1, state: 'CANCELLED' }),
   ).rejects.toMatchObject({ code: 'APPLICATION_ARCHIVED' });
@@ -264,7 +266,7 @@ it('archive/restore preserves independent status, agenda, linked mail and receip
       jobTitle: source.jobTitle,
     },
   });
-  await MatcherService.matchEmailToApplication(next.id);
+  await matchEmailToApplication(next.id);
   expect((await prisma.email.findUniqueOrThrow({ where: { id: next.id } })).applicationId).toBe(
     appId,
   );
@@ -279,19 +281,19 @@ it('archive/restore preserves independent status, agenda, linked mail and receip
   expect((await prisma.agendaItem.findUniqueOrThrow({ where: { id: agenda.id } })).state).toBe(
     'CONFIRMED',
   );
-  expect((await ActionService.byRequest(owner, a.clientRequestId!)).id).toBe(a.id);
+  expect((await getActionByRequest(owner, a.clientRequestId!)).id).toBe(a.id);
 });
 it('correction carries snooze and increments revisions without moving personal work', async () => {
-  const personal = await ActionService.createFollowUp(owner, appId, draft());
+  const personal = await createFollowUp(owner, appId, draft());
   const e = await mail();
   const action = await prisma.action.findFirstOrThrow({ where: { emailId: e.id } });
-  await ActionService.snooze(
+  await snoozeAction(
     owner,
     action.id,
     { expectedActionRevision: 0, snoozedUntil: '2026-10-03T07:00:00Z' },
     now,
   );
-  await MatcherService.correctEmailMatch(owner, e.id, {
+  await correctEmailMatch(owner, e.id, {
     expectedMatchState: 'MATCHED',
     expectedApplicationId: appId,
     applicationId: otherApp,
@@ -389,10 +391,10 @@ it('MCP intake waits on an observed archive row lock and routes the stale candid
   }
 });
 it('competing archive and personal edit serialize without changing archived work', async () => {
-  const a = await ActionService.createFollowUp(owner, appId, draft());
+  const a = await createFollowUp(owner, appId, draft());
   const outcomes = await Promise.allSettled([
     archiveApplication(owner, appId, { archived: true, expectedArchiveRevision: 0 }),
-    ActionService.editFollowUp(owner, a.id, {
+    editFollowUp(owner, a.id, {
       expectedActionRevision: 0,
       description: 'Edited',
       deadline: null,
@@ -404,7 +406,7 @@ it('competing archive and personal edit serialize without changing archived work
   else
     expect((await prisma.action.findUniqueOrThrow({ where: { id: a.id } })).actionRevision).toBe(1);
   await expect(
-    ActionService.editFollowUp(owner, a.id, {
+    editFollowUp(owner, a.id, {
       expectedActionRevision: 1,
       description: 'After archive',
       deadline: null,

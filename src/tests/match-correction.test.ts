@@ -5,9 +5,14 @@ import { Prisma } from '@prisma/client';
 import { recordSubmission } from '../services/externalSubmission';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
-import { MatcherService } from '../services/matcher';
-import { ApplicationService } from '../services/application';
-import { ActionService } from '../services/action';
+import { applyMatch, correctEmailMatch, matchEmailToApplication } from '../services/matcher';
+import {
+  getApplication,
+  getApplicationActions,
+  getApplicationEvents,
+  updateUserStatus,
+} from '../services/application';
+import { getUserActions } from '../services/action';
 import { enqueueNotificationJob } from '../jobs/notificationJob';
 vi.mock('../jobs/notificationJob', () => ({ enqueueNotificationJob: vi.fn() }));
 let owner: string;
@@ -56,11 +61,11 @@ async function mail(category: 'INTERVIEW' | 'RECRUITER' = 'INTERVIEW', applicati
       companyName: 'A',
     },
   });
-  await MatcherService.applyMatch(email.id, applicationId, result, 'AI_AUTO');
+  await applyMatch(email.id, applicationId, result, 'AI_AUTO');
   return email.id;
 }
 const change = (emailId: string, target: string | null, expected = a) =>
-  MatcherService.correctEmailMatch(owner, emailId, {
+  correctEmailMatch(owner, emailId, {
     applicationId: target,
     expectedApplicationId: expected,
     expectedMatchState: 'MATCHED',
@@ -93,7 +98,7 @@ it('moves without deleting evidence or changing user status, and recomputes the 
   ).toMatchObject({ status: 'DISMISSED', retiredAt: null });
   expect(enqueueNotificationJob).not.toHaveBeenCalled();
   expect(await prisma.aIOperation.count({ where: { email: { userId: owner } } })).toBe(0);
-  const timeline = await ApplicationService.getApplicationEvents(owner, a);
+  const timeline = await getApplicationEvents(owner, a);
   expect(timeline!.find((e) => e.emailId === interview)).toMatchObject({
     retiredReason: 'EMAIL_MOVED',
     retiredAt: expect.any(String),
@@ -108,9 +113,9 @@ it('unlinks, hides retired actions and excludes retired events from recent evide
     applicationId: null,
     matchConfirmedBy: 'USER_CONFIRMED',
   });
-  expect(await ActionService.getUserActions(owner)).toEqual([]);
-  expect(await ApplicationService.getApplicationActions(owner, a)).toEqual([]);
-  expect(await ApplicationService.getApplication(owner, a)).toMatchObject({
+  expect(await getUserActions(owner)).toEqual([]);
+  expect(await getApplicationActions(owner, a)).toEqual([]);
+  expect(await getApplication(owner, a)).toMatchObject({
     aiStatus: null,
     pendingActionCount: 0,
     recentEvent: null,
@@ -139,7 +144,7 @@ it('reactivates old rows when moved back without reopening handled actions', asy
     retiredAt: null,
   });
   const before = await prisma.applicationEvent.findMany({ where: { emailId: id } });
-  await MatcherService.matchEmailToApplication(id);
+  await matchEmailToApplication(id);
   expect(await prisma.applicationEvent.findMany({ where: { emailId: id } })).toEqual(before);
 });
 it('links an ignored email and rejects stale or foreign requests identically', async () => {
@@ -215,7 +220,7 @@ it('rechecks a stale thread decision after correction and stops after unlink', a
     }
     return row;
   });
-  const pending = MatcherService.matchEmailToApplication(later.id);
+  const pending = matchEmailToApplication(later.id);
   try {
     await entered;
     await change(id, b);
@@ -243,7 +248,7 @@ it('rechecks a stale thread decision after correction and stops after unlink', a
       processingStatus: 'COMPLETED',
     },
   });
-  await MatcherService.matchEmailToApplication(future.id);
+  await matchEmailToApplication(future.id);
   expect((await prisma.email.findUniqueOrThrow({ where: { id: future.id } })).matchState).toBe(
     'UNMATCHED',
   );
@@ -291,7 +296,7 @@ it('refuses a move without stored AI but still permits unlink', async () => {
 it('does not automatically move a matched email when company evidence changes', async () => {
   const id = await mail();
   await prisma.aIProcessingResult.update({ where: { emailId: id }, data: { companyName: 'B' } });
-  await MatcherService.matchEmailToApplication(id);
+  await matchEmailToApplication(id);
   expect((await prisma.email.findUniqueOrThrow({ where: { id } })).applicationId).toBe(a);
   expect(await prisma.applicationEvent.count({ where: { emailId: id, applicationId: b } })).toBe(0);
 });
@@ -343,7 +348,7 @@ it.each(['status', 'submission'] as const)(
     const pid = await reached;
     const competing =
       kind === 'status'
-        ? ApplicationService.updateUserStatus(owner, a, {
+        ? updateUserStatus(owner, a, {
             userStatus: 'REJECTED',
             expectedUserStatusRevision: 7,
           })

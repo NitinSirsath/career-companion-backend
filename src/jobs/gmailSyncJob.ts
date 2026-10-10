@@ -3,12 +3,7 @@ import { SyncQueueError, SyncSupersededError } from '../services/gmailSyncErrors
 import { randomUUID } from 'crypto';
 import { prisma } from '../db/prisma';
 import { getQueue } from '../services/queue';
-import {
-  GmailSyncService,
-  GmailAuthError,
-  SyncInProgressError,
-  syncLease,
-} from '../services/gmailSync';
+import { GmailAuthError, SyncInProgressError, syncLease, syncUser } from '../services/gmailSync';
 import { logDebug, logError } from '../utils/log';
 
 export const GMAIL_SYNC_EXPIRE_SECONDS = 300;
@@ -73,7 +68,7 @@ export interface GmailSyncJobData {
 export async function handleGmailSyncJobs(jobs: JobWithMetadata<GmailSyncJobData>[]) {
   for (const job of jobs) {
     try {
-      await GmailSyncService.syncUser(job.data.userId, job.data.claim, {
+      await syncUser(job.data.userId, job.data.claim, {
         trigger: job.data.trigger,
         jobId: job.id,
         retryCount: job.retryCount,

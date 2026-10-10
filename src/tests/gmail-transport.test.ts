@@ -9,9 +9,9 @@ import {
   createGoogleOAuthClient,
   GOOGLE_OAUTH_TIMEOUT_MS,
 } from '../services/googleTransport';
-import { GmailSyncService } from '../services/gmailSync';
+import { syncUser } from '../services/gmailSync';
 import { handleGmailSyncJobs } from '../jobs/gmailSyncJob';
-import { GmailFetcherService } from '../services/gmailFetcher';
+import { fetchMessageBody, fetchMessageMetadata } from '../services/gmailFetcher';
 import { app } from '../index';
 import type { JobWithMetadata } from 'pg-boss';
 import type { GmailSyncJobData } from '../jobs/gmailSyncJob';
@@ -248,11 +248,11 @@ it('passes signals through both email fetches', async () => {
   const controller = new AbortController();
   handlers.set(messagePath, () => controller.abort());
   await expect(
-    GmailFetcherService.fetchMessageMetadata(userId, 'fixture', { signal: controller.signal }),
+    fetchMessageMetadata(userId, 'fixture', { signal: controller.signal }),
   ).rejects.toThrow();
   hits.clear();
   await expect(
-    GmailFetcherService.fetchMessageBody(userId, 'fixture', { signal: controller.signal }),
+    fetchMessageBody(userId, 'fixture', { signal: controller.signal }),
   ).rejects.toThrow();
   expect(hits.size).toBe(0);
 });
@@ -311,9 +311,9 @@ it.each(['deadline', 'cancel', 'timeout', 'quota', 'forbidden', 'network'] as co
 it('makes no Google call for a pre-cancelled sync delivery', async () => {
   const controller = new AbortController();
   controller.abort();
-  await expect(
-    GmailSyncService.syncUser(userId, undefined, { signal: controller.signal }),
-  ).rejects.toMatchObject({ name: 'SyncCancelledError' });
+  await expect(syncUser(userId, undefined, { signal: controller.signal })).rejects.toMatchObject({
+    name: 'SyncCancelledError',
+  });
   expect(hits.size).toBe(0);
 });
 it.each(['token', 'profile'])(

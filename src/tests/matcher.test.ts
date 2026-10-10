@@ -1,9 +1,9 @@
-import { MatcherService } from '../services/matcher';
+import { matchEmailToApplication } from '../services/matcher';
 import { prisma } from '../db/prisma';
 import { ApplicationStatus, EmailMatchState, MatchConfirmationSource } from '@prisma/client';
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 
-describe('MatcherService', () => {
+describe('matcher', () => {
   let user: { id: string; email: string; googleId: string | null };
 
   beforeAll(async () => {
@@ -59,7 +59,7 @@ describe('MatcherService', () => {
       },
     });
 
-    await MatcherService.matchEmailToApplication(newEmail.id);
+    await matchEmailToApplication(newEmail.id);
 
     const updatedEmail = await prisma.email.findUnique({ where: { id: newEmail.id } });
     expect(updatedEmail?.applicationId).toBe(app.id);
@@ -88,7 +88,7 @@ describe('MatcherService', () => {
       },
     });
 
-    await MatcherService.matchEmailToApplication(newEmail.id);
+    await matchEmailToApplication(newEmail.id);
 
     const updatedEmail = await prisma.email.findUnique({ where: { id: newEmail.id } });
     expect(updatedEmail?.applicationId).toBe(app.id);
@@ -119,7 +119,7 @@ describe('MatcherService', () => {
       },
     });
 
-    await MatcherService.matchEmailToApplication(newEmail.id);
+    await matchEmailToApplication(newEmail.id);
 
     const updatedEmail = await prisma.email.findUnique({ where: { id: newEmail.id } });
     expect(updatedEmail?.applicationId).toBeNull();
@@ -148,7 +148,7 @@ describe('MatcherService', () => {
       },
     });
 
-    await MatcherService.matchEmailToApplication(newEmail.id);
+    await matchEmailToApplication(newEmail.id);
 
     const updatedApp = await prisma.application.findUnique({ where: { id: app.id } });
     expect(updatedApp?.aiStatus).toBe(ApplicationStatus.OFFER);
@@ -182,7 +182,7 @@ describe('MatcherService', () => {
       },
     });
 
-    await MatcherService.matchEmailToApplication(newEmail.id);
+    await matchEmailToApplication(newEmail.id);
 
     const updatedApp = await prisma.application.findUnique({ where: { id: app.id } });
     expect(updatedApp?.aiStatus).toBe(ApplicationStatus.OFFER); // Should not regress
@@ -216,8 +216,8 @@ describe('MatcherService', () => {
       },
     });
 
-    await MatcherService.matchEmailToApplication(newEmail.id);
-    await MatcherService.matchEmailToApplication(newEmail.id); // Process again
+    await matchEmailToApplication(newEmail.id);
+    await matchEmailToApplication(newEmail.id); // Process again
 
     const events = await prisma.applicationEvent.findMany({ where: { applicationId: app.id } });
     expect(events.length).toBe(1); // Only 1 event
@@ -255,7 +255,7 @@ describe('MatcherService', () => {
       },
     });
 
-    await MatcherService.matchEmailToApplication(newEmail.id);
+    await matchEmailToApplication(newEmail.id);
 
     const updatedEmail = await prisma.email.findUnique({ where: { id: newEmail.id } });
     expect(updatedEmail?.applicationId).toBeNull(); // Should not match user2's app
@@ -294,7 +294,7 @@ describe('MatcherService', () => {
       },
     });
 
-    await MatcherService.matchEmailToApplication(newEmail.id);
+    await matchEmailToApplication(newEmail.id);
 
     const updatedEmail = await prisma.email.findUnique({ where: { id: newEmail.id } });
 

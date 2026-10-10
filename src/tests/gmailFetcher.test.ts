@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { GmailFetcherService } from '../services/gmailFetcher';
+import { fetchMessageBody } from '../services/gmailFetcher';
 import { prisma } from '../db/prisma';
 import { encryptToken } from '../utils/gmailTokenEncryption';
 
@@ -72,7 +72,7 @@ describe('Gmail Fetcher Service (COM-25)', () => {
       },
     });
 
-    const body = await GmailFetcherService.fetchMessageBody(testUser.id, 'msg-123');
+    const body = await fetchMessageBody(testUser.id, 'msg-123');
     expect(body).toBe('Hello World !');
   });
 
@@ -84,7 +84,7 @@ describe('Gmail Fetcher Service (COM-25)', () => {
       },
     });
 
-    await expect(GmailFetcherService.fetchMessageBody(testUser.id, 'msg-401')).rejects.toThrow();
+    await expect(fetchMessageBody(testUser.id, 'msg-401')).rejects.toThrow();
     expect(
       (await prisma.gmailConnection.findUniqueOrThrow({ where: { userId: testUser.id } })).status,
     ).toBe('REVOKED');

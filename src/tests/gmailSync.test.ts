@@ -8,7 +8,7 @@ vi.mock('../jobs/emailProcessingJob', () => ({
   enqueueEmailProcessingJob: vi.fn().mockResolvedValue(undefined),
 }));
 
-describe('GmailSyncService Helpers', () => {
+describe('gmailSync helpers', () => {
   describe('extractHeaders', () => {
     it('extracts Subject, From, and Date correctly', () => {
       const headers = [

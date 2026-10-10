@@ -4,7 +4,7 @@ import request from 'supertest';
 import { AIProcessingResult, Prisma } from '@prisma/client';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
-import { MatcherService } from '../services/matcher';
+import { applyMatch, matchEmailToApplication, resolveEmailMatch } from '../services/matcher';
 
 vi.mock('../jobs/notificationJob', () => ({ enqueueNotificationJob: vi.fn() }));
 
@@ -86,9 +86,7 @@ describe('distinct and duplicate processing', () => {
       ),
     );
     await Promise.all(
-      emails.map(({ email, result }) =>
-        MatcherService.applyMatch(email.id, target.id, result, 'AI_AUTO'),
-      ),
+      emails.map(({ email, result }) => applyMatch(email.id, target.id, result, 'AI_AUTO')),
     );
     for (const { email } of emails) {
       const e = await effects(email.id);
@@ -111,9 +109,7 @@ describe('distinct and duplicate processing', () => {
       category: 'INTERVIEW',
       actionRequired: true,
     });
-    await Promise.all(
-      Array.from({ length: 5 }, () => MatcherService.matchEmailToApplication(email.id)),
-    );
+    await Promise.all(Array.from({ length: 5 }, () => matchEmailToApplication(email.id)));
     const e = await effects(email.id);
     expect(e.events).toHaveLength(1);
     expect(e.actions).toHaveLength(1);
@@ -145,10 +141,10 @@ describe('stale automatic selection versus user decisions', () => {
       actionRequired: true,
     });
     const pause = pauseAfterCandidateRead();
-    const matching = MatcherService.matchEmailToApplication(email.id);
+    const matching = matchEmailToApplication(email.id);
     await pause.arrived;
     vi.mocked(prisma.application.findMany).mockRestore();
-    await MatcherService.resolveEmailMatch(owner, email.id, chosen.id);
+    await resolveEmailMatch(owner, email.id, chosen.id);
     pause.open();
     await matching;
     const e = await effects(email.id);
@@ -167,10 +163,10 @@ describe('stale automatic selection versus user decisions', () => {
     await application('Twin Co', { jobTitle: 'B' });
     const { email } = await relevantEmail('stale-ignore', { companyName: 'Twin Co' }, 'AMBIGUOUS');
     const pause = pauseAfterCandidateRead();
-    const matching = MatcherService.matchEmailToApplication(email.id);
+    const matching = matchEmailToApplication(email.id);
     await pause.arrived;
     vi.mocked(prisma.application.findMany).mockRestore();
-    await MatcherService.resolveEmailMatch(owner, email.id, null);
+    await resolveEmailMatch(owner, email.id, null);
     pause.open();
     await matching;
     expect((await effects(email.id)).email).toEqual({
@@ -195,9 +191,9 @@ describe('stale automatic selection versus user decisions', () => {
       await b.gate;
       return original(args as never);
     }) as never);
-    const resolving = MatcherService.resolveEmailMatch(owner, email.id, chosen.id);
+    const resolving = resolveEmailMatch(owner, email.id, chosen.id);
     await b.arrived; // user read UNMATCHED; now the automatic match commits first
-    await MatcherService.applyMatch(email.id, auto.id, result, 'AI_AUTO');
+    await applyMatch(email.id, auto.id, result, 'AI_AUTO');
     b.open();
     await expect(resolving).rejects.toThrow('INVALID_MATCH_STATE');
     const e = await effects(email.id);
@@ -266,10 +262,7 @@ describe('competing user resolutions', () => {
     await application('Same Co');
     await application('Same Co');
     const { email } = await relevantEmail('ambiguous', { companyName: 'Same Co' });
-    await Promise.all([
-      MatcherService.matchEmailToApplication(email.id),
-      MatcherService.matchEmailToApplication(email.id),
-    ]);
+    await Promise.all([matchEmailToApplication(email.id), matchEmailToApplication(email.id)]);
     expect((await effects(email.id)).email.matchState).toBe('AMBIGUOUS');
     expect(await prisma.application.count({ where: { userId: owner } })).toBe(2);
   });

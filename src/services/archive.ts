@@ -2,7 +2,7 @@ import { prisma } from '../db/prisma';
 import { ArchiveApplication } from '../contracts/application';
 import { lockUser, LOCK_NAMESPACE } from '../utils/advisoryLock';
 import { AppError, CHANGE_REJECTED } from '../errors';
-import { ApplicationService } from './application';
+import { getApplication } from './application';
 import { suppressNotifications } from './notificationSuppression';
 export async function archiveApplication(userId: string, id: string, request: ArchiveApplication) {
   return prisma.$transaction(async (tx) => {
@@ -31,6 +31,6 @@ export async function archiveApplication(userId: string, id: string, request: Ar
         );
       }
     }
-    return ApplicationService.getApplication(userId, id, tx);
+    return getApplication(userId, id, tx);
   });
 }

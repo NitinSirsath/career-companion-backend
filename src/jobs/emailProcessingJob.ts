@@ -2,14 +2,11 @@ import type { JobWithMetadata } from 'pg-boss';
 import { getQueue } from '../services/queue';
 import { prisma } from '../db/prisma';
 import { AIAccessError, AIProviderError, TerminalAIError } from '../services/ai/errors';
-import { EmailAIPipeline } from '../services/ai/pipeline';
+import { processEmail } from '../services/ai/pipeline';
 import { logDebug, logEvent, logWarn, logError } from '../utils/log';
 
 export const EMAIL_PROCESSING_JOB = 'email-processing-job';
 export const EMAIL_RETRY_LIMIT = 3;
-// 300s expiry + ~120s detection + 60 * 2^3 backoff; also clears the
-// 15-minute uncertain AI claim threshold by five minutes.
-export const EMAIL_PROCESSING_STUCK_MS = 20 * 60_000;
 
 export interface EmailProcessingJobData {
   userId: string;
@@ -106,7 +103,7 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
       where: { id: emailId, userId, processingState: { not: 'COMPLETED' } },
       data: { processingState: 'PROCESSING' },
     });
-    await EmailAIPipeline.processEmail(userId, emailId, { signal: job.signal });
+    await processEmail(userId, emailId, { signal: job.signal });
     logDebug('job_completed', {
       jobId: job.id,
       emailId,

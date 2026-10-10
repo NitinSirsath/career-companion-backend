@@ -53,17 +53,11 @@
     }
   },
   "src/routes/auth.ts": {
-    "no-restricted-imports": {
-      "count": 1
-    },
     "no-restricted-properties": {
       "count": 7
     }
   },
   "src/routes/gmail.ts": {
-    "no-restricted-imports": {
-      "count": 1
-    },
     "no-restricted-properties": {
       "count": 5
     }

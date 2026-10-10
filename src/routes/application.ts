@@ -1,5 +1,5 @@
 import { archiveApplication } from '../services/archive';
-import { ActionService } from '../services/action';
+import { createFollowUp } from '../services/action';
 import { CreateFollowUpSchema, ArchiveApplicationSchema } from '../contracts';
 import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
@@ -8,7 +8,14 @@ import {
   CreateApplicationRequestSchema,
   UpdateApplicationStatusRequestSchema,
 } from '../contracts';
-import { ApplicationService } from '../services/application';
+import {
+  createApplication,
+  getApplication,
+  getApplicationActions,
+  getApplicationEvents,
+  listApplications,
+  updateUserStatus,
+} from '../services/application';
 import { requireAuth } from '../middleware/auth';
 
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
@@ -23,7 +30,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     const data = CreateApplicationRequestSchema.parse(req.body);
     const userId = req.auth!.user.id;
 
-    const application = await ApplicationService.createApplication(userId, data);
+    const application = await createApplication(userId, data);
     res.status(201).json(application);
   } catch (err) {
     next(err);
@@ -35,7 +42,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.auth!.user.id;
     const { limit, offset } = getPaginationParams(req.query);
 
-    const applications = await ApplicationService.listApplications(
+    const applications = await listApplications(
       userId,
       limit,
       offset,
@@ -59,7 +66,7 @@ router.get('/:id/events', async (req: Request, res: Response, next: NextFunction
     const id = z.uuid().parse(req.params.id);
     const { limit, offset } = getPaginationParams(req.query);
 
-    const events = await ApplicationService.getApplicationEvents(userId, id, limit, offset);
+    const events = await getApplicationEvents(userId, id, limit, offset);
 
     if (events === null) {
       // Either not found or belongs to another user — return 403 to avoid
@@ -89,7 +96,7 @@ router.get('/:id/actions', async (req: Request, res: Response, next: NextFunctio
     const id = z.uuid().parse(req.params.id);
     const { limit, offset } = getPaginationParams(req.query);
 
-    const actions = await ApplicationService.getApplicationActions(userId, id, limit, offset);
+    const actions = await getApplicationActions(userId, id, limit, offset);
 
     if (actions === null) {
       return res.status(403).json({
@@ -117,7 +124,7 @@ router.patch('/:id/status', async (req: Request, res: Response, next: NextFuncti
     const userId = req.auth!.user.id;
     const id = z.uuid().parse(req.params.id);
     const body = UpdateApplicationStatusRequestSchema.parse(req.body);
-    const { application, changed } = await ApplicationService.updateUserStatus(userId, id, body);
+    const { application, changed } = await updateUserStatus(userId, id, body);
     logEvent('application_status_corrected', {
       applicationId: id,
       changed,
@@ -134,7 +141,7 @@ router.post('/:id/actions', async (req, res, next) => {
     res
       .status(201)
       .json(
-        await ActionService.createFollowUp(
+        await createFollowUp(
           req.auth!.user.id,
           z.uuid().parse(req.params.id),
           CreateFollowUpSchema.parse(req.body),
@@ -159,10 +166,7 @@ router.patch('/:id/archive', async (req, res, next) => {
 });
 router.get('/:id', async (req, res, next) => {
   try {
-    const application = await ApplicationService.getApplication(
-      req.auth!.user.id,
-      z.uuid().parse(req.params.id),
-    );
+    const application = await getApplication(req.auth!.user.id, z.uuid().parse(req.params.id));
     if (!application)
       return res
         .status(404)
