@@ -181,6 +181,48 @@ export function parseMCP_DAILY_SUBMISSION_LIMIT(value: string | undefined): numb
 export const submissionDailyLimit = () =>
   parseMCP_DAILY_SUBMISSION_LIMIT(process.env.MCP_DAILY_SUBMISSION_LIMIT);
 
+// ─── Test tools (manual test environment only) ──────────────────────────────
+// The test inbox and reset are on only when TEST_TOOLS_ENABLED=true AND the database name
+// contains "test", so a copied flag can never turn them on against a live database.
+
+export function parseTEST_TOOLS_ENABLED(value: string | undefined): boolean {
+  if (value === undefined || value === '' || value === 'false') return false;
+  if (value === 'true') return true;
+  throw new Error('TEST_TOOLS_ENABLED must be empty, false, or true');
+}
+
+/** The database name in DATABASE_URL, or null when it is missing or not a plain URL. */
+export function databaseName(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return decodeURIComponent(new URL(url).pathname.slice(1)) || null;
+  } catch {
+    return null;
+  }
+}
+
+export const isTestDatabase = (url: string | undefined): boolean =>
+  /test/i.test(databaseName(url) ?? '');
+
+/** Checked again on every use, so changing the environment at runtime cannot bypass startup. */
+export function testToolsEnabled(): boolean {
+  try {
+    return (
+      parseTEST_TOOLS_ENABLED(process.env.TEST_TOOLS_ENABLED) &&
+      isTestDatabase(process.env.DATABASE_URL)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function validateTestTools(env: NodeJS.ProcessEnv) {
+  if (parseTEST_TOOLS_ENABLED(env.TEST_TOOLS_ENABLED) && !isTestDatabase(env.DATABASE_URL))
+    throw new Error(
+      'TEST_TOOLS_ENABLED=true needs a DATABASE_URL, written out in full, whose database name contains "test". Test tools never run on live data.',
+    );
+}
+
 // ─── Startup checks ─────────────────────────────────────────────────────────
 
 const HEX_KEY = /^[0-9a-f]{64}$/i;
@@ -207,6 +249,7 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env) {
   parseGmailSchedule(env);
   parseAI_TRIAGE_BATCH_ENABLED(env.AI_TRIAGE_BATCH_ENABLED);
   parseAI_TRIAGE_BATCH_SIZE(env.AI_TRIAGE_BATCH_SIZE);
+  validateTestTools(env);
   if (env.NODE_ENV !== 'production') return;
   if (env.ENABLE_DEV_AUTH === 'true')
     throw new Error('Development authentication is forbidden in production');

@@ -1,6 +1,8 @@
 import { gmail_v1 } from 'googleapis';
 import { gmailCallOptions } from './googleTransport';
 import { withGmail } from './gmailClient';
+import { isSimulatedId } from '../contracts/testTools';
+import { readSimulatedEmail, simulatedSnippet } from './testTools/simulatedMail';
 
 function extractTextFromParts(parts: gmail_v1.Schema$MessagePart[]): string {
   let htmlText = '';
@@ -55,6 +57,11 @@ export async function fetchMessageMetadata(
   gmailMessageId: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<{ labelIds: string[] | null; snippet: string | null }> {
+  // Test-inbox emails (test environment only) are read from the database, never from Gmail.
+  if (isSimulatedId(gmailMessageId)) {
+    const content = await readSimulatedEmail(userId, gmailMessageId);
+    return { labelIds: content.labels, snippet: simulatedSnippet(content.body) };
+  }
   return withGmail(
     userId,
     async (gmail) => {
@@ -72,6 +79,8 @@ export async function fetchMessageBody(
   gmailMessageId: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<string> {
+  if (isSimulatedId(gmailMessageId))
+    return (await readSimulatedEmail(userId, gmailMessageId)).body.slice(0, 8000);
   return withGmail(
     userId,
     async (gmail) => {

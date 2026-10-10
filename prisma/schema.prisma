@@ -109,16 +109,32 @@ model Email {
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
 
-  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  application Application?       @relation(fields: [applicationId], references: [id], onDelete: SetNull)
-  agendaItems AgendaItem[]
-  events      ApplicationEvent[]
-  actions     Action[]
+  user             User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application      Application?           @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  agendaItems      AgendaItem[]
+  events           ApplicationEvent[]
+  actions          Action[]
+  simulatedContent SimulatedEmailContent?
 
   @@unique([userId, gmailMessageId]) // idempotency constraint
   @@index([userId])
   @@index([userId, relevanceState]) // future AI processing queue queries
   @@map("emails")
+}
+
+/// Content of a test-inbox email (manual test environment only; services/testTools). Its email's
+/// gmailMessageId starts with "sim-". Real Gmail content is never stored.
+model SimulatedEmailContent {
+  emailId   String   @id @db.Uuid
+  userId    String   @db.Uuid
+  labels    String[]
+  body      String
+  createdAt DateTime @default(now())
+
+  email Email @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("simulated_email_contents")
 }
 
 enum MatchConfirmationSource {
@@ -375,7 +391,7 @@ model AIBatch {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   operations AIOperation[]
 
   @@index([userId, createdAt])

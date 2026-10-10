@@ -83,6 +83,7 @@ import { actionRouter } from './routes/action';
 import { aiRouter } from './routes/ai';
 import { integrationTokenRouter } from './routes/integrationTokens';
 import { submissionRouter } from './routes/submissions';
+import { testToolsRouter } from './routes/testTools';
 import { errorHandler } from './middleware/error';
 
 app.use('/api/auth', authRouter);
@@ -95,6 +96,8 @@ app.use('/api/workspace', workspaceRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/integration-tokens', integrationTokenRouter);
 app.use('/api/submissions', submissionRouter);
+// Manual test environment only: answers 404 unless test tools are on (utils/config.ts).
+app.use('/api/test-tools', testToolsRouter);
 
 app.use(errorHandler);
 
