@@ -5,49 +5,34 @@ import session from 'express-session';
 import pgSession from 'connect-pg-simple';
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
-import { validateProductionConfig, validateRequiredSecrets } from './utils/config';
+import {
+  cookieSecret,
+  databaseUrl,
+  frontendUrl,
+  isProduction,
+  isTest,
+  port,
+  sessionSecret,
+  startupWarnings,
+  trustProxyHops,
+  validateProductionConfig,
+  validateRequiredSecrets,
+} from './utils/config';
 import { logEvent, logWarn } from './utils/log';
 import { createMcpRouter } from './mcp/router';
 import { healthRouter } from './routes/health';
 import { requestContext } from './middleware/requestContext';
 
 dotenv.config();
-validateProductionConfig(process.env);
+validateProductionConfig();
 // Fail at startup, not inside the first request that needs a key. Tests set their own keys.
-if (process.env.NODE_ENV !== 'test') validateRequiredSecrets(process.env);
-
-if (
-  process.env.ENABLE_DEV_AUTH === 'true' &&
-  process.env.NODE_ENV !== 'test' &&
-  process.env.NODE_ENV !== 'production'
-) {
-  logWarn('config_warning', {
-    message: 'ENABLE_DEV_AUTH is ignored outside NODE_ENV=test; use Google login.',
-  });
-}
-
-// ── Startup configuration warnings ───────────────────────────────────────────
-// These surface missing required env vars at startup rather than at request time.
-if (!process.env.SESSION_SECRET) {
-  logWarn('config_warning', {
-    message:
-      'SESSION_SECRET is not set — using an insecure dev default. ' +
-      'Set SESSION_SECRET in .env before running in any shared or production environment.',
-  });
-}
-if (!process.env.FRONTEND_URL) {
-  logWarn('config_warning', {
-    message:
-      'FRONTEND_URL is not set — defaulting to http://localhost:5173 (Vite dev server). ' +
-      'Set FRONTEND_URL in .env for production.',
-  });
-}
-// ─────────────────────────────────────────────────────────────────────────────
+if (!isTest()) validateRequiredSecrets();
+for (const message of startupWarnings()) logWarn('config_warning', { message });
 
 const app = express();
 // Explicit deployment setting; never trust arbitrary forwarded headers by default.
-if (process.env.TRUST_PROXY_HOPS) app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS));
-const port = process.env.PORT || 3000;
+const proxyHops = trustProxyHops();
+if (proxyHops) app.set('trust proxy', proxyHops);
 
 // Request ID and one line per request, before everything else so every route is covered.
 app.use(requestContext);
@@ -58,18 +43,15 @@ app.use(requestContext);
 app.use('/mcp', createMcpRouter());
 app.use(healthRouter);
 
-// Default to the Vite dev server port so CORS works in local development
-// without requiring FRONTEND_URL to be set.
-app.use(cors({ credentials: true, origin: process.env.FRONTEND_URL ?? 'http://localhost:5173' }));
+app.use(cors({ credentials: true, origin: frontendUrl() }));
 app.use(express.json());
 // cookie-parser with a secret enables signed cookies used for OAuth state (CSRF protection).
-// OAUTH_STATE_COOKIE_SECRET is a required env var when Gmail OAuth routes are used.
-app.use(cookieParser(process.env.OAUTH_STATE_COOKIE_SECRET ?? 'dev-cookie-secret-change-in-prod'));
+app.use(cookieParser(cookieSecret()));
 
 // --- Session Setup ---
 const PgStore = pgSession(session);
 const dbPool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: databaseUrl(),
 });
 
 app.use(
@@ -78,13 +60,13 @@ app.use(
       pool: dbPool,
       tableName: 'session',
     }),
-    secret: process.env.SESSION_SECRET || 'dev-session-secret-change-in-prod',
+    secret: sessionSecret(),
     resave: false,
     saveUninitialized: false,
     name: 'cc_session',
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isProduction(),
       sameSite: 'lax',
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     },
@@ -120,12 +102,12 @@ import { startWorkers } from './jobs/startWorkers';
 import { stopQueue } from './services/queue';
 import { prisma } from './db/prisma';
 
-if (process.env.NODE_ENV !== 'test') {
+if (!isTest()) {
   let shuttingDown = false;
   void startWorkers(undefined, { isShuttingDown: () => shuttingDown });
 
-  const server = app.listen(port, () => {
-    logEvent('server_started', { port });
+  const server = app.listen(port(), () => {
+    logEvent('server_started', { port: port() });
   });
 
   const shutdown = async () => {
