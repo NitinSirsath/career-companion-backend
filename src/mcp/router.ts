@@ -1,5 +1,5 @@
 /**
- * POST /mcp — the Streamable HTTP MCP endpoint (ADR-0002 decisions 1, 10, 11, 13; MCP-04).
+ * POST /mcp — the Streamable HTTP MCP endpoint (ADR-0002 decisions 1, 10, 11, 13).
  *
  * Mounted in index.ts BEFORE every global middleware (CORS, JSON parser, cookies, session), so:
  *   - the route-local 32 KB JSON limit is the one that applies;
