@@ -1,6 +1,6 @@
 import { createPaginatedResponseSchema } from './pagination';
 /**
- * Zod contracts for Gmail OAuth routes (COM-19).
+ * Zod contracts for Gmail OAuth routes.
  * These types are shared via the sync-contracts script with the frontend.
  *
  * IMPORTANT: No token fields are ever included in response schemas.
