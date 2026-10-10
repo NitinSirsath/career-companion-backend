@@ -33,6 +33,14 @@ import {
 } from './score';
 
 const REPORTS_DIR = path.join(__dirname, 'reports');
+const EXIT_CODES = { PASS: 0, FAIL: 1, INCONCLUSIVE: 2 } as const;
+
+type Outcome = keyof typeof EXIT_CODES;
+/** One inconclusive part makes the whole run inconclusive; otherwise one failure fails it. */
+function worstOutcome(...outcomes: (Outcome | undefined)[]): Outcome {
+  if (outcomes.includes('INCONCLUSIVE')) return 'INCONCLUSIVE';
+  return outcomes.includes('FAIL') ? 'FAIL' : 'PASS';
+}
 
 function option(name: string): string | undefined {
   const index = process.argv.indexOf(`--${name}`);
@@ -195,12 +203,7 @@ async function main() {
   const failed = failures(metrics, baseline);
   const temporal = extractionVersion === 'extraction/v3' ? scoreTemporal(results, runs) : null;
   const baseOutcome = evaluationOutcome(metrics, baseline);
-  const outcome =
-    baseOutcome === 'INCONCLUSIVE' || temporal?.outcome === 'INCONCLUSIVE'
-      ? 'INCONCLUSIVE'
-      : baseOutcome === 'FAIL' || temporal?.outcome === 'FAIL'
-        ? 'FAIL'
-        : 'PASS';
+  const outcome = worstOutcome(baseOutcome, temporal?.outcome);
   const createdAt = new Date().toISOString();
   const report = {
     createdAt,
@@ -230,7 +233,7 @@ async function main() {
     `${outcome}: ${metrics.refusedCalls} calls refused (${JSON.stringify(metrics.refusedByKind)})${failed.length ? '; ' + failed.join('; ') : ''}`,
   );
   console.log(`Report: ${path.relative(process.cwd(), file)}`);
-  process.exitCode = outcome === 'PASS' ? 0 : outcome === 'FAIL' ? 1 : 2;
+  process.exitCode = EXIT_CODES[outcome];
 }
 
 main().catch((err: unknown) => {
