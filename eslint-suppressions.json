@@ -34,14 +34,6 @@
       "count": 1
     }
   },
-  "src/jobs/notificationJob.ts": {
-    "no-nested-ternary": {
-      "count": 1
-    },
-    "no-restricted-properties": {
-      "count": 2
-    }
-  },
   "src/mcp/config.ts": {
     "no-restricted-properties": {
       "count": 1

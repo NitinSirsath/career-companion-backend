@@ -14,7 +14,7 @@ import { handleGmailSyncJobs } from '../jobs/gmailSyncJob';
 import { fetchMessageBody, fetchMessageMetadata } from '../services/gmailFetcher';
 import { app } from '../index';
 import type { JobWithMetadata } from 'pg-boss';
-import type { GmailSyncJobData } from '../jobs/gmailSyncJob';
+import type { GmailSyncJobData } from '../services/enqueue';
 
 const transport = vi.hoisted(() => ({ root: '', dataBound: 200, budget: 350 }));
 vi.mock('googleapis', async (importOriginal) => {

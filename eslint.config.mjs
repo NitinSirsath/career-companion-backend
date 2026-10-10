@@ -53,6 +53,23 @@ export default [
     },
   },
   {
+    files: ['src/jobs/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/db/prisma'],
+              message:
+                'Job files register workers and call services; they do not query the database.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['src/services/**/*.ts'],
     rules: {
       'no-restricted-imports': [

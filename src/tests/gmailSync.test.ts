@@ -1,4 +1,4 @@
-import { GMAIL_SYNC_EXPIRE_SECONDS } from '../jobs/gmailSyncJob';
+import { GMAIL_SYNC_EXPIRE_SECONDS } from '../services/enqueue';
 import { SYNC_ATTEMPT_BUDGET_MS } from '../services/googleTransport';
 import { describe, it, expect, vi } from 'vitest';
 import { extractHeaders, GmailAuthError } from '../services/gmailSync';

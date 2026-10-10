@@ -73,7 +73,7 @@ async function main() {
   const { prisma } = require('../dist/db/prisma');
   const { encryptToken } = require('../dist/utils/gmailTokenEncryption');
   const { getQueue, stopQueue } = require('../dist/services/queue');
-  const { requestGmailSync } = require('../dist/jobs/gmailSyncJob');
+  const { requestGmailSync } = require('../dist/services/gmailSyncRequests');
   let user;
   let child;
   let quarantine = false;

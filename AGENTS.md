@@ -24,6 +24,7 @@ https://github.com/NitinSirsath/career-companion-docs/blob/main/docs/engineering
 
 - Routes (`src/routes/`): validate input with the contract schema, call one service, send the result. No database queries in routes. Copy `routes/ai.ts`.
 - Services (`src/services/`): business rules as plain exported functions. Don't add classes with static methods.
+- Jobs (`src/jobs/`): register the pg-boss worker and call a service. No database queries in job files. Copy `jobs/notificationJob.ts`.
 - Queueing: services put work on the queue with the `enqueue…` functions in `src/services/enqueue.ts`. They never import from `src/jobs/`; lint fails on it.
 - Errors: for an expected failure (not found, conflict, not allowed, invalid), a service throws `AppError(status, code, message, details?)` from `src/errors.ts`, and `middleware/error.ts` sends it. Don't add error classes, and don't catch errors in routes to build a response. Gmail sync and AI provider errors stay as they are.
 - Contracts: change `src/contracts/` here; the frontend copies them with `npm run sync-contracts`.

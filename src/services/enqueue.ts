@@ -84,3 +84,24 @@ export async function enqueueNotificationJob(actionId: string) {
     },
   );
 }
+
+export const GMAIL_SYNC_JOB = 'gmail-sync-job';
+export const GMAIL_SYNC_EXPIRE_SECONDS = 300;
+
+export interface GmailSyncJobData {
+  userId: string;
+  claim: string;
+  trigger?: 'manual' | 'scheduled';
+}
+
+/** Returns the queued job ID, or null when the queue did not accept the job. */
+export async function enqueueGmailSync(data: GmailSyncJobData): Promise<string | null> {
+  const queue = await getQueue();
+  return queue.send(GMAIL_SYNC_JOB, data, {
+    singletonKey: data.claim,
+    retryLimit: 3,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: GMAIL_SYNC_EXPIRE_SECONDS,
+  });
+}
