@@ -1,7 +1,7 @@
 /**
  * AES-256-GCM encryption/decryption for Gmail OAuth tokens.
  *
- * Design principles (COM-19):
+ * Design principles:
  * - Each token is encrypted with a unique random IV (12 bytes).
  * - Produces base64-encoded ciphertext and base64-encoded IV stored separately.
  * - Encryption key is loaded from GMAIL_TOKEN_ENCRYPTION_KEY env var (64 hex chars = 32 bytes).
