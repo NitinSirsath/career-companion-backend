@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
-import { AIProcessingResult } from '@prisma/client';
+import { AIProcessingResult, Prisma } from '@prisma/client';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
 import {
@@ -10,7 +10,6 @@ import {
   ListApplicationsResponseSchema,
   deriveStatus,
 } from '../contracts';
-import { ApplicationService } from '../services/application';
 import { MatcherService } from '../services/matcher';
 import { GmailFetcherService } from '../services/gmailFetcher';
 import { createProviderClient } from '../services/ai/providers';
@@ -248,9 +247,16 @@ describe('PATCH /api/applications/:id/status', () => {
   });
 
   it('rolls back when the transaction fails after the write', async () => {
+    type Work = (tx: Prisma.TransactionClient) => Promise<unknown>;
+    const original = prisma.$transaction.bind(prisma) as (work: Work) => Promise<unknown>;
+    const failAfterWork = (work: Work) =>
+      original(async (tx) => {
+        await work(tx);
+        throw new Error('boom');
+      });
     const spy = vi
-      .spyOn(ApplicationService, 'getApplication')
-      .mockRejectedValueOnce(new Error('boom'));
+      .spyOn(prisma, '$transaction')
+      .mockImplementationOnce(failAfterWork as typeof prisma.$transaction);
     const res = await patch(id, { userStatus: 'OFFER', expectedUserStatusRevision: 0 });
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe('INTERNAL_SERVER_ERROR');
