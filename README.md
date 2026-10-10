@@ -230,3 +230,12 @@ credentials remain private. Unlink keeps future thread mail for manual review.
 AI_TRIAGE_BATCH_ENABLED is **off by default**. Unset, empty, or false means off; exactly true enables batched relevance triage. Any other value is rejected at startup. AI_TRIAGE_BATCH_SIZE defaults to 20 and accepts 1–25.
 
 When enabled, new unclassified emails are grouped into per-user triage jobs. The batch contract only sends bounded sender, subject, labels and preview metadata plus per-batch keys; no Gmail or database IDs are sent to the provider. The existing per-email extraction and matching path remains unchanged.
+
+### Manual test environment (test inbox and reset)
+
+For clean manual testing without Gmail, a second account or live data. **Never turn it on for live.** Only the emails are fake: they are read by the AI provider the test user connects, with a real key.
+
+- `TEST_TOOLS_ENABLED=true` turns on `/api/test-tools` (status, deliver a test email, reset). Startup fails unless `DATABASE_URL` is written out in full (no `${...}`) and its database name contains `test`, for example `career_companion_testenv`. Do not reuse the automated test database: `npm test` wipes it. When off, every `/api/test-tools` path answers 404.
+- A test email is saved with a `sim-` Gmail ID and goes to the same queue as a newly synced Gmail email. `services/gmailFetcher.ts` reads its content from `simulated_email_contents` instead of Gmail. `gmailSync.ts` is unchanged.
+- Reset deletes the user's emails, applications, submissions, AI batches and AI day counts, and clears an AI rate-limit pause. It keeps the user, AI settings, Gmail connection and tokens. It is refused (409 `REAL_MAIL_PRESENT`) if the user has any real Gmail email.
+- Frontend: build or run it with `VITE_TEST_TOOLS=true` to show the TEST banner and the Test inbox on the Gmail page.
