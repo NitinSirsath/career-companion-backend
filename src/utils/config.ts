@@ -26,6 +26,11 @@ export function readableLogs(): boolean {
   return process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test';
 }
 
+/** The one user whose actions are sent to the Discord webhook; unset means nobody. */
+export function discordUserId(): string | undefined {
+  return process.env.DISCORD_USER_ID || undefined;
+}
+
 export function validateRequiredSecrets(env: NodeJS.ProcessEnv) {
   for (const key of ['GMAIL_TOKEN_ENCRYPTION_KEY', 'AI_CREDENTIAL_ENCRYPTION_KEY'] as const) {
     if (!env[key] || !/^[0-9a-f]{64}$/i.test(env[key])) {
