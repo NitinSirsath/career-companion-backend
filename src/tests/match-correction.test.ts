@@ -13,8 +13,11 @@ import {
   updateUserStatus,
 } from '../services/application';
 import { getUserActions } from '../services/action';
-import { enqueueNotificationJob } from '../jobs/notificationJob';
-vi.mock('../jobs/notificationJob', () => ({ enqueueNotificationJob: vi.fn() }));
+import { enqueueNotificationJob } from '../services/enqueue';
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
+  enqueueNotificationJob: vi.fn(),
+}));
 let owner: string;
 let foreign: string;
 let a: string;

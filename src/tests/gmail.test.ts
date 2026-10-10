@@ -1,4 +1,4 @@
-import { emailJobOptions } from '../jobs/emailProcessingJob';
+import { emailJobOptions } from '../services/enqueue';
 import { EMAIL_PROCESSING_STUCK_MS } from '../services/email';
 import { STALE_PROCESSING_MS } from '../services/ai/heldOperations';
 import { GmailStatusResponseSchema } from '../contracts/gmail';
@@ -24,8 +24,8 @@ import { prisma } from '../db/prisma';
 import { encryptToken } from '../utils/gmailTokenEncryption';
 import { configureAI } from './helpers/aiAccess';
 
-vi.mock('../jobs/emailProcessingJob', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../jobs/emailProcessingJob')>()),
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
   enqueueEmailProcessingJob: vi.fn().mockResolvedValue(undefined),
 }));
 

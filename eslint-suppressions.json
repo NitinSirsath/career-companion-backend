@@ -89,9 +89,6 @@
     "no-nested-ternary": {
       "count": 2
     },
-    "no-restricted-imports": {
-      "count": 1
-    },
     "no-restricted-properties": {
       "count": 3
     }
@@ -124,16 +121,10 @@
   "src/services/gmailSync.ts": {
     "no-nested-ternary": {
       "count": 3
-    },
-    "no-restricted-imports": {
-      "count": 2
     }
   },
   "src/services/matcher.ts": {
     "no-nested-ternary": {
-      "count": 1
-    },
-    "no-restricted-imports": {
       "count": 1
     }
   },

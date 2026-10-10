@@ -16,7 +16,10 @@ import { AgendaQuerySchema } from '../contracts/agenda';
 import { correctEmailMatch, matchEmailToApplication } from '../services/matcher';
 import { recordSubmission } from '../services/externalSubmission';
 import { candidateEnvelope } from '../services/ai/temporal';
-vi.mock('../jobs/notificationJob', () => ({ enqueueNotificationJob: vi.fn() }));
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
+  enqueueNotificationJob: vi.fn(),
+}));
 let owner: string, foreign: string, appId: string, otherApp: string;
 const now = new Date('2026-10-03T06:30:00.000Z');
 const query = { bucket: 'all' as const, timeZone: 'Asia/Kolkata', limit: 20, offset: 0 };

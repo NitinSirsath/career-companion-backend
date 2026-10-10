@@ -2,7 +2,7 @@ import type { AIAccess } from './access';
 import { getAccessState, resolveAIAccess } from './access';
 import { prisma } from '../../db/prisma';
 import { fetchMessageMetadata } from '../gmailFetcher';
-import { enqueueEmailProcessingJob } from '../../jobs/emailProcessingJob';
+import { enqueueEmailProcessingJob } from '../enqueue';
 import { AIAccessError, AIProviderError, RetryableAIError, TerminalAIError } from './errors';
 import {
   AI_CONTRACT_VERSIONS,

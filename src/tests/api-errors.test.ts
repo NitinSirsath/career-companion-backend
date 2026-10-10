@@ -9,8 +9,8 @@ import { utcDay } from '../services/ai/usage';
 import { configureAI } from './helpers/aiAccess';
 
 vi.mock('../services/ai/providers', () => ({ createProviderClient: vi.fn() }));
-vi.mock('../jobs/emailProcessingJob', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../jobs/emailProcessingJob')>()),
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
   enqueueEmailProcessingJob: vi.fn(),
 }));
 

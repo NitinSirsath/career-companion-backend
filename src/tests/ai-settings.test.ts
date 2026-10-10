@@ -5,7 +5,7 @@ import { prisma } from '../db/prisma';
 import { openApiKey, sealApiKey } from '../services/ai/credentials';
 import { createProviderClient, VerifyResult } from '../services/ai/providers';
 import { utcDay } from '../services/ai/usage';
-import { reofferPendingEmails } from '../services/gmailSync';
+import { reofferPendingEmails } from '../services/ai/offer';
 import { configureAI } from './helpers/aiAccess';
 import { JobExtractionSchema } from '../services/ai/contracts';
 import { ProviderFailure } from '../services/ai/errors';

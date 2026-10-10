@@ -6,7 +6,10 @@ import { app } from '../index';
 import { prisma } from '../db/prisma';
 import { applyMatch, matchEmailToApplication, resolveEmailMatch } from '../services/matcher';
 
-vi.mock('../jobs/notificationJob', () => ({ enqueueNotificationJob: vi.fn() }));
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
+  enqueueNotificationJob: vi.fn(),
+}));
 
 const OWNER = 'race-owner@s6m.test';
 let owner: string;

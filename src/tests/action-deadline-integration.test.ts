@@ -4,7 +4,10 @@ import { prisma } from '../db/prisma';
 import { app } from '../index';
 import { matchEmailToApplication } from '../services/matcher';
 import { DiscordProvider } from '../services/notifications/DiscordProvider';
-vi.mock('../jobs/notificationJob', () => ({ enqueueNotificationJob: vi.fn() }));
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
+  enqueueNotificationJob: vi.fn(),
+}));
 let owner: string | undefined;
 afterEach(async () => {
   vi.restoreAllMocks();

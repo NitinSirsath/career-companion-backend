@@ -15,19 +15,21 @@ import { createProviderClient } from '../services/ai/providers';
 import { configureAI } from './helpers/aiAccess';
 import { getQueue, stopQueue } from '../services/queue';
 import {
-  EMAIL_PROCESSING_JOB,
   EmailJobFailure,
-  EmailProcessingJobData,
-  emailJobOptions,
-  enqueueEmailProcessingJob,
   handleEmailJobs,
   processEmailJob,
   startEmailProcessingWorker,
 } from '../jobs/emailProcessingJob';
+import {
+  EMAIL_PROCESSING_JOB,
+  EmailProcessingJobData,
+  emailJobOptions,
+  enqueueEmailProcessingJob,
+} from '../services/enqueue';
 
 vi.mock('../services/ai/providers', () => ({ createProviderClient: vi.fn() }));
-vi.mock('../jobs/emailProcessingJob', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../jobs/emailProcessingJob')>()),
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
   enqueueEmailProcessingJob: vi.fn(),
 }));
 

@@ -3,7 +3,7 @@ import { prisma } from '../db/prisma';
 import { syncUser } from '../services/gmailSync';
 import { fetchMessageMetadata } from '../services/gmailFetcher';
 import { encryptToken, decryptToken } from '../utils/gmailTokenEncryption';
-import { enqueueEmailProcessingJob } from '../jobs/emailProcessingJob';
+import { enqueueEmailProcessingJob } from '../services/enqueue';
 import { configureAI } from './helpers/aiAccess';
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
@@ -12,7 +12,10 @@ const mocks = vi.hoisted(() => ({
   profile: vi.fn(),
   credentials: {} as { access_token?: string; refresh_token?: string },
 }));
-vi.mock('../jobs/emailProcessingJob', () => ({ enqueueEmailProcessingJob: vi.fn() }));
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
+  enqueueEmailProcessingJob: vi.fn(),
+}));
 vi.mock('googleapis', () => ({
   google: {
     auth: {

@@ -13,11 +13,14 @@ import {
 import { applyMatch } from '../services/matcher';
 import * as gmailFetcher from '../services/gmailFetcher';
 import { createProviderClient } from '../services/ai/providers';
-import { enqueueNotificationJob } from '../jobs/notificationJob';
+import { enqueueNotificationJob } from '../services/enqueue';
 import { getQueue } from '../services/queue';
 
 vi.mock('../services/ai/providers', () => ({ createProviderClient: vi.fn() }));
-vi.mock('../jobs/notificationJob', () => ({ enqueueNotificationJob: vi.fn() }));
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
+  enqueueNotificationJob: vi.fn(),
+}));
 // Real queue, observed: any job send during a correction would go through getQueue().
 vi.mock('../services/queue', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/queue')>();
