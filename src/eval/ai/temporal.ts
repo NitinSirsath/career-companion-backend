@@ -75,6 +75,12 @@ export const temporalCases: EvalCase[] = cases.map(([id, body]) => ({
 }));
 /** Zero temporal errors; missing/refused/partial runs are inconclusive, never a pass. The
  * scorer rejects event identity/state fields too: reschedule is evidence, not a command. */
+/** A run that did not check every case proves nothing, whatever the checked ones say. */
+function temporalOutcome(complete: boolean, failed: number) {
+  if (!complete) return 'INCONCLUSIVE' as const;
+  return failed ? ('FAIL' as const) : ('PASS' as const);
+}
+
 export function scoreTemporal(results: CaseRun[], expectedRuns: number) {
   let checked = 0,
     failed = 0;
@@ -110,11 +116,6 @@ export function scoreTemporal(results: CaseRun[], expectedRuns: number) {
     checked,
     expected: cases.length * expectedRuns,
     failed,
-    outcome:
-      checked !== cases.length * expectedRuns
-        ? ('INCONCLUSIVE' as const)
-        : failed
-          ? ('FAIL' as const)
-          : ('PASS' as const),
+    outcome: temporalOutcome(checked === cases.length * expectedRuns, failed),
   };
 }
