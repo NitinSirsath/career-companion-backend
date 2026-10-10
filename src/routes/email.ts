@@ -11,9 +11,7 @@ import {
 import { ResolveAmbiguityRequestSchema, RetryEmailRequestSchema } from '../contracts/email';
 
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
-import { AppError } from '../errors';
-import { enqueueEmailProcessingJob } from '../jobs/emailProcessingJob';
-import { prepareRetry } from '../services/email';
+import { retryEmail } from '../services/email';
 
 const router = Router();
 
@@ -166,15 +164,7 @@ router.post('/:id/retry', async (req: Request, res: Response, next: NextFunction
     const emailId = z.uuid().parse(req.params.id);
     const { acceptPossibleDuplicateCharge } = RetryEmailRequestSchema.parse(req.body ?? {});
 
-    const approval = await prepareRetry(userId, emailId, acceptPossibleDuplicateCharge);
-    const jobId = await enqueueEmailProcessingJob(userId, emailId, approval);
-    if (!jobId)
-      throw new AppError(
-        409,
-        'RETRY_RECENTLY_QUEUED',
-        'A processing attempt was queued recently. Try again in a few minutes.',
-      );
-
+    await retryEmail(userId, emailId, acceptPossibleDuplicateCharge);
     res.status(200).json({ success: true });
   } catch (err) {
     next(err);
