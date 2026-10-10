@@ -1,0 +1,39 @@
+name: Finish COM-155-step-5b once (temporary)
+# Renames and deletes files on refactor/COM-155-one-config-module and commits only that.
+# Lives only on the throwaway branch tmp/COM-155-config-finish, which is deleted afterwards.
+on:
+  push:
+    branches: [tmp/COM-155-config-finish]
+permissions:
+  contents: write
+concurrency:
+  group: finish-COM-155-step-5b-once
+  cancel-in-progress: false
+jobs:
+  finish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refactor/COM-155-one-config-module
+      - name: Check the hand commits
+        run: |
+          if [ "$(git rev-parse 'HEAD^{tree}')" != "2dfa570eb4a68ce6fd5f46033eb8c767d7bb566c" ]; then
+            echo "The hand commits do not match the reviewed files. Nothing was changed."
+            exit 1
+          fi
+      - name: Rename and delete
+        run: |
+          git rm -q src/mcp/config.ts
+      - name: Commit only the reviewed result
+        run: |
+          if [ "$(git write-tree)" != "3c5360fba2e7a7af43f33d45e78c64d2ba3845b7" ]; then
+            echo "The result does not match the reviewed tree. Nothing was pushed."
+            git status --short
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'refactor(config): remove the folded-in MCP config file (COM-155 step 5)'
+          git push origin HEAD:refactor/COM-155-one-config-module
