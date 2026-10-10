@@ -3,9 +3,9 @@ import { getQueue } from '../services/queue';
 import {
   GMAIL_SCHEDULE_QUEUE,
   GMAIL_SYNC_CRON,
-  gmailScheduleConfig,
   setGmailScheduleRegistered,
 } from '../services/gmailSchedule';
+import { gmailScheduleConfig } from '../utils/config';
 import { runScheduledGmailSync } from '../services/gmailSyncRequests';
 import { logDebug } from '../utils/log';
 type Source = 'schedule' | 'startup';
