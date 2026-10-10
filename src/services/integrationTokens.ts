@@ -1,5 +1,5 @@
 /**
- * Per-user integration tokens for the MCP endpoint (ADR-0002 decision 10; MCP-02).
+ * Per-user integration tokens for the MCP endpoint (ADR-0002 decision 10).
  *
  * Format `ccmcp_` + 32 random bytes in base64url. Only the SHA-256 hash and a display prefix are
  * stored; the plaintext is returned once, by create, and never logged. Revoking keeps the row.
