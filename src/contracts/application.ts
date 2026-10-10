@@ -40,7 +40,7 @@ export const CreateApplicationRequestSchema = z.object({
 
 export type CreateApplicationRequest = z.infer<typeof CreateApplicationRequestSchema>;
 
-// ─── Source email evidence (S6-02) ─────────────────────────────────────────
+// ─── Source email evidence ─────────────────────────────────────────────────
 // Owned, bounded metadata only. null means the evidence is unavailable, not an error.
 
 const IsoDateTimeSchema = z.iso.datetime({ offset: true });
@@ -69,19 +69,27 @@ export const RecentEventSchema = z.object({
 });
 export type RecentEvent = z.infer<typeof RecentEventSchema>;
 
-// ─── Canonical status (S6-01) ─────────────────────────────────────────────
+// ─── Canonical status ─────────────────────────────────────────────────────
 
 export const StatusSourceSchema = z.enum(['USER', 'AI', 'UNKNOWN']);
 export type StatusSource = z.infer<typeof StatusSourceSchema>;
 
 /** Domain rule: effective status is userStatus ?? aiStatus. Derived, never persisted. */
+function statusSourceOf(
+  aiStatus: ApplicationStatus | null,
+  userStatus: ApplicationStatus | null,
+): StatusSource {
+  if (userStatus) return 'USER';
+  return aiStatus ? 'AI' : 'UNKNOWN';
+}
+
 export function deriveStatus(
   aiStatus: ApplicationStatus | null,
   userStatus: ApplicationStatus | null,
 ) {
   return {
     effectiveStatus: userStatus ?? aiStatus,
-    statusSource: (userStatus ? 'USER' : aiStatus ? 'AI' : 'UNKNOWN') as StatusSource,
+    statusSource: statusSourceOf(aiStatus, userStatus),
     hasStatusConflict: userStatus !== null && aiStatus !== null && userStatus !== aiStatus,
   };
 }
@@ -129,7 +137,7 @@ export const ListApplicationsResponseSchema =
   createPaginatedResponseSchema(ApplicationResponseSchema);
 export type ListApplicationsResponse = z.infer<typeof ListApplicationsResponseSchema>;
 
-// ─── Manual status correction (S6-01) ───────────────────────────────────────
+// ─── Manual status correction ───────────────────────────────────────────────
 
 /** null clears the user's override; the persisted AI status (or unknown) becomes effective. */
 export const UpdateApplicationStatusRequestSchema = z.strictObject({
