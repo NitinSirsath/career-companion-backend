@@ -1,0 +1,45 @@
+name: Finish COM-155-step-8 once (temporary)
+# Renames and deletes files on refactor/COM-155-clean-up and commits only that.
+# Lives only on the throwaway branch tmp/COM-155-clean-up-finish, which is deleted afterwards.
+on:
+  push:
+    branches: [tmp/COM-155-clean-up-finish]
+permissions:
+  contents: write
+concurrency:
+  group: finish-COM-155-step-8-once
+  cancel-in-progress: false
+jobs:
+  finish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refactor/COM-155-clean-up
+      - name: Check the hand commits
+        run: |
+          if [ "$(git rev-parse 'HEAD^{tree}')" != "287c658eff4cf28e4bf8c93b719b9aec6347e4d6" ]; then
+            echo "The hand commits do not match the reviewed files. Nothing was changed."
+            exit 1
+          fi
+      - name: Rename and delete
+        run: |
+          git mv src/tests/discordProvider.test.ts src/tests/discord-provider.test.ts
+          git mv src/tests/gmailFetcher.test.ts src/tests/gmail-fetcher.test.ts
+          git mv src/tests/gmailSync.test.ts src/tests/gmail-sync.test.ts
+          git mv src/tests/gmailTokenEncryption.test.ts src/tests/gmail-token-encryption.test.ts
+          git mv src/tests/notificationJob.test.ts src/tests/notification-job.test.ts
+          git rm -q eslint-suppressions.json
+          git rm -q src/client/api.ts
+      - name: Commit only the reviewed result
+        run: |
+          if [ "$(git write-tree)" != "06f013c048d0be582767f2d5c9753f86892e4574" ]; then
+            echo "The result does not match the reviewed tree. Nothing was pushed."
+            git status --short
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'refactor: kebab-case test files, remove the unused client and the lint baseline (COM-155 step 8)'
+          git push origin HEAD:refactor/COM-155-clean-up
