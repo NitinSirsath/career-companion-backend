@@ -23,7 +23,7 @@ export class CredentialUnreadableError extends Error {
 
 export function loadAICredentialKey(): Buffer {
   const hex = aiCredentialEncryptionKey();
-  if (!hex || !/^[0-9a-f]{64}$/i.test(hex)
+  if (!hex || !/^[0-9a-f]{64}$/i.test(hex))
     throw new Error('AI_CREDENTIAL_ENCRYPTION_KEY must be a 64-character hex string (32 bytes)');
   return Buffer.from(hex, 'hex');
 }
