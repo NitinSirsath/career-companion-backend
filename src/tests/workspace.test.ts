@@ -5,8 +5,8 @@ import request from 'supertest';
 import { prisma } from '../db/prisma';
 import { app } from '../index';
 import { readWorkspaceActions, readWorkspaceReview } from '../services/workspace';
-import { ApplicationService } from '../services/application';
-import { MatcherService } from '../services/matcher';
+import { listApplications, updateUserStatus } from '../services/application';
+import { getAmbiguousMatches, getUnmatchedEmails } from '../services/matcher';
 import { listPendingSubmissions } from '../services/externalSubmission';
 
 vi.mock('../jobs/notificationJob', () => ({
@@ -213,8 +213,8 @@ describe('daily workspace against PostgreSQL', () => {
       ],
     });
     const counts = await readWorkspaceReview(owner, at);
-    expect(counts.unmatched).toBe((await MatcherService.getUnmatchedEmails(owner)).length);
-    expect(counts.ambiguous).toBe((await MatcherService.getAmbiguousMatches(owner)).length);
+    expect(counts.unmatched).toBe((await getUnmatchedEmails(owner)).length);
+    expect(counts.ambiguous).toBe((await getAmbiguousMatches(owner)).length);
     expect(counts.pendingSubmissions).toBe((await listPendingSubmissions(owner, 20, 0)).length);
     expect(counts).toMatchObject({ unmatched: 1, ambiguous: 1, pendingSubmissions: 0 });
   });
@@ -271,26 +271,26 @@ describe('application discovery', () => {
     for (const q of ['a%_\\', 'senior engineer']) {
       expect(
         (
-          await ApplicationService.listApplications(owner, 20, 0, {
+          await listApplications(owner, 20, 0, {
             q,
             effectiveStatus: 'REJECTED',
           })
         ).map((row) => row.id),
       ).toEqual([target.id]);
       expect(
-        await ApplicationService.listApplications(owner, 20, 0, {
+        await listApplications(owner, 20, 0, {
           q,
           effectiveStatus: 'INTERVIEW',
         }),
       ).toHaveLength(0);
     }
-    await ApplicationService.updateUserStatus(owner, target.id, {
+    await updateUserStatus(owner, target.id, {
       userStatus: null,
       expectedUserStatusRevision: 0,
     });
     expect(
       (
-        await ApplicationService.listApplications(owner, 20, 0, {
+        await listApplications(owner, 20, 0, {
           q: 'a%_\\',
           effectiveStatus: 'INTERVIEW',
         })

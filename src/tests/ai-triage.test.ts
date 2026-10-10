@@ -31,9 +31,9 @@ import {
 } from '../jobs/relevanceTriageJob';
 import { getQueue } from '../services/queue';
 import { parseAI_TRIAGE_BATCH_ENABLED, parseAI_TRIAGE_BATCH_SIZE } from '../utils/config';
-import { GmailFetcherService } from '../services/gmailFetcher';
+import { fetchMessageMetadata } from '../services/gmailFetcher';
 import { getAccessState, resolveAIAccess } from '../services/ai/access';
-import { EmailAIPipeline } from '../services/ai/pipeline';
+import { processEmail } from '../services/ai/pipeline';
 import { holdOf } from '../services/ai/heldOperations';
 import { bindCapabilities } from '../services/ai/capabilities';
 import { strictJsonSchema } from '../services/ai/providers/jsonSchema';
@@ -106,7 +106,7 @@ beforeEach(async () => {
       consecutiveFailures: 0,
     },
   });
-  vi.mocked(GmailFetcherService.fetchMessageMetadata).mockResolvedValue({
+  vi.mocked(fetchMessageMetadata).mockResolvedValue({
     labelIds: ['INBOX'],
     snippet: 'fixture',
   });
@@ -263,7 +263,7 @@ describe('COM-125 relevance batch pure behavior', () => {
         prisma.email.create({ data: { userId, gmailMessageId: `happy-${i}` } }),
       ),
     );
-    vi.mocked(GmailFetcherService.fetchMessageMetadata).mockImplementation(async (_u, id) => ({
+    vi.mocked(fetchMessageMetadata).mockImplementation(async (_u, id) => ({
       labelIds: id.endsWith('0') || id.endsWith('1') ? ['INBOX', 'SPAM'] : ['INBOX'],
       snippet: 'fixture',
     }));
@@ -424,8 +424,8 @@ describe('COM-125 relevance batch pure behavior', () => {
       },
     });
     process.env.AI_TRIAGE_BATCH_ENABLED = 'true';
-    await EmailAIPipeline.processEmail(userId, perEmail.id);
-    expect(GmailFetcherService.fetchMessageMetadata).toHaveBeenCalledTimes(1);
+    await processEmail(userId, perEmail.id);
+    expect(fetchMessageMetadata).toHaveBeenCalledTimes(1);
     expect(
       await prisma.aIProcessingResult.findUnique({ where: { emailId: perEmail.id } }),
     ).toMatchObject({
@@ -450,8 +450,8 @@ describe('COM-125 relevance batch pure behavior', () => {
       },
     });
     process.env.AI_TRIAGE_BATCH_ENABLED = 'false';
-    await EmailAIPipeline.processEmail(userId, batched.id);
-    expect(GmailFetcherService.fetchMessageMetadata).toHaveBeenCalledTimes(1);
+    await processEmail(userId, batched.id);
+    expect(fetchMessageMetadata).toHaveBeenCalledTimes(1);
     expect(
       await prisma.aIProcessingResult.findUnique({ where: { emailId: batched.id } }),
     ).toMatchObject({
@@ -747,7 +747,7 @@ describe('COM-125 relevance batch pure behavior', () => {
   it('38 a Gmail failure hands that email to the per-email job', async () => {
     const bad = await prisma.email.create({ data: { userId, gmailMessageId: 'gmail-bad' } });
     await prisma.email.create({ data: { userId, gmailMessageId: 'gmail-good' } });
-    vi.mocked(GmailFetcherService.fetchMessageMetadata).mockImplementation(async (_u, id) => {
+    vi.mocked(fetchMessageMetadata).mockImplementation(async (_u, id) => {
       if (id === 'gmail-bad') throw new Error('Gmail request failed');
       return { labelIds: ['INBOX'], snippet: 'fixture' };
     });
@@ -809,7 +809,7 @@ describe('COM-125 relevance batch pure behavior', () => {
 
   it('42 a run with AI access not ready makes no Gmail calls and no claims', async () => {
     const email = await prisma.email.create({ data: { userId, gmailMessageId: 'noaccess-1' } });
-    vi.mocked(GmailFetcherService.fetchMessageMetadata).mockClear();
+    vi.mocked(fetchMessageMetadata).mockClear();
     vi.mocked(getAccessState).mockResolvedValue({
       state: 'LIMITED',
       reason: 'RATE_LIMITED',
@@ -817,7 +817,7 @@ describe('COM-125 relevance batch pure behavior', () => {
       resumesAt: null,
     });
     await expect(runTriage(userId)).resolves.toMatchObject({ stoppedBy: 'access_not_ready' });
-    expect(GmailFetcherService.fetchMessageMetadata).not.toHaveBeenCalled();
+    expect(fetchMessageMetadata).not.toHaveBeenCalled();
     expect(await prisma.aIOperation.count({ where: { emailId: email.id } })).toBe(0);
   });
 
@@ -893,7 +893,7 @@ describe('strict relevance rules apply to new mails only', () => {
     const email = await prisma.email.create({
       data: { userId, gmailMessageId: 'li-social', sender: linkedin },
     });
-    vi.mocked(GmailFetcherService.fetchMessageMetadata).mockResolvedValue({
+    vi.mocked(fetchMessageMetadata).mockResolvedValue({
       labelIds: ['INBOX', 'CATEGORY_SOCIAL'],
       snippet: 'fixture',
     });
@@ -998,11 +998,11 @@ describe('strict relevance rules apply to new mails only', () => {
         status: 'PENDING',
       },
     });
-    vi.mocked(GmailFetcherService.fetchMessageMetadata).mockResolvedValue({
+    vi.mocked(fetchMessageMetadata).mockResolvedValue({
       labelIds: ['INBOX', 'CATEGORY_SOCIAL'],
       snippet: 'fixture',
     });
-    await EmailAIPipeline.processEmail(userId, social.id);
+    await processEmail(userId, social.id);
     expect(classifySingle).not.toHaveBeenCalled();
     expect(
       await prisma.aIProcessingResult.findUnique({ where: { emailId: social.id } }),
@@ -1017,11 +1017,11 @@ describe('strict relevance rules apply to new mails only', () => {
         status: 'PENDING',
       },
     });
-    vi.mocked(GmailFetcherService.fetchMessageMetadata).mockResolvedValue({
+    vi.mocked(fetchMessageMetadata).mockResolvedValue({
       labelIds: ['INBOX'],
       snippet: 'fixture',
     });
-    await EmailAIPipeline.processEmail(userId, waiting.id);
+    await processEmail(userId, waiting.id);
     expect(classifySingle).toHaveBeenCalledTimes(1);
     expect(classifySingle.mock.calls[0][1]).toBe(LEGACY.CLASSIFICATION);
     expect(
@@ -1036,11 +1036,11 @@ describe('strict relevance rules apply to new mails only', () => {
     const email = await prisma.email.create({
       data: { userId, gmailMessageId: 'new-social', sender: linkedin },
     });
-    vi.mocked(GmailFetcherService.fetchMessageMetadata).mockResolvedValue({
+    vi.mocked(fetchMessageMetadata).mockResolvedValue({
       labelIds: ['INBOX', 'CATEGORY_SOCIAL'],
       snippet: 'fixture',
     });
-    await EmailAIPipeline.processEmail(userId, email.id);
+    await processEmail(userId, email.id);
     expect(classifySingle).toHaveBeenCalledTimes(1);
     expect(classifySingle.mock.calls[0][1]).toBe(AI_CONTRACT_VERSIONS.CLASSIFICATION);
     expect(

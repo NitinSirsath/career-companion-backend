@@ -50,39 +50,37 @@ function extractBody(message: gmail_v1.Schema$Message): string {
   return '';
 }
 
-export class GmailFetcherService {
-  static async fetchMessageMetadata(
-    userId: string,
-    gmailMessageId: string,
-    options: { signal?: AbortSignal } = {},
-  ): Promise<{ labelIds: string[] | null; snippet: string | null }> {
-    return withGmail(
-      userId,
-      async (gmail) => {
-        const { data } = await gmail.users.messages.get(
-          { userId: 'me', id: gmailMessageId, format: 'metadata' },
-          gmailCallOptions(options.signal),
-        );
-        return { labelIds: data.labelIds ?? null, snippet: data.snippet ?? null };
-      },
-      options,
-    );
-  }
-  static async fetchMessageBody(
-    userId: string,
-    gmailMessageId: string,
-    options: { signal?: AbortSignal } = {},
-  ): Promise<string> {
-    return withGmail(
-      userId,
-      async (gmail) => {
-        const { data } = await gmail.users.messages.get(
-          { userId: 'me', id: gmailMessageId, format: 'full' },
-          gmailCallOptions(options.signal),
-        );
-        return extractBody(data).slice(0, 8000);
-      },
-      options,
-    );
-  }
+export async function fetchMessageMetadata(
+  userId: string,
+  gmailMessageId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<{ labelIds: string[] | null; snippet: string | null }> {
+  return withGmail(
+    userId,
+    async (gmail) => {
+      const { data } = await gmail.users.messages.get(
+        { userId: 'me', id: gmailMessageId, format: 'metadata' },
+        gmailCallOptions(options.signal),
+      );
+      return { labelIds: data.labelIds ?? null, snippet: data.snippet ?? null };
+    },
+    options,
+  );
+}
+export async function fetchMessageBody(
+  userId: string,
+  gmailMessageId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<string> {
+  return withGmail(
+    userId,
+    async (gmail) => {
+      const { data } = await gmail.users.messages.get(
+        { userId: 'me', id: gmailMessageId, format: 'full' },
+        gmailCallOptions(options.signal),
+      );
+      return extractBody(data).slice(0, 8000);
+    },
+    options,
+  );
 }

@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import type { JobWithMetadata } from 'pg-boss';
 import { prisma } from '../db/prisma';
-import { GmailSyncService } from '../services/gmailSync';
+import * as gmailSync from '../services/gmailSync';
 import { GmailAuthError, SyncBusyError, SyncSupersededError } from '../services/gmailSyncErrors';
 import { handleGmailSyncJobs, requestGmailSync, GmailSyncJobData } from '../jobs/gmailSyncJob';
 const mocks = vi.hoisted(() => ({ send: vi.fn() }));
@@ -17,7 +17,7 @@ afterEach(() => vi.restoreAllMocks());
 it.each([new SyncBusyError(), new Error('temporary')])(
   'rejects retryable delivery failures',
   async (error) => {
-    vi.spyOn(GmailSyncService, 'syncUser').mockRejectedValue(error);
+    vi.spyOn(gmailSync, 'syncUser').mockRejectedValue(error);
     await expect(
       handleGmailSyncJobs([
         {
@@ -28,7 +28,7 @@ it.each([new SyncBusyError(), new Error('temporary')])(
         } as JobWithMetadata<GmailSyncJobData>,
       ]),
     ).rejects.toBe(error);
-    expect(GmailSyncService.syncUser).toHaveBeenCalledWith(userId, 'queued:fixture', {
+    expect(gmailSync.syncUser).toHaveBeenCalledWith(userId, 'queued:fixture', {
       trigger: 'scheduled',
       jobId: 'fixture',
       retryCount: 2,
@@ -39,7 +39,7 @@ it.each([new SyncBusyError(), new Error('temporary')])(
 it.each([new GmailAuthError(), new SyncSupersededError()])(
   'acknowledges terminal authentication or obsolete deliveries',
   async (error) => {
-    vi.spyOn(GmailSyncService, 'syncUser').mockRejectedValue(error);
+    vi.spyOn(gmailSync, 'syncUser').mockRejectedValue(error);
     await expect(
       handleGmailSyncJobs([
         {

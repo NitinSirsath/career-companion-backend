@@ -1,7 +1,7 @@
 import type { AIAccess } from './access';
 import { getAccessState, resolveAIAccess } from './access';
 import { prisma } from '../../db/prisma';
-import { GmailFetcherService } from '../gmailFetcher';
+import { fetchMessageMetadata } from '../gmailFetcher';
 import { enqueueEmailProcessingJob } from '../../jobs/emailProcessingJob';
 import { AIAccessError, AIProviderError, RetryableAIError, TerminalAIError } from './errors';
 import {
@@ -618,7 +618,7 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
           select: { id: true, gmailMessageId: true, sender: true, subject: true },
         });
         if (!email) throw new TerminalAIError('Email unavailable');
-        const gmail = await GmailFetcherService.fetchMessageMetadata(userId, email.gmailMessageId, {
+        const gmail = await fetchMessageMetadata(userId, email.gmailMessageId, {
           signal,
         });
         const labels = gmail.labelIds ?? [];
