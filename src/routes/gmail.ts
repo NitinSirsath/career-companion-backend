@@ -86,8 +86,6 @@ router.use(requireAuth);
 
 router.get('/status', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const userId = req.auth!.user.id;
-
     return res.status(200).json(await readGmailStatus(req.auth!.user.id));
   } catch (err) {
     next(err);
@@ -261,17 +259,7 @@ router.patch('/settings', async (req: Request, res: Response, next: NextFunction
     await setSyncLookbackDays(userId, syncLookbackDays);
 
     return res.status(200).json({ success: true, syncLookbackDays });
-  } catch (err: unknown) {
-    if (
-      typeof err === 'object' &&
-      err !== null &&
-      'code' in err &&
-      (err as { code: string }).code === 'P2025'
-    ) {
-      return res
-        .status(404)
-        .json({ error: { code: 'NOT_CONNECTED', message: 'Gmail connection not found' } });
-    }
+  } catch (err) {
     next(err);
   }
 });
@@ -279,7 +267,6 @@ router.patch('/settings', async (req: Request, res: Response, next: NextFunction
 export const gmailRouter = router;
 
 // ─── POST /api/gmail/sync ────────────────────────────────────────────────────
-
 
 router.post('/sync', async (req: Request, res: Response, next: NextFunction) => {
   try {
