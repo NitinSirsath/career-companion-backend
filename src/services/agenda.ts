@@ -137,6 +137,12 @@ export async function updateAgenda(userId: string, id: string, request: UpdateAg
   });
 }
 
+const ARCHIVE_FILTERS = {
+  all: Prisma.empty,
+  archived: Prisma.sql`AND app."archivedAt" IS NOT NULL`,
+  active: Prisma.sql`AND app."archivedAt" IS NULL`,
+};
+
 export async function readAgenda(
   userId: string,
   q: AgendaQuery,
@@ -159,28 +165,24 @@ export async function readAgenda(
     new Date(Date.parse(today) + days * 86400000).toISOString().slice(0, 10);
   const from = q.from ?? (q.view === 'past' ? shift(-30) : today);
   const to = q.to ?? (q.view === 'past' ? shift(1) : shift(30));
-  const archiveFilter =
-    q.archive === 'all'
-      ? Prisma.empty
-      : q.archive === 'archived'
-        ? Prisma.sql`AND app."archivedAt" IS NOT NULL`
-        : Prisma.sql`AND app."archivedAt" IS NULL`;
+  const archiveFilter = ARCHIVE_FILTERS[q.archive ?? 'active'];
   const extra = q.applicationId
     ? Prisma.sql`AND a."applicationId"=${q.applicationId}::uuid`
     : Prisma.empty;
   const effectiveDate = Prisma.sql`CASE WHEN a.precision='DATETIME' THEN (a.instant AT TIME ZONE 'UTC' AT TIME ZONE ${q.timeZone})::date ELSE a.date::date END`;
-  const filtering =
-    q.view === 'review'
-      ? Prisma.sql`a.state='TENTATIVE' AND a."retiredAt" IS NULL`
-      : q.view === 'history'
-        ? q.from
-          ? Prisma.sql`(a."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE ${q.timeZone})::date >= ${from}::date AND (a."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE ${q.timeZone})::date < ${to}::date`
-          : Prisma.sql`TRUE`
-        : Prisma.sql`a."retiredAt" IS NULL AND ${effectiveDate} >= ${from}::date AND ${effectiveDate} < ${to}::date AND ${
-            q.view === 'upcoming'
-              ? Prisma.sql`a.state='CONFIRMED' AND (CASE WHEN a.precision='DATETIME' THEN a.instant >= ${now} ELSE a.date >= ${today} END)`
-              : Prisma.sql`a.state IN ('CONFIRMED','COMPLETED') AND (CASE WHEN a.precision='DATETIME' THEN a.instant < ${now} ELSE a.date < ${today} END)`
-          }`;
+  const viewFilter = () => {
+    if (q.view === 'review') return Prisma.sql`a.state='TENTATIVE' AND a."retiredAt" IS NULL`;
+    if (q.view === 'history')
+      return q.from
+        ? Prisma.sql`(a."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE ${q.timeZone})::date >= ${from}::date AND (a."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE ${q.timeZone})::date < ${to}::date`
+        : Prisma.sql`TRUE`;
+    const state =
+      q.view === 'upcoming'
+        ? Prisma.sql`a.state='CONFIRMED' AND (CASE WHEN a.precision='DATETIME' THEN a.instant >= ${now} ELSE a.date >= ${today} END)`
+        : Prisma.sql`a.state IN ('CONFIRMED','COMPLETED') AND (CASE WHEN a.precision='DATETIME' THEN a.instant < ${now} ELSE a.date < ${today} END)`;
+    return Prisma.sql`a."retiredAt" IS NULL AND ${effectiveDate} >= ${from}::date AND ${effectiveDate} < ${to}::date AND ${state}`;
+  };
+  const filtering = viewFilter();
   const ordering = ['review', 'history'].includes(q.view)
     ? Prisma.sql`a."createdAt" DESC, a.id DESC`
     : Prisma.sql`${effectiveDate}, CASE WHEN a.precision='DATETIME' THEN 0 ELSE 1 END, a.instant ASC NULLS LAST, a.id`;
