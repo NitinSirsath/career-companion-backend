@@ -1,32 +1,10 @@
 import { suppressNotifications } from '../services/notificationSuppression';
+import { NOTIFICATION_JOB, NotificationJobData } from '../services/enqueue';
 import { getQueue } from '../services/queue';
 import { prisma } from '../db/prisma';
 import { DiscordProvider } from '../services/notifications/DiscordProvider';
 import { NotificationPayload } from '../services/notifications/NotificationProvider';
 import { logDebug, logEvent, logWarn, logError } from '../utils/log';
-
-export const NOTIFICATION_JOB = 'discord-notification-job';
-
-export interface NotificationJobData {
-  actionId: string;
-}
-
-export async function enqueueNotificationJob(actionId: string) {
-  const queue = await getQueue();
-  const jobId = `notify-discord-${actionId}`; // idempotency key
-
-  await queue.send(
-    NOTIFICATION_JOB,
-    { actionId },
-    {
-      singletonKey: jobId,
-      singletonSeconds: 300,
-      retryLimit: 3,
-      retryDelay: 60,
-      retryBackoff: true,
-    },
-  );
-}
 
 export async function startNotificationWorker() {
   const queue = await getQueue();
