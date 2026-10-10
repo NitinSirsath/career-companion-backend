@@ -7,9 +7,6 @@ import { logDebug, logEvent, logWarn, logError } from '../utils/log';
 
 export const EMAIL_PROCESSING_JOB = 'email-processing-job';
 export const EMAIL_RETRY_LIMIT = 3;
-// 300s expiry + ~120s detection + 60 * 2^3 backoff; also clears the
-// 15-minute uncertain AI claim threshold by five minutes.
-export const EMAIL_PROCESSING_STUCK_MS = 20 * 60_000;
 
 export interface EmailProcessingJobData {
   userId: string;
