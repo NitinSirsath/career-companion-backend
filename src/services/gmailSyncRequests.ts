@@ -4,11 +4,12 @@
  */
 import { randomUUID } from 'crypto';
 import { prisma } from '../db/prisma';
+import { gmailScheduleConfig } from '../utils/config';
 import { errorCategory } from '../utils/errorCategory';
 import { logError, logEvent } from '../utils/log';
 import { enqueueGmailSync } from './enqueue';
 import { assertSyncCanStart } from './gmailConnection';
-import { gmailScheduleConfig, latestSlot } from './gmailSchedule';
+import { latestSlot } from './gmailSchedule';
 import { syncLease } from './gmailSync';
 import { SyncInProgressError, SyncQueueError } from './gmailSyncErrors';
 
