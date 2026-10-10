@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { prisma } from '../db/prisma';
-import { runScheduledGmailSync } from '../jobs/gmailScheduledSyncJob';
+import { runScheduledGmailSync } from '../services/gmailSyncRequests';
 const mocks = vi.hoisted(() => ({ send: vi.fn() }));
 vi.mock('../services/queue', () => ({ getQueue: async () => ({ send: mocks.send }) }));
 const now = new Date('2026-10-02T12:31:00Z');
