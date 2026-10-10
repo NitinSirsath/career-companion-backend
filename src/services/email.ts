@@ -1,4 +1,7 @@
-/** The user's synced emails: the Gmail page list and the checks before a manual retry. */
+/**
+ * The user's synced emails: the Gmail page list, the checks before a manual retry, and the
+ * processing state the worker records.
+ */
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { AppError } from '../errors';
@@ -214,4 +217,53 @@ async function approveHeldOperations(
       currentProvider: config?.provider ?? null,
     });
   return Math.max(...held.map(({ op }) => op.approvedRetries)) + 1;
+}
+
+// Completed emails are never downgraded, so every worker update skips them.
+const notCompleted = (userId: string, emailId: string) => ({
+  id: emailId,
+  userId,
+  processingState: { not: 'COMPLETED' as const },
+});
+
+export async function markEmailProcessing(userId: string, emailId: string): Promise<void> {
+  await prisma.email.updateMany({
+    where: notCompleted(userId, emailId),
+    data: { processingState: 'PROCESSING' },
+  });
+}
+
+/** Puts an email that only waited for AI access back in line, with no failure recorded. */
+export async function returnEmailToPending(userId: string, emailId: string): Promise<void> {
+  await prisma.email.updateMany({
+    where: notCompleted(userId, emailId),
+    data: {
+      processingState: 'PENDING',
+      processingErrorCategory: null,
+      processingErrorDetails: null,
+      processingErrorStage: null,
+      processingRetryable: null,
+      processingFailedAt: null,
+    },
+  });
+}
+
+/** Records a failed attempt. `final` means no delivery is left, so the email becomes FAILED. */
+export async function recordEmailFailure(
+  userId: string,
+  emailId: string,
+  failure: { category: string; details: string; stage: string | null; retryable: boolean },
+  final: boolean,
+): Promise<void> {
+  await prisma.email.updateMany({
+    where: notCompleted(userId, emailId),
+    data: {
+      processingState: final ? 'FAILED' : 'PROCESSING',
+      processingErrorCategory: failure.category,
+      processingErrorDetails: failure.details,
+      processingErrorStage: failure.stage,
+      processingRetryable: final ? false : failure.retryable,
+      processingFailedAt: new Date(),
+    },
+  });
 }
