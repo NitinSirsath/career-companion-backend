@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
-import { latestSlot, nextSlot, parseGmailSchedule } from '../services/gmailSchedule';
+import { latestSlot, nextSlot } from '../services/gmailSchedule';
+import { parseGmailSchedule } from '../utils/config';
 it.each([
   ['2026-10-02T12:29:59Z', '2026-10-01T18:30:00Z', '2026-10-02T12:30:00Z'],
   ['2026-10-02T12:30:00Z', '2026-10-02T12:30:00Z', '2026-10-02T18:30:00Z'],
