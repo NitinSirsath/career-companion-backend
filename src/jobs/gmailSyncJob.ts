@@ -1,70 +1,10 @@
 import { JobWithMetadata } from 'pg-boss';
-import { SyncQueueError, SyncSupersededError } from '../services/gmailSyncErrors';
-import { randomUUID } from 'crypto';
-import { prisma } from '../db/prisma';
+import { GMAIL_SYNC_JOB, GmailSyncJobData } from '../services/enqueue';
 import { getQueue } from '../services/queue';
-import { GmailAuthError, SyncInProgressError, syncLease, syncUser } from '../services/gmailSync';
-import { logDebug, logError } from '../utils/log';
+import { syncUser } from '../services/gmailSync';
+import { GmailAuthError, SyncSupersededError } from '../services/gmailSyncErrors';
+import { logDebug } from '../utils/log';
 
-export const GMAIL_SYNC_EXPIRE_SECONDS = 300;
-
-export async function requestGmailSync(userId: string, trigger: 'manual' | 'scheduled' = 'manual') {
-  const claim = `queued:${randomUUID()}`;
-  const accepted = await prisma.gmailConnection.updateMany({
-    where: {
-      userId,
-      status: 'CONNECTED',
-      OR: [
-        { syncStatus: { not: 'SYNCING' } },
-        { syncLeaseUntil: { lt: new Date() } },
-        { syncLeaseUntil: null },
-      ],
-    },
-    data: { syncStatus: 'SYNCING', syncClaim: claim, syncLeaseUntil: syncLease(), syncError: null },
-  });
-  if (!accepted.count) throw new SyncInProgressError('A sync is already in progress');
-  try {
-    const queue = await getQueue();
-    const id = await queue.send(
-      'gmail-sync-job',
-      { userId, claim, trigger },
-      {
-        singletonKey: claim,
-        retryLimit: 3,
-        retryDelay: 60,
-        retryBackoff: true,
-        expireInSeconds: GMAIL_SYNC_EXPIRE_SECONDS,
-      },
-    );
-    if (!id) throw new Error('Sync job was not queued');
-    return { accepted: true as const };
-  } catch {
-    await prisma.gmailConnection
-      .updateMany({
-        where: { userId, syncClaim: claim },
-        data: {
-          syncStatus: 'FAILED',
-          syncClaim: null,
-          syncLeaseUntil: null,
-          syncError: 'QUEUE_UNAVAILABLE',
-        },
-      })
-      .catch(() => undefined);
-    logError('gmail_sync_failed', {
-      category: 'QUEUE_UNAVAILABLE',
-      trigger,
-      userId,
-      requestId: claim,
-    });
-    throw new SyncQueueError();
-  }
-}
-
-export interface GmailSyncJobData {
-  userId: string;
-  claim: string;
-  trigger?: 'manual' | 'scheduled';
-}
 export async function handleGmailSyncJobs(jobs: JobWithMetadata<GmailSyncJobData>[]) {
   for (const job of jobs) {
     try {
@@ -83,6 +23,6 @@ export async function handleGmailSyncJobs(jobs: JobWithMetadata<GmailSyncJobData
 }
 export async function startGmailSyncWorker() {
   const queue = await getQueue();
-  await queue.work('gmail-sync-job', { includeMetadata: true, batchSize: 1 }, handleGmailSyncJobs);
-  logDebug('worker_registered', { queue: 'gmail-sync-job' });
+  await queue.work(GMAIL_SYNC_JOB, { includeMetadata: true, batchSize: 1 }, handleGmailSyncJobs);
+  logDebug('worker_registered', { queue: GMAIL_SYNC_JOB });
 }
