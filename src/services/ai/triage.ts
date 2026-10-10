@@ -1,5 +1,6 @@
 import type { AIAccess } from './access';
 import { getAccessState, resolveAIAccess } from './access';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { fetchMessageMetadata } from '../gmailFetcher';
 import { enqueueEmailProcessingJob } from '../enqueue';
@@ -122,15 +123,36 @@ async function batchCandidates(
     .slice(0, limit);
 }
 
+/** What every step of one batch call needs. */
+interface BatchRun {
+  userId: string;
+  access: AIAccess;
+  /** Every item in one batch shares one version; callers group older emails by their pinned version. */
+  version: string;
+  now: Date;
+  /** false when called from classifyOne: the per-email job owns the email's state there. */
+  updateEmails: boolean;
+}
+
+const classificationKey = (emailId: string, version: string) => ({
+  emailId_operation_version: { emailId, operation: 'classification', version },
+});
+
+const CLEARED_FAILURE = {
+  processingErrorCategory: null,
+  processingErrorDetails: null,
+  processingErrorStage: null,
+  processingRetryable: null,
+  processingFailedAt: null,
+};
+
 export async function classifyBatch(
   userId: string,
   items: Candidate[],
   access: AIAccess,
   options: { signal?: AbortSignal; updateEmails?: boolean; version?: string } = {},
 ) {
-  // false when called from classifyOne: the per-email job owns the email's state there.
   const updateEmails = options.updateEmails ?? true;
-  // Every item in one batch shares one version; callers group older emails by their pinned version.
   const version = options.version ?? AI_CONTRACT_VERSIONS.RELEVANCE_BATCH;
   if (!RELEVANCE_BATCH_VERSIONS.includes(version))
     throw new TerminalAIError('Unknown relevance batch version');
@@ -148,12 +170,83 @@ export async function classifyBatch(
   const threshold = relevanceThreshold();
   // Checked before claiming: an abort here leaves nothing claimed and nothing sent.
   options.signal?.throwIfAborted();
-  const now = new Date();
-  const model = access.models.fast;
-  const claimed: Candidate[] = [];
-  let batchId: string | null = null;
+  const run: BatchRun = { userId, access, version, now: new Date(), updateEmails };
+  const { batchId, claimed } = await claimBatch(run, items);
 
+  const sent = buildRelevanceBatchInput(claimed.map((item) => item.input));
+  let result: AIResult<{ results: unknown[] }>;
+  try {
+    result = await access.classifier.classifyRelevanceBatch(sent, version);
+  } catch (err) {
+    throw await failBatch(err, {
+      userId,
+      access,
+      batchId,
+      claimed,
+      now: run.now,
+      modelId: access.models.fast.id,
+      updateEmails,
+      version,
+    });
+  }
+
+  // Deliberately outside the catch (same rule as runOperation): if saving fails after the provider
+  // answered, the rows stay PROCESSING, later become held for approval, and are never resent.
+  await recordTokens(userId, run.now, result.usage);
+  const keys = sent.items.map((item) => item.key!);
+  const mapped = mapBatchResults(keys, result.data.results);
+  const byEmail = new Map<string, BatchOutcome>();
   await prisma.$transaction(async (tx) => {
+    const batch = await tx.aIBatch.update({
+      where: { id: batchId },
+      data: {
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+        errorCode: null,
+      },
+    });
+    for (let index = 0; index < claimed.length; index++) {
+      const { emailId } = claimed[index];
+      const answer = mapped.decided.get(keys[index]);
+      if (!answer) {
+        await saveMissingAnswer(tx, run, emailId);
+        byEmail.set(emailId, 'UNDECIDED');
+        continue;
+      }
+      const decision = {
+        decision: answer.confidence < threshold ? ('UNCERTAIN' as const) : answer.decision,
+        confidence: answer.confidence,
+        category: answer.category,
+      };
+      await saveDecision(tx, run, emailId, decision, {
+        provider: batch.provider!,
+        model: batch.model!,
+      });
+      byEmail.set(emailId, decision.decision);
+    }
+  });
+  await noteProviderSuccess(access);
+  logEvent('ai_batch_completed', {
+    batchId,
+    userId,
+    itemCount: claimed.length,
+    decided: mapped.decided.size,
+    undecided: mapped.undecided.length,
+    ignored: mapped.ignored,
+  });
+  return { ...mapped, batchId, byEmail };
+}
+
+/**
+ * Commits the batch and one claimed attempt per email before the provider is called, and
+ * reserves one call for the user. Emails another worker holds are left out of the batch.
+ */
+async function claimBatch(run: BatchRun, items: Candidate[]) {
+  const { userId, access, version, now } = run;
+  const model = access.models.fast;
+  return prisma.$transaction(async (tx) => {
     // New mails only: an email that already has a row of another relevance version is never claimed here.
     const pinned = await tx.aIOperation.findMany({
       where: {
@@ -189,16 +282,10 @@ export async function classifyBatch(
         startedAt: now,
       },
     });
-    batchId = batch.id;
+    const claimed: Candidate[] = [];
     for (const item of eligible) {
       const existing = await tx.aIOperation.findUniqueOrThrow({
-        where: {
-          emailId_operation_version: {
-            emailId: item.emailId,
-            operation: 'classification',
-            version,
-          },
-        },
+        where: classificationKey(item.emailId, version),
       });
       const claim = await tx.aIOperation.updateMany({
         where: {
@@ -222,7 +309,7 @@ export async function classifyBatch(
     }
     if (!claimed.length) throw new RetryableAIError('AI operation not ready');
     await reserveUserCall(tx, userId, now);
-    if (updateEmails)
+    if (run.updateEmails)
       await tx.email.updateMany({
         where: {
           userId,
@@ -239,150 +326,77 @@ export async function classifyBatch(
       provider: access.provider,
       model: model.id,
     });
+    return { batchId: batch.id, claimed };
   });
+}
 
-  const sent = buildRelevanceBatchInput(claimed.map((item) => item.input));
-  let result: AIResult<{ results: unknown[] }>;
-  try {
-    result = await access.classifier.classifyRelevanceBatch(sent, version);
-  } catch (err) {
-    throw await failBatch(err, {
-      userId,
-      access,
-      batchId: batchId!,
-      claimed,
-      now,
-      modelId: model.id,
-      updateEmails,
-      version,
-    });
-  }
-
-  // Deliberately outside the catch (same rule as runOperation): if saving fails after the provider
-  // answered, the rows stay PROCESSING, later become held for approval, and are never resent.
-  await recordTokens(userId, now, result.usage);
-  const mapped = mapBatchResults(
-    sent.items.map((item) => item.key!),
-    result.data.results,
-  );
-  const byEmail = new Map<string, BatchOutcome>();
-  const cleared = {
-    processingErrorCategory: null,
-    processingErrorDetails: null,
-    processingErrorStage: null,
-    processingRetryable: null,
-    processingFailedAt: null,
-  };
-  await prisma.$transaction(async (tx) => {
-    const batch = await tx.aIBatch.update({
-      where: { id: batchId! },
-      data: {
-        status: 'COMPLETED',
-        completedAt: new Date(),
-        inputTokens: result.usage.inputTokens,
-        outputTokens: result.usage.outputTokens,
-        errorCode: null,
-      },
-    });
-    for (let index = 0; index < claimed.length; index++) {
-      const item = claimed[index];
-      const decision = mapped.decided.get(sent.items[index].key!);
-      const op = await tx.aIOperation.findUniqueOrThrow({
-        where: {
-          emailId_operation_version: {
-            emailId: item.emailId,
-            operation: 'classification',
-            version,
-          },
-        },
-      });
-      if (!decision) {
-        // Stays RETRYABLE even when its attempts are used up: holdOf then offers the user an approval.
-        await tx.aIOperation.update({
-          where: { id: op.id },
-          data: { status: 'RETRYABLE', errorCode: 'BATCH_ITEM_MISSING', retryAfter: null },
-        });
-        if (updateEmails) {
-          const exhausted = op.attempts >= MAX_ATTEMPTS + op.approvedRetries;
-          await tx.email.updateMany({
-            where: { id: item.emailId, userId },
-            data: exhausted
-              ? {
-                  processingState: 'FAILED',
-                  processingErrorCategory: 'BatchItemMissing',
-                  processingErrorDetails: null,
-                  processingErrorStage: 'classification',
-                  processingRetryable: false,
-                  processingFailedAt: new Date(),
-                }
-              : { processingState: 'PENDING', ...cleared },
-          });
+/** The provider's answer left this email out: it is offered again, or fails once attempts run out. */
+async function saveMissingAnswer(tx: Prisma.TransactionClient, run: BatchRun, emailId: string) {
+  const op = await tx.aIOperation.findUniqueOrThrow({
+    where: classificationKey(emailId, run.version),
+  });
+  // Stays RETRYABLE even when its attempts are used up: holdOf then offers the user an approval.
+  await tx.aIOperation.update({
+    where: { id: op.id },
+    data: { status: 'RETRYABLE', errorCode: 'BATCH_ITEM_MISSING', retryAfter: null },
+  });
+  if (!run.updateEmails) return;
+  const exhausted = op.attempts >= MAX_ATTEMPTS + op.approvedRetries;
+  await tx.email.updateMany({
+    where: { id: emailId, userId: run.userId },
+    data: exhausted
+      ? {
+          processingState: 'FAILED',
+          processingErrorCategory: 'BatchItemMissing',
+          processingErrorDetails: null,
+          processingErrorStage: 'classification',
+          processingRetryable: false,
+          processingFailedAt: new Date(),
         }
-        byEmail.set(item.emailId, 'UNDECIDED');
-        continue;
-      }
-      const decisionState = decision.confidence < threshold ? 'UNCERTAIN' : decision.decision;
-      byEmail.set(item.emailId, decisionState);
-      await tx.aIOperation.update({
-        where: { id: op.id },
-        data: {
-          status: 'COMPLETED',
-          result: {
-            decision: decisionState,
-            confidence: decision.confidence,
-            category: decision.category,
-          },
-          completedAt: new Date(),
-          retryAfter: null,
-        },
-      });
-      await tx.aIProcessingResult.upsert({
-        where: { emailId: item.emailId },
-        create: {
-          emailId: item.emailId,
-          provider: batch.provider!,
-          model: batch.model!,
-          contractVersion: version,
-          relevanceDecision: decisionState,
-          confidence: decision.confidence,
-          category: decision.category,
-          deterministic: false,
-          processingStatus: decisionState === 'IRRELEVANT' ? 'COMPLETED' : 'PROCESSING',
-        },
-        update: {
-          provider: batch.provider!,
-          model: batch.model!,
-          contractVersion: version,
-          relevanceDecision: decisionState,
-          confidence: decision.confidence,
-          category: decision.category,
-          deterministic: false,
-          processingStatus: decisionState === 'IRRELEVANT' ? 'COMPLETED' : 'PROCESSING',
-          errorCategory: null,
-          errorDetails: null,
-        },
-      });
-      if (updateEmails)
-        await tx.email.updateMany({
-          where: { id: item.emailId, userId },
-          // relevanceState of job-related email is set by the pipeline's finish(), after extraction.
-          data:
-            decisionState === 'IRRELEVANT'
-              ? { processingState: 'COMPLETED', relevanceState: 'IRRELEVANT', ...cleared }
-              : { processingState: 'PENDING', ...cleared },
-        });
-    }
+      : { processingState: 'PENDING', ...CLEARED_FAILURE },
   });
-  await noteProviderSuccess(access);
-  logEvent('ai_batch_completed', {
-    batchId,
-    userId,
-    itemCount: claimed.length,
-    decided: mapped.decided.size,
-    undecided: mapped.undecided.length,
-    ignored: mapped.ignored,
+}
+
+/** Saves one email's decision on its operation row and its result, and moves the email on. */
+async function saveDecision(
+  tx: Prisma.TransactionClient,
+  run: BatchRun,
+  emailId: string,
+  decision: Pick<RelevanceBatchItem, 'confidence' | 'category'> & {
+    decision: Exclude<BatchOutcome, 'UNDECIDED'>;
+  },
+  producedBy: { provider: string; model: string },
+) {
+  const irrelevant = decision.decision === 'IRRELEVANT';
+  const op = await tx.aIOperation.findUniqueOrThrow({
+    where: classificationKey(emailId, run.version),
   });
-  return { ...mapped, batchId, byEmail };
+  await tx.aIOperation.update({
+    where: { id: op.id },
+    data: { status: 'COMPLETED', result: decision, completedAt: new Date(), retryAfter: null },
+  });
+  const result = {
+    ...producedBy,
+    contractVersion: run.version,
+    relevanceDecision: decision.decision,
+    confidence: decision.confidence,
+    category: decision.category,
+    deterministic: false,
+    processingStatus: irrelevant ? ('COMPLETED' as const) : ('PROCESSING' as const),
+  };
+  await tx.aIProcessingResult.upsert({
+    where: { emailId },
+    create: { emailId, ...result },
+    update: { ...result, errorCategory: null, errorDetails: null },
+  });
+  if (!run.updateEmails) return;
+  await tx.email.updateMany({
+    where: { id: emailId, userId: run.userId },
+    // relevanceState of job-related email is set by the pipeline's finish(), after extraction.
+    data: irrelevant
+      ? { processingState: 'COMPLETED', relevanceState: 'IRRELEVANT', ...CLEARED_FAILURE }
+      : { processingState: 'PENDING', ...CLEARED_FAILURE },
+  });
 }
 
 const REFUSALS = [
@@ -394,6 +408,11 @@ const REFUSALS = [
 type Refusal = (typeof REFUSALS)[number];
 const isRefusal = (kind: string | undefined): kind is Refusal =>
   kind !== undefined && (REFUSALS as readonly string[]).includes(kind);
+
+function batchFailureStatus(kind: string | undefined) {
+  if (isRefusal(kind)) return 'REFUSED';
+  return kind === 'INVALID_OUTPUT' || kind === 'INVALID_REQUEST' ? 'FAILED' : 'UNKNOWN';
+}
 
 /**
  * Records a failed batch call on every claimed row (and, from the triage job, on the emails) and
@@ -416,16 +435,9 @@ async function failBatch(
   const failure = failureKind(err);
   const kind = failure?.kind;
   const refusal = isRefusal(kind) ? kind : null;
-  const status = refusal
-    ? 'REFUSED'
-    : kind === 'INVALID_OUTPUT' || kind === 'INVALID_REQUEST'
-      ? 'FAILED'
-      : 'UNKNOWN';
-  const thrown: unknown = refusal
-    ? null
-    : failure
-      ? failureError(failure.kind, failure.message)
-      : err;
+  const status = batchFailureStatus(kind);
+  const classified = failure ? failureError(failure.kind, failure.message) : err;
+  const thrown: unknown = refusal ? null : classified;
   const resumesAt = await prisma.$transaction(async (tx) => {
     await tx.aIBatch.update({
       where: { id: ctx.batchId },

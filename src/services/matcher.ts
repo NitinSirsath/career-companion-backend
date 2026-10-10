@@ -1,7 +1,7 @@
 import { suppressNotifications } from './notificationSuppression';
 import { AppError, CHANGE_REJECTED } from '../errors';
 import { projectAgenda } from './agenda';
-import { Prisma, Email, Application } from '@prisma/client';
+import { Prisma, Email, Application, Action } from '@prisma/client';
 import type { CorrectEmailMatchRequest } from '../contracts/email';
 import { lockUser, LOCK_NAMESPACE } from '../utils/advisoryLock';
 import { parseActionDeadline } from '../utils/actionDeadline';
@@ -216,98 +216,32 @@ export async function applyMatch(
   return actionId !== undefined;
 }
 
+type EmailWithResult = Prisma.EmailGetPayload<{ include: { aiProcessingResult: true } }>;
+
 export async function correctEmailMatch(
   userId: string,
   emailId: string,
   request: CorrectEmailMatchRequest,
 ) {
+  const target = request.applicationId;
   const result = await prisma.$transaction(async (tx) => {
-    await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
-    await tx.$queryRaw`SELECT id FROM emails WHERE id = ${emailId}::uuid AND "userId" = ${userId}::uuid FOR UPDATE`;
-    const email = await tx.email.findFirst({
-      where: { id: emailId, userId },
-      include: { aiProcessingResult: true },
-    });
-    if (!email) throw new AppError(404, 'NOT_FOUND', MATCH_GONE);
-    if (
-      email.matchState !== request.expectedMatchState ||
-      email.applicationId !== request.expectedApplicationId
-    )
-      throw new AppError(409, 'MATCH_CONFLICT', MATCH_CHANGED);
-    const target = request.applicationId;
-    const events = await tx.applicationEvent.findMany({
-      where: {
-        emailId,
-        retiredAt: null,
-        externalSubmissionId: null,
-        type: { not: 'AUTOMATION_SUBMITTED' },
-        application: { userId },
-      },
-      select: { applicationId: true },
-    });
-    const actions = await tx.action.findMany({
-      where: { emailId, retiredAt: null, application: { userId } },
-      select: { applicationId: true, status: true, snoozedUntil: true },
-    });
-    const agenda = await tx.agendaItem.findMany({
-      where: { emailId, userId, retiredAt: null },
-      orderBy: { id: 'asc' },
-    });
-    const priorActions = actions.length
-      ? actions
-      : await tx.action.findMany({
-          where: { emailId, application: { userId }, retiredAt: { not: null } },
-          orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-          take: 1,
-        });
-    const priorAgenda = agenda.length
-      ? agenda
-      : await tx.agendaItem.findMany({
-          where: { emailId, userId },
-          orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-        });
-    const affected = [
-      ...new Set([
-        ...(email.applicationId ? [email.applicationId] : []),
-        ...events.map((e) => e.applicationId),
-        ...actions.map((a) => a.applicationId),
-        ...agenda.map((a) => a.applicationId),
-        ...(target ? [target] : []),
-      ]),
-    ].sort();
-    const apps = affected.length
-      ? await tx.$queryRaw<
-          Application[]
-        >`SELECT * FROM applications WHERE id = ANY(${affected}::uuid[]) AND "userId" = ${userId}::uuid ORDER BY id FOR UPDATE`
-      : [];
+    const email = await lockEmailForCorrection(tx, userId, emailId, request);
+    const work = await workFromEmail(tx, userId, emailId);
+    const apps = await lockApplications(tx, userId, [
+      ...(email.applicationId ? [email.applicationId] : []),
+      ...work.events.map((e) => e.applicationId),
+      ...work.actions.map((a) => a.applicationId),
+      ...work.agenda.map((a) => a.applicationId),
+      ...(target ? [target] : []),
+    ]);
     const targetApp = apps.find((a) => a.id === target);
     if (target && !targetApp) throw new AppError(404, 'APPLICATION_NOT_FOUND', MATCH_GONE);
     if (targetApp?.archivedAt) throw new AppError(409, 'APPLICATION_ARCHIVED', CHANGE_REJECTED);
     if (target && !email.aiProcessingResult)
       throw new AppError(409, 'MATCH_NOT_CORRECTABLE', MATCH_CHANGED);
+
     const sources = apps.filter((a) => a.id !== target).map((a) => a.id);
-    const retirement = {
-      retiredAt: new Date(),
-      retiredReason: target ? ('EMAIL_MOVED' as const) : ('EMAIL_UNLINKED' as const),
-    };
-    const retiredEvents = await tx.applicationEvent.updateMany({
-      where: {
-        emailId,
-        applicationId: { in: sources },
-        retiredAt: null,
-        externalSubmissionId: null,
-        type: { not: 'AUTOMATION_SUBMITTED' },
-      },
-      data: retirement,
-    });
-    const retiredActions = await tx.action.updateMany({
-      where: { emailId, applicationId: { in: sources }, retiredAt: null },
-      data: { ...retirement, actionRevision: { increment: 1 } },
-    });
-    await tx.agendaItem.updateMany({
-      where: { emailId, userId, applicationId: { in: sources }, retiredAt: null },
-      data: { ...retirement, revision: { increment: 1 } },
-    });
+    const retired = await retireWorkFromEmail(tx, userId, emailId, sources, !!target);
     const updated = await tx.email.update({
       where: { id: emailId },
       data: {
@@ -318,47 +252,157 @@ export async function correctEmailMatch(
       select: { id: true, matchState: true, matchConfirmedBy: true, applicationId: true },
     });
     if (targetApp && email.aiProcessingResult) {
-      const carried = priorActions.some((a) => a.status === 'COMPLETED')
-        ? 'COMPLETED'
-        : priorActions.some((a) => a.status === 'DISMISSED')
-          ? 'DISMISSED'
-          : 'PENDING';
-      await applyEffects(
-        tx,
-        email,
-        targetApp,
-        email.aiProcessingResult,
-        true,
-        carried,
-        priorActions.find((a) => a.status === 'PENDING' && a.snoozedUntil)?.snoozedUntil ?? null,
-      );
-      await projectAgenda(tx, email, targetApp, email.aiProcessingResult, true, priorAgenda);
-    }
-    for (const id of sources) {
-      const remaining = await tx.aIProcessingResult.findMany({
-        where: { email: { userId, applicationId: id, matchState: 'MATCHED' } },
+      // The user's earlier answer travels with the email: done stays done, a snooze stays a snooze.
+      await applyEffects(tx, email, targetApp, email.aiProcessingResult, {
+        reactivate: true,
+        actionStatus: carriedActionStatus(work.priorActions),
+        snoozedUntil:
+          work.priorActions.find((a) => a.status === 'PENDING' && a.snoozedUntil)?.snoozedUntil ??
+          null,
       });
-      const aiStatus = aiStatusFromEvidence(remaining);
-      if (apps.find((a) => a.id === id)!.aiStatus !== aiStatus)
-        await tx.application.update({ where: { id }, data: { aiStatus } });
+      await projectAgenda(tx, email, targetApp, email.aiProcessingResult, true, work.priorAgenda);
     }
+    await refreshAiStatus(
+      tx,
+      userId,
+      apps.filter((a) => sources.includes(a.id)),
+    );
     return {
       email: updated,
       affectedApplicationIds: apps.map((a) => a.id),
       fromApplicationIds: sources,
-      retiredEvents: retiredEvents.count,
-      retiredActions: retiredActions.count,
+      ...retired,
     };
   });
   logEvent('email_match_corrected', {
     emailId,
-    kind: request.applicationId ? 'MOVE' : 'UNLINK',
+    kind: target ? 'MOVE' : 'UNLINK',
     fromApplicationIds: result.fromApplicationIds,
-    toApplicationId: request.applicationId,
+    toApplicationId: target,
     retiredEvents: result.retiredEvents,
     retiredActions: result.retiredActions,
   });
   return { email: result.email, affectedApplicationIds: result.affectedApplicationIds };
+}
+
+/** Locks the email and refuses the correction when the user acted on an outdated screen. */
+async function lockEmailForCorrection(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  emailId: string,
+  request: CorrectEmailMatchRequest,
+): Promise<EmailWithResult> {
+  await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
+  await tx.$queryRaw`SELECT id FROM emails WHERE id = ${emailId}::uuid AND "userId" = ${userId}::uuid FOR UPDATE`;
+  const email = await tx.email.findFirst({
+    where: { id: emailId, userId },
+    include: { aiProcessingResult: true },
+  });
+  if (!email) throw new AppError(404, 'NOT_FOUND', MATCH_GONE);
+  if (
+    email.matchState !== request.expectedMatchState ||
+    email.applicationId !== request.expectedApplicationId
+  )
+    throw new AppError(409, 'MATCH_CONFLICT', MATCH_CHANGED);
+  return email;
+}
+
+/**
+ * The events, actions and agenda items this email produced. When none is live any more, the
+ * `prior` lists hold the retired ones, so a move can carry the user's earlier answers over.
+ */
+async function workFromEmail(tx: Prisma.TransactionClient, userId: string, emailId: string) {
+  const events = await tx.applicationEvent.findMany({
+    where: {
+      emailId,
+      retiredAt: null,
+      externalSubmissionId: null,
+      type: { not: 'AUTOMATION_SUBMITTED' },
+      application: { userId },
+    },
+    select: { applicationId: true },
+  });
+  const actions = await tx.action.findMany({
+    where: { emailId, retiredAt: null, application: { userId } },
+    select: { applicationId: true, status: true, snoozedUntil: true },
+  });
+  const agenda = await tx.agendaItem.findMany({
+    where: { emailId, userId, retiredAt: null },
+    orderBy: { id: 'asc' },
+  });
+  const priorActions = actions.length
+    ? actions
+    : await tx.action.findMany({
+        where: { emailId, application: { userId }, retiredAt: { not: null } },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        take: 1,
+      });
+  const priorAgenda = agenda.length
+    ? agenda
+    : await tx.agendaItem.findMany({
+        where: { emailId, userId },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      });
+  return { events, actions, agenda, priorActions, priorAgenda };
+}
+
+/** Locks the user's applications in ID order, so two corrections cannot deadlock. */
+async function lockApplications(tx: Prisma.TransactionClient, userId: string, ids: string[]) {
+  const affected = [...new Set(ids)].sort();
+  if (!affected.length) return [];
+  return tx.$queryRaw<
+    Application[]
+  >`SELECT * FROM applications WHERE id = ANY(${affected}::uuid[]) AND "userId" = ${userId}::uuid ORDER BY id FOR UPDATE`;
+}
+
+/** Retires what the email produced on the applications it is leaving. Nothing is deleted. */
+async function retireWorkFromEmail(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  emailId: string,
+  sources: string[],
+  moved: boolean,
+) {
+  const retirement = {
+    retiredAt: new Date(),
+    retiredReason: moved ? ('EMAIL_MOVED' as const) : ('EMAIL_UNLINKED' as const),
+  };
+  const retiredEvents = await tx.applicationEvent.updateMany({
+    where: {
+      emailId,
+      applicationId: { in: sources },
+      retiredAt: null,
+      externalSubmissionId: null,
+      type: { not: 'AUTOMATION_SUBMITTED' },
+    },
+    data: retirement,
+  });
+  const retiredActions = await tx.action.updateMany({
+    where: { emailId, applicationId: { in: sources }, retiredAt: null },
+    data: { ...retirement, actionRevision: { increment: 1 } },
+  });
+  await tx.agendaItem.updateMany({
+    where: { emailId, userId, applicationId: { in: sources }, retiredAt: null },
+    data: { ...retirement, revision: { increment: 1 } },
+  });
+  return { retiredEvents: retiredEvents.count, retiredActions: retiredActions.count };
+}
+
+function carriedActionStatus(priorActions: { status: Action['status'] }[]) {
+  if (priorActions.some((a) => a.status === 'COMPLETED')) return 'COMPLETED';
+  return priorActions.some((a) => a.status === 'DISMISSED') ? 'DISMISSED' : 'PENDING';
+}
+
+/** An application's AI status follows the emails still matched to it. */
+async function refreshAiStatus(tx: Prisma.TransactionClient, userId: string, apps: Application[]) {
+  for (const app of apps) {
+    const remaining = await tx.aIProcessingResult.findMany({
+      where: { email: { userId, applicationId: app.id, matchState: 'MATCHED' } },
+    });
+    const aiStatus = aiStatusFromEvidence(remaining);
+    if (app.aiStatus !== aiStatus)
+      await tx.application.update({ where: { id: app.id }, data: { aiStatus } });
+  }
 }
 
 export async function getAmbiguousMatches(userId: string, limit: number = 20, offset: number = 0) {
@@ -524,14 +568,49 @@ export async function threadDecision(db: Prisma.TransactionClient, email: Email)
     : { kind: 'NONE' as const };
 }
 
+/**
+ * Applies a matched email to its application: status, timeline event, agenda and action.
+ * Returns the ID of the action to notify about, or null when there is nothing to notify.
+ */
 async function applyEffects(
   tx: Prisma.TransactionClient,
   email: Email,
   app: Application,
   aiResult: AIProcessingResult,
-  reactivate = false,
-  actionStatus = 'PENDING',
-  snoozedUntil: Date | null = null,
+  carried: {
+    reactivate?: boolean;
+    actionStatus?: Action['status'];
+    snoozedUntil?: Date | null;
+  } = {},
+) {
+  const { reactivate = false, actionStatus = 'PENDING', snoozedUntil = null } = carried;
+  await recordEmailOnTimeline(tx, email, app, aiResult, reactivate);
+  if (!reactivate) await projectAgenda(tx, email, app, aiResult);
+  if (!aiResult.actionRequired && !aiResult.followUpRequired) return null;
+
+  const existing = await tx.action.findFirst({
+    where: { applicationId: app.id, emailId: email.id },
+  });
+  if (existing) return reuseAction(tx, app, existing, reactivate);
+
+  const action = await createActionFromEmail(tx, email, app, aiResult, {
+    actionStatus,
+    snoozedUntil,
+  });
+  if (app.archivedAt || (snoozedUntil && snoozedUntil > new Date())) {
+    await suppressNotifications(tx, [action.id]);
+    return null;
+  }
+  return action.id;
+}
+
+/** Moves the application's AI status forward when the email suggests it, and records the event once. */
+async function recordEmailOnTimeline(
+  tx: Prisma.TransactionClient,
+  email: Email,
+  app: Application,
+  aiResult: AIProcessingResult,
+  reactivate: boolean,
 ) {
   const emailId = email.id,
     applicationId = app.id;
@@ -564,35 +643,45 @@ async function applyEffects(
         provenance: aiResult.provenance,
       },
     });
-  if (!reactivate) await projectAgenda(tx, email, app, aiResult);
-  if (!aiResult.actionRequired && !aiResult.followUpRequired) return null;
-  const existingAction = await tx.action.findFirst({ where: { applicationId, emailId } });
-  if (existingAction) {
-    if (existingAction.retiredAt && reactivate)
-      await tx.action.update({
-        where: { id: existingAction.id },
-        data: { retiredAt: null, retiredReason: null, actionRevision: { increment: 1 } },
-      });
-    if (
-      app.archivedAt ||
-      (existingAction.snoozedUntil && existingAction.snoozedUntil > new Date())
-    ) {
-      await suppressNotifications(tx, [existingAction.id]);
-      return null;
-    }
-    return existingAction.retiredAt && !reactivate ? null : existingAction.id;
+}
+
+/** The email already produced an action here: bring it back if asked, never create a second one. */
+async function reuseAction(
+  tx: Prisma.TransactionClient,
+  app: Application,
+  existing: Action,
+  reactivate: boolean,
+) {
+  if (existing.retiredAt && reactivate)
+    await tx.action.update({
+      where: { id: existing.id },
+      data: { retiredAt: null, retiredReason: null, actionRevision: { increment: 1 } },
+    });
+  if (app.archivedAt || (existing.snoozedUntil && existing.snoozedUntil > new Date())) {
+    await suppressNotifications(tx, [existing.id]);
+    return null;
   }
+  return existing.retiredAt && !reactivate ? null : existing.id;
+}
+
+async function createActionFromEmail(
+  tx: Prisma.TransactionClient,
+  email: Email,
+  app: Application,
+  aiResult: AIProcessingResult,
+  carried: { actionStatus: Action['status']; snoozedUntil: Date | null },
+) {
   const deadlineText = aiResult.actionRequired ? aiResult.actionDeadline : aiResult.followUpDate;
   const parsed = parseActionDeadline(deadlineText, email.receivedAt);
   if (deadlineText?.trim() && !parsed.deadline)
-    logEvent('action_deadline_unclear', { emailId, reason: parsed.reason });
-  const action = await tx.action.create({
+    logEvent('action_deadline_unclear', { emailId: email.id, reason: parsed.reason });
+  return tx.action.create({
     data: {
-      applicationId,
-      emailId,
-      status: actionStatus,
+      applicationId: app.id,
+      emailId: email.id,
+      status: carried.actionStatus,
       origin: 'EMAIL',
-      snoozedUntil: actionStatus === 'PENDING' ? snoozedUntil : null,
+      snoozedUntil: carried.actionStatus === 'PENDING' ? carried.snoozedUntil : null,
       type: aiResult.actionRequired ? 'ACTION_REQUIRED' : 'FOLLOW_UP_REQUIRED',
       description: aiResult.actionRequired
         ? aiResult.requestedAction || 'Action required'
@@ -601,9 +690,4 @@ async function applyEffects(
       deadlinePrecision: parsed.precision,
     },
   });
-  if (app.archivedAt || (snoozedUntil && snoozedUntil > new Date())) {
-    await suppressNotifications(tx, [action.id]);
-    return null;
-  }
-  return action.id;
 }

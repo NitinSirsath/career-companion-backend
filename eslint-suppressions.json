@@ -29,24 +29,9 @@
       "count": 3
     }
   },
-  "src/services/ai/triage.ts": {
-    "no-nested-ternary": {
-      "count": 2
-    }
-  },
   "src/services/application.ts": {
     "no-nested-ternary": {
       "count": 3
-    }
-  },
-  "src/services/gmailSync.ts": {
-    "no-nested-ternary": {
-      "count": 3
-    }
-  },
-  "src/services/matcher.ts": {
-    "no-nested-ternary": {
-      "count": 1
     }
   },
   "src/tests/application-discovery.test.ts": {
