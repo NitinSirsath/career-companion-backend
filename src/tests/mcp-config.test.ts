@@ -1,7 +1,6 @@
 // MCP-04: endpoint configuration and production startup checks (ADR-0002 decision 11).
 import { describe, expect, it } from 'vitest';
-import { mcpConfig, parseHostnameList } from '../mcp/config';
-import { validateProductionConfig } from '../utils/config';
+import { mcpConfig, parseHostnameList, validateProductionConfig } from '../utils/config';
 
 const production = {
   NODE_ENV: 'production',

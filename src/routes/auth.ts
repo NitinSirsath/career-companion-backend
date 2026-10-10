@@ -1,80 +1,34 @@
 import { randomBytes } from 'crypto';
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth';
-import { createGoogleOAuthClient, GOOGLE_OAUTH_TIMEOUT_MS } from '../services/googleTransport';
+import {
+  googleLoginUrl,
+  verifyGoogleLogin,
+  warnIfGoogleLoginNotConfigured,
+} from '../services/googleOAuth';
 import { findOrCreateGoogleUser, getUserProfile } from '../services/user';
-import { logWarn, logError } from '../utils/log';
+import { frontendUrl, isProduction } from '../utils/config';
+import { logError } from '../utils/log';
 
 const router = Router();
 
-const GOOGLE_AUTH_SCOPE = ['openid', 'email', 'profile'];
 const AUTH_STATE_COOKIE_NAME = 'google_login_state';
 const FRONTEND_LOGIN_PATH = '/login';
 const FRONTEND_DASHBOARD_PATH = '/';
 
-/**
- * Warn at startup when required Google OAuth variables are absent.
- * This surfaces the configuration gap early (before any request hits /connect)
- * rather than producing an opaque 500. Google login is required for local
- * development and production.
- */
-const OAUTH_REQUIRED_VARS = [
-  'GOOGLE_CLIENT_ID',
-  'GOOGLE_CLIENT_SECRET',
-  'GOOGLE_REDIRECT_URI',
-] as const;
-const missingOAuthVars = OAUTH_REQUIRED_VARS.filter((v) => !process.env[v]);
-if (missingOAuthVars.length > 0) {
-  logWarn('google_oauth_not_configured', {
-    missing: missingOAuthVars,
-    message: 'Google login will return 500. Set the Google OAuth variables in .env.',
-  });
-}
-
-function createOAuth2Client() {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  // Default matches the Vite dev server port so the redirect works without extra config.
-  const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5173/api/auth/callback';
-
-  if (!clientId || !clientSecret) {
-    throw new Error(
-      `Google Auth is not configured: ${missingOAuthVars.join(', ')} must all be set`,
-    );
-  }
-
-  return createGoogleOAuthClient({
-    clientId,
-    clientSecret,
-    redirectUri,
-    timeoutMs: GOOGLE_OAUTH_TIMEOUT_MS,
-  });
-}
-
-function getFrontendUrl(): string {
-  // Default to the Vite dev server — NOT the backend port — so post-OAuth
-  // redirects land on the correct origin in local development.
-  return process.env.FRONTEND_URL?.replace(/\/$/, '') ?? 'http://localhost:5173';
-}
+warnIfGoogleLoginNotConfigured();
 
 router.get('/connect', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const oauth2Client = createOAuth2Client();
-
     const state = randomBytes(32).toString('hex');
-
-    const authUrl = oauth2Client.generateAuthUrl({
-      access_type: 'online', // no refresh token needed for identity
-      scope: GOOGLE_AUTH_SCOPE,
-      state,
-    });
+    const authUrl = googleLoginUrl(state);
 
     res.cookie(AUTH_STATE_COOKIE_NAME, state, {
       httpOnly: true,
       sameSite: 'lax',
       maxAge: 5 * 60 * 1000, // 5 minutes
       signed: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isProduction(),
     });
 
     return res.redirect(302, authUrl);
@@ -84,8 +38,8 @@ router.get('/connect', async (req: Request, res: Response, next: NextFunction) =
 });
 
 router.get('/callback', async (req: Request, res: Response) => {
-  const frontendLoginUrl = `${getFrontendUrl()}${FRONTEND_LOGIN_PATH}`;
-  const frontendDashboardUrl = `${getFrontendUrl()}${FRONTEND_DASHBOARD_PATH}`;
+  const frontendLoginUrl = `${frontendUrl()}${FRONTEND_LOGIN_PATH}`;
+  const frontendDashboardUrl = `${frontendUrl()}${FRONTEND_DASHBOARD_PATH}`;
 
   try {
     const { code, state, error } = req.query as {
@@ -110,30 +64,8 @@ router.get('/callback', async (req: Request, res: Response) => {
       return res.redirect(302, `${frontendLoginUrl}?error=missing_code`);
     }
 
-    const oauth2Client = createOAuth2Client();
-    const { tokens } = await oauth2Client.getToken(code);
-
-    if (!tokens.id_token) {
-      throw new Error('Google identity failed to return id_token');
-    }
-
-    // Verify identity using google-auth-library supported mechanism
-    const ticket = await oauth2Client.verifyIdToken({
-      idToken: tokens.id_token,
-      audience: process.env.GOOGLE_CLIENT_ID,
-    });
-
-    const payload = ticket.getPayload();
-    if (!payload || !payload.sub || !payload.email || payload.email_verified !== true) {
-      throw new Error('Google identity failed to return valid ID or email in claims');
-    }
-
-    // Check issuer to be completely strict
-    if (payload.iss !== 'https://accounts.google.com' && payload.iss !== 'accounts.google.com') {
-      throw new Error('Invalid issuer');
-    }
-
-    const user = await findOrCreateGoogleUser(payload.sub, payload.email, payload.name || null);
+    const identity = await verifyGoogleLogin(code);
+    const user = await findOrCreateGoogleUser(identity.googleId, identity.email, identity.name);
 
     await new Promise<void>((resolve, reject) =>
       req.session.regenerate((err) => (err ? reject(err) : resolve())),

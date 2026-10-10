@@ -27,7 +27,7 @@ import {
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import { TOKEN_SCOPE, verifyIntegrationToken } from '../services/integrationTokens';
 import { McpCallRecord, currentCall, rpcMethodOf, runWithCall, writeCallLog } from './callLog';
-import { mcpConfig } from './config';
+import { mcpConfig } from '../utils/config';
 import { createMcpServer } from './server';
 
 export const MCP_BODY_LIMIT = 32 * 1024;
