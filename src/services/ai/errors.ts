@@ -27,6 +27,17 @@ export class TerminalAIError extends AIProviderError {
   }
 }
 
+/**
+ * Reads a setting while AI work runs. A bad value is terminal: a retry cannot fix configuration.
+ */
+export function aiSetting<T>(read: () => T): T {
+  try {
+    return read();
+  } catch (error) {
+    throw new TerminalAIError(error instanceof Error ? error.message : 'Invalid AI setting');
+  }
+}
+
 export class SchemaValidationFailure extends TerminalAIError {
   constructor(
     message: string,
