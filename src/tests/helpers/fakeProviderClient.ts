@@ -11,15 +11,12 @@ export function fakeProviderClient(responses: {
 }) {
   const answer = async (response: Response, input: string) =>
     typeof response === 'function' ? response(input) : response;
+  const responseFor = (schemaName: string) => {
+    if (schemaName === 'email_relevance') return responses.classification;
+    return schemaName === 'email_relevance_batch' ? responses.relevanceBatch : responses.extraction;
+  };
   const generateStructured = vi.fn(async ({ contract, input }: StructuredRequest) => ({
-    data: await answer(
-      contract.schemaName === 'email_relevance'
-        ? responses.classification
-        : contract.schemaName === 'email_relevance_batch'
-          ? responses.relevanceBatch
-          : responses.extraction,
-      input,
-    ),
+    data: await answer(responseFor(contract.schemaName), input),
     usage: { inputTokens: 10, outputTokens: 5 },
   }));
   const calls = (schemaName: 'email_relevance' | 'email_relevance_batch' | 'job_extraction') =>
