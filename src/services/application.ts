@@ -1,4 +1,4 @@
- import { AppError, CHANGE_REJECTED } from '../errors';
+import { AppError, CHANGE_REJECTED } from '../errors';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import {
