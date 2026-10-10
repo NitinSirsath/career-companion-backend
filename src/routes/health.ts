@@ -1,8 +1,5 @@
-import {
-  GMAIL_SCHEDULE_QUEUE,
-  gmailScheduleConfig,
-  isGmailScheduleRegistered,
-} from '../services/gmailSchedule';
+import { GMAIL_SCHEDULE_QUEUE, isGmailScheduleRegistered } from '../services/gmailSchedule';
+import { gmailScheduleConfig } from '../utils/config';
 import { Router } from 'express';
 import { getStartedQueue, QUEUE_NAMES } from '../services/queue';
 export const healthRouter = Router();
