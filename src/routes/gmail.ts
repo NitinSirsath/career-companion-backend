@@ -39,7 +39,7 @@ import { GmailAuthError, SyncInProgressError } from '../services/gmailSync';
 const router = Router();
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
- 
+
 const STATE_COOKIE_NAME = 'gmail_oauth_state';
 const FRONTEND_GMAIL_PATH = '/gmail';
 
@@ -152,7 +152,7 @@ router.post('/disconnect', async (req: Request, res: Response, next: NextFunctio
 
     const accessToken = await connectedAccessToken(userId);
     if (accessToken === null) return res.status(200).json({ disconnected: true });
- 
+
     // The token is cleared from the database whether or not Google accepted the revoke.
     await revokeGmailAccess(accessToken);
     await clearGmailConnection(userId);
