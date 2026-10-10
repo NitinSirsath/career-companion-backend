@@ -3,7 +3,6 @@ import type { JobWithMetadata } from 'pg-boss';
 import { prisma } from '../db/prisma';
 import * as gmailSync from '../services/gmailSync';
 import { GmailAuthError, SyncBusyError, SyncSupersededError } from '../services/gmailSyncErrors';
-import { GmailAuthError, SyncBusyError, SyncSupersededError } from '../services/gmailSyncErrors';
 import { handleGmailSyncJobs } from '../jobs/gmailSyncJob';
 import { GmailSyncJobData } from '../services/enqueue';
 import { requestGmailSync } from '../services/gmailSyncRequests';
