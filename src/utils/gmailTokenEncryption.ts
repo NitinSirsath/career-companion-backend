@@ -10,6 +10,7 @@
  */
 
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
+import { gmailTokenEncryptionKey } from './config';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12; // 96-bit IV recommended for GCM
@@ -28,7 +29,7 @@ export interface EncryptedToken {
  * before the key is set, returning a 500 rather than crashing the process.
  */
 export function loadEncryptionKey(): Buffer {
-  const hex = process.env.GMAIL_TOKEN_ENCRYPTION_KEY;
+  const hex = gmailTokenEncryptionKey();
   if (!hex || hex.trim() === '') {
     throw new Error('GMAIL_TOKEN_ENCRYPTION_KEY is not set');
   }
