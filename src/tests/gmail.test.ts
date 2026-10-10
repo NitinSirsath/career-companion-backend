@@ -1,4 +1,5 @@
-import { EMAIL_PROCESSING_STUCK_MS, emailJobOptions } from '../jobs/emailProcessingJob';
+import { emailJobOptions } from '../jobs/emailProcessingJob';
+import { EMAIL_PROCESSING_STUCK_MS } from '../services/email';
 import { STALE_PROCESSING_MS } from '../services/ai/heldOperations';
 import { GmailStatusResponseSchema } from '../contracts/gmail';
 import { syncUser } from '../services/gmailSync';
