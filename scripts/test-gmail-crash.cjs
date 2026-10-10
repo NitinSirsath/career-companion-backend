@@ -39,8 +39,7 @@ async function worker() {
       },
     },
   });
-  require('../dist/jobs/emailProcessingJob').enqueueEmailProcessingJob = async () =>
-    'fixture-email-job';
+  require('../dist/services/enqueue').enqueueEmailProcessingJob = async () => 'fixture-email-job';
   const queue = require('../dist/services/queue');
   process.on('SIGTERM', async () => {
     await queue.stopQueue();
