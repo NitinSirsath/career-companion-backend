@@ -4,8 +4,6 @@ import {
   GOOGLE_REVOKE_TIMEOUT_MS,
   gmailCallOptions,
 } from '../services/googleTransport';
-import { EMAIL_PROCESSING_STUCK_MS } from '../jobs/emailProcessingJob';
-import { nextScheduledSyncAt } from '../services/gmailSchedule';
 import { SyncQueueError } from '../services/gmailSyncErrors';
 /**
  * Gmail OAuth routes (COM-19).
@@ -25,16 +23,25 @@ import { SyncQueueError } from '../services/gmailSyncErrors';
  * - Gmail OAuth is a secondary authorization grant, not user authentication.
  */
 
+import { randomBytes } from 'crypto';
 import { Router, Request, Response, NextFunction } from 'express';
-import { Prisma } from '@prisma/client';
 import { google } from 'googleapis';
 import { requireAuth } from '../middleware/auth';
-import { encryptToken, decryptToken, loadEncryptionKey } from '../utils/gmailTokenEncryption';
-import { prisma } from '../db/prisma';
+import { decryptToken, loadEncryptionKey } from '../utils/gmailTokenEncryption';
 import { requestGmailSync } from '../jobs/gmailSyncJob';
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
 import { GmailSettingsPatchSchema } from '../contracts/gmail';
 import { logWarn, logError } from '../utils/log';
+import { listEmails } from '../services/email';
+import {
+  assertSyncCanStart,
+  clearGmailConnection,
+  connectedAccessToken,
+  readGmailStatus,
+  saveGmailGrant,
+  setSyncLookbackDays,
+} from '../services/gmailConnection';
+import { GmailAuthError, SyncInProgressError } from '../services/gmailSync';
 
 const router = Router();
 
@@ -79,58 +86,7 @@ router.use(requireAuth);
 
 router.get('/status', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const userId = req.auth!.user.id;
-
-    const connection = await prisma.gmailConnection.findUnique({
-      where: { userId },
-      select: {
-        gmailEmail: true,
-        status: true,
-        syncStatus: true,
-        lastSyncedAt: true,
-        unscannedFrom: true,
-        unscannedUntil: true,
-        syncLeaseUntil: true,
-        syncError: true,
-        syncLookbackDays: true,
-        // accessToken and refreshToken are deliberately NOT selected.
-      },
-    });
-
-    if (!connection) {
-      return res.status(200).json({
-        connected: false,
-        gmailEmail: null,
-        status: null,
-        syncStatus: null,
-        lastSyncedAt: null,
-        unscannedGap: null,
-        nextScheduledSyncAt: null,
-        syncLookbackDays: 1,
-      });
-    }
-
-    return res.status(200).json({
-      connected: connection.status === 'CONNECTED',
-      gmailEmail: connection.gmailEmail,
-      status: connection.status,
-      syncStatus:
-        connection.syncStatus === 'SYNCING' &&
-        (!connection.syncLeaseUntil || connection.syncLeaseUntil < new Date())
-          ? 'FAILED'
-          : connection.syncStatus,
-      syncError: connection.syncError,
-      lastSyncedAt: connection.lastSyncedAt,
-      nextScheduledSyncAt: nextScheduledSyncAt(connection.status === 'CONNECTED'),
-      unscannedGap:
-        connection.unscannedFrom && connection.unscannedUntil
-          ? {
-              from: connection.unscannedFrom.toISOString(),
-              until: connection.unscannedUntil.toISOString(),
-            }
-          : null,
-      syncLookbackDays: connection.syncLookbackDays,
-    });
+    return res.status(200).json(await readGmailStatus(req.auth!.user.id));
   } catch (err) {
     next(err);
   }
@@ -148,7 +104,6 @@ router.get('/connect', async (req: Request, res: Response, next: NextFunction) =
     const oauth2Client = createOAuth2Client();
 
     // Generate a cryptographically random CSRF state token (32 bytes = 64 hex chars).
-    const { randomBytes } = await import('crypto');
     const state = `${req.auth!.user.id}.${randomBytes(32).toString('hex')}`;
 
     const authUrl = oauth2Client.generateAuthUrl({
@@ -239,47 +194,14 @@ router.get('/callback', async (req: Request, res: Response) => {
       throw new Error('Could not determine Gmail address from Google profile');
     }
 
-    const previous = await prisma.gmailConnection.findUnique({ where: { userId } });
-    if (previous && previous.gmailEmail.toLowerCase() !== gmailEmail.toLowerCase()) {
-      return res.redirect(302, `${frontendGmailUrl}?gmailError=account_change`);
-    }
-
-    // ── Encrypt tokens ────────────────────────────────────────────────────
-    // SECURITY: Tokens are encrypted immediately after receipt.
-    // The plaintext value must not be stored in any variable that persists
-    // beyond this function scope.
-    const encryptedAccessToken = encryptToken(tokens.access_token);
-    const encryptedRefreshToken = tokens.refresh_token
-      ? encryptToken(tokens.refresh_token)
-      : undefined;
-
-    // ── Upsert GmailConnection ────────────────────────────────────────────
-    await prisma.gmailConnection.upsert({
-      // Including mailbox identity prevents a concurrent first grant from overwriting a different mailbox.
-      where: { userId, gmailEmail: { equals: gmailEmail, mode: 'insensitive' } },
-      create: {
-        userId,
-        gmailEmail,
-        status: 'CONNECTED',
-        syncStatus: 'IDLE',
-        accessToken: encryptedAccessToken,
-        accessTokenExpiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-        refreshToken: encryptedRefreshToken ?? null,
-      },
-      update: {
-        gmailEmail,
-        status: 'CONNECTED',
-        syncStatus: 'IDLE',
-        accessToken: encryptedAccessToken,
-        accessTokenExpiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-        syncClaim: null,
-        syncLeaseUntil: null,
-        syncError: null,
-        // Only update refreshToken if Google returned a new one.
-        // Google only returns a refresh_token when prompt=consent is used.
-        ...(encryptedRefreshToken ? { refreshToken: encryptedRefreshToken } : {}),
-      },
+    // ── Save the grant ────────────────────────────────────────────────────
+    // SECURITY: the service encrypts the tokens before it stores them.
+    const saved = await saveGmailGrant(userId, gmailEmail, {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiryDate: tokens.expiry_date,
     });
+    if (!saved) return res.redirect(302, `${frontendGmailUrl}?gmailError=account_change`);
 
     return res.redirect(302, frontendGmailUrl);
   } catch (err) {
@@ -295,24 +217,14 @@ router.post('/disconnect', async (req: Request, res: Response, next: NextFunctio
   try {
     const userId = req.auth!.user.id;
 
-    const connection = await prisma.gmailConnection.findUnique({
-      where: { userId },
-      select: {
-        id: true,
-        accessToken: true,
-        status: true,
-      },
-    });
-
-    if (!connection || connection.status === 'NOT_CONNECTED') {
-      return res.status(200).json({ disconnected: true });
-    }
+    const accessToken = await connectedAccessToken(userId);
+    if (accessToken === null) return res.status(200).json({ disconnected: true });
 
     // ── Revoke access token (best effort) ─────────────────────────────────
     // Revocation failure must not block the disconnect flow.
     // The token is cleared from the DB regardless of revocation outcome.
     try {
-      const decryptedAccessToken = decryptToken(connection.accessToken);
+      const decryptedAccessToken = decryptToken(accessToken);
       const oauth2Client = createOAuth2Client(GOOGLE_REVOKE_TIMEOUT_MS);
       await oauth2Client.revokeToken(decryptedAccessToken);
     } catch (revokeErr) {
@@ -322,24 +234,7 @@ router.post('/disconnect', async (req: Request, res: Response, next: NextFunctio
       });
     }
 
-    // ── Clear tokens and mark NOT_CONNECTED ───────────────────────────────
-    // We upsert to avoid a delete+create race. accessToken is set to a
-    // sentinel placeholder because the column is NOT NULL — the real token
-    // is gone and this record signals a disconnected (not revoked) state.
-    await prisma.gmailConnection.update({
-      where: { userId },
-      data: {
-        status: 'NOT_CONNECTED',
-        syncStatus: 'IDLE',
-        accessToken: '', // Cleared — not a valid encrypted value
-        accessTokenExpiresAt: null,
-        refreshToken: null,
-        lastHistoryId: null,
-        syncClaim: null,
-        syncLeaseUntil: null,
-        syncError: null,
-      },
-    });
+    await clearGmailConnection(userId);
 
     return res.status(200).json({ disconnected: true });
   } catch (err) {
@@ -360,23 +255,11 @@ router.patch('/settings', async (req: Request, res: Response, next: NextFunction
       });
     }
 
-    const connection = await prisma.gmailConnection.update({
-      where: { userId },
-      data: { syncLookbackDays: parsed.data.syncLookbackDays },
-    });
+    const { syncLookbackDays } = parsed.data;
+    await setSyncLookbackDays(userId, syncLookbackDays);
 
-    return res.status(200).json({ success: true, syncLookbackDays: connection.syncLookbackDays });
-  } catch (err: unknown) {
-    if (
-      typeof err === 'object' &&
-      err !== null &&
-      'code' in err &&
-      (err as { code: string }).code === 'P2025'
-    ) {
-      return res
-        .status(404)
-        .json({ error: { code: 'NOT_CONNECTED', message: 'Gmail connection not found' } });
-    }
+    return res.status(200).json({ success: true, syncLookbackDays });
+  } catch (err) {
     next(err);
   }
 });
@@ -385,32 +268,11 @@ export const gmailRouter = router;
 
 // ─── POST /api/gmail/sync ────────────────────────────────────────────────────
 
-import { GmailAuthError, SyncInProgressError } from '../services/gmailSync';
-
 router.post('/sync', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.auth!.user.id;
 
-    const connection = await prisma.gmailConnection.findUnique({
-      where: { userId },
-    });
-
-    if (!connection || connection.status !== 'CONNECTED') {
-      return res
-        .status(400)
-        .json({ error: { code: 'GMAIL_NOT_CONNECTED', message: 'Gmail is not connected' } });
-    }
-
-    if (
-      connection.syncStatus === 'SYNCING' &&
-      connection.syncLeaseUntil &&
-      connection.syncLeaseUntil > new Date()
-    ) {
-      return res
-        .status(409)
-        .json({ error: { code: 'SYNC_IN_PROGRESS', message: 'A sync is already in progress' } });
-    }
-
+    await assertSyncCanStart(userId);
     const result = await requestGmailSync(userId);
     return res.status(202).json(result);
   } catch (err) {
@@ -441,46 +303,7 @@ router.get('/messages', async (req: Request, res: Response, next: NextFunction) 
     const { limit, offset } = getPaginationParams(req.query);
     const relevance = req.query.relevance as string | undefined;
 
-    const where: Prisma.EmailWhereInput = { userId };
-    if (relevance === 'job_related') {
-      where.relevanceState = { in: ['RELEVANT', 'UNPROCESSED'] };
-    } else if (relevance === 'irrelevant') {
-      where.relevanceState = 'IRRELEVANT';
-    }
-
-    const messages = await prisma.email.findMany({
-      where,
-      take: limit + 1,
-      skip: offset,
-      orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
-      select: {
-        id: true,
-        gmailMessageId: true,
-        threadId: true,
-        subject: true,
-        sender: true,
-        receivedAt: true,
-        relevanceState: true,
-        matchState: true,
-        applicationId: true,
-        matchConfirmedBy: true,
-        application: { select: { id: true, companyName: true, jobTitle: true } },
-        processingState: true,
-        updatedAt: true,
-        processingErrorCategory: true,
-        processingErrorDetails: true,
-        processingErrorStage: true,
-        processingRetryable: true,
-        processingFailedAt: true,
-        aiProcessingResult: { select: { provider: true, model: true } },
-      },
-    });
-
-    const cutoff = Date.now() - EMAIL_PROCESSING_STUCK_MS;
-    const items = messages.map(({ updatedAt, ...message }) => ({
-      ...message,
-      processingStuck: message.processingState === 'PROCESSING' && updatedAt.getTime() < cutoff,
-    }));
+    const items = await listEmails(userId, relevance, limit, offset);
     return res.status(200).json(createPaginatedResponse(items, limit, offset));
   } catch (err) {
     next(err);

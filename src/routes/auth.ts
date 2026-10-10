@@ -1,6 +1,8 @@
+import { randomBytes } from 'crypto';
 import { Router, Request, Response, NextFunction } from 'express';
+import { requireAuth } from '../middleware/auth';
 import { createGoogleOAuthClient, GOOGLE_OAUTH_TIMEOUT_MS } from '../services/googleTransport';
-import { prisma } from '../db/prisma';
+import { findOrCreateGoogleUser, getUserProfile } from '../services/user';
 import { logWarn, logError } from '../utils/log';
 
 const router = Router();
@@ -59,7 +61,6 @@ router.get('/connect', async (req: Request, res: Response, next: NextFunction) =
   try {
     const oauth2Client = createOAuth2Client();
 
-    const { randomBytes } = await import('crypto');
     const state = randomBytes(32).toString('hex');
 
     const authUrl = oauth2Client.generateAuthUrl({
@@ -132,49 +133,7 @@ router.get('/callback', async (req: Request, res: Response) => {
       throw new Error('Invalid issuer');
     }
 
-    const googleId = payload.sub;
-    const email = payload.email;
-    const name = payload.name || null;
-
-    let user = await prisma.user.findUnique({
-      where: { googleId },
-    });
-
-    if (!user) {
-      user = await prisma.user.findUnique({
-        where: { email },
-      });
-
-      if (user) {
-        if (user.googleId && user.googleId !== googleId) throw new Error('Identity already linked');
-        // Link existing user to Google
-        user = await prisma.user.update({
-          // Preserve the identity check if two verified grants race to link an account.
-          where: { id: user.id, OR: [{ googleId: null }, { googleId }] },
-          data: {
-            googleId,
-            name: user.name || name,
-          },
-        });
-      } else {
-        // Create new user
-        user = await prisma.user.create({
-          data: {
-            googleId,
-            email,
-            name,
-          },
-        });
-      }
-    } else {
-      // Update name if missing
-      if (!user.name && name) {
-        user = await prisma.user.update({
-          where: { id: user.id },
-          data: { name },
-        });
-      }
-    }
+    const user = await findOrCreateGoogleUser(payload.sub, payload.email, payload.name || null);
 
     await new Promise<void>((resolve, reject) =>
       req.session.regenerate((err) => (err ? reject(err) : resolve())),
@@ -190,8 +149,6 @@ router.get('/callback', async (req: Request, res: Response) => {
   }
 });
 
-import { requireAuth } from '../middleware/auth';
-
 router.get('/me', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.auth?.user) {
@@ -200,14 +157,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response, next: NextFun
         .json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: req.auth.user.id },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-      },
-    });
+    const user = await getUserProfile(req.auth.user.id);
 
     if (!user) {
       // Session exists but user was deleted

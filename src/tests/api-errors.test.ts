@@ -9,6 +9,10 @@ import { utcDay } from '../services/ai/usage';
 import { configureAI } from './helpers/aiAccess';
 
 vi.mock('../services/ai/providers', () => ({ createProviderClient: vi.fn() }));
+vi.mock('../jobs/emailProcessingJob', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../jobs/emailProcessingJob')>()),
+  enqueueEmailProcessingJob: vi.fn(),
+}));
 
 const DOMAIN = '@api-errors.test';
 const OWNER = `owner${DOMAIN}`;
@@ -219,6 +223,146 @@ describe('email match correction errors', () => {
       error: {
         code: 'MATCH_CONFLICT',
         message: 'This email link changed or cannot be corrected. Refresh before trying again.',
+      },
+    });
+  });
+});
+
+describe('Gmail errors', () => {
+  const sync = () => request(app).post('/api/gmail/sync').set(as());
+  const connect = (data: object = {}) =>
+    prisma.gmailConnection.create({
+      data: {
+        userId,
+        gmailEmail: 'owner@gmail.test',
+        accessToken: '',
+        status: 'CONNECTED',
+        ...data,
+      },
+    });
+
+  beforeEach(() => prisma.gmailConnection.deleteMany({ where: { userId } }));
+
+  it('404 NOT_CONNECTED when saving settings', async () => {
+    const res = await request(app)
+      .patch('/api/gmail/settings')
+      .set(as())
+      .send({ syncLookbackDays: 7 });
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({
+      error: { code: 'NOT_CONNECTED', message: 'Gmail connection not found' },
+    });
+  });
+
+  it('400 GMAIL_NOT_CONNECTED when starting a sync', async () => {
+    const res = await sync();
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: { code: 'GMAIL_NOT_CONNECTED', message: 'Gmail is not connected' },
+    });
+  });
+
+  it('409 SYNC_IN_PROGRESS while a sync holds the lease', async () => {
+    await connect({ syncStatus: 'SYNCING', syncLeaseUntil: new Date(Date.now() + 60_000) });
+    const res = await sync();
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      error: { code: 'SYNC_IN_PROGRESS', message: 'A sync is already in progress' },
+    });
+  });
+});
+
+describe('email retry errors', () => {
+  const retry = (id: string, body: object = {}) =>
+    request(app).post(`/api/emails/${id}/retry`).set(as()).send(body);
+  const failedEmail = (data: object = {}) =>
+    prisma.email.create({
+      data: {
+        userId,
+        gmailMessageId: `api-errors-${crypto.randomUUID()}`,
+        processingState: 'FAILED',
+        ...data,
+      },
+    });
+  const operation = (emailId: string, data: object) =>
+    prisma.aIOperation.create({
+      data: { emailId, operation: 'classification', version: 'v1', attempts: 1, ...data },
+    });
+
+  it('404 NOT_FOUND', async () => {
+    const res = await retry(missingId());
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: { code: 'NOT_FOUND', message: 'Email not found.' } });
+  });
+
+  it('400 BAD_REQUEST for a completed email', async () => {
+    const res = await retry((await failedEmail({ processingState: 'COMPLETED' })).id);
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: { code: 'BAD_REQUEST', message: 'Email is already completed.' },
+    });
+  });
+
+  it('409 AI_OPERATION_REQUIRES_REVIEW', async () => {
+    const { id } = await failedEmail();
+    await operation(id, { status: 'FAILED', errorCode: 'INVALID_REQUEST' });
+    const res = await retry(id);
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      error: {
+        code: 'AI_OPERATION_REQUIRES_REVIEW',
+        message: 'This email has an AI operation that needs review before it can be retried.',
+      },
+    });
+  });
+
+  it('409 AI_RETRY_NEEDS_APPROVAL with the held operations', async () => {
+    const { id } = await failedEmail();
+    await operation(id, { status: 'UNKNOWN' });
+    const res = await retry(id);
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      error: {
+        code: 'AI_RETRY_NEEDS_APPROVAL',
+        message:
+          'The earlier AI attempt may already have been charged. Approve one more attempt to retry.',
+        details: {
+          operations: [
+            {
+              operation: 'classification',
+              reason: expect.any(String),
+              provider: null,
+              model: null,
+              attemptedAt: null,
+            },
+          ],
+          currentProvider: null,
+        },
+      },
+    });
+  });
+
+  it('409 AI_ACCESS_UNAVAILABLE when approving without working AI access', async () => {
+    const { id } = await failedEmail();
+    await operation(id, { status: 'UNKNOWN' });
+    const res = await retry(id, { acceptPossibleDuplicateCharge: true });
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      error: {
+        code: 'AI_ACCESS_UNAVAILABLE',
+        message: 'Fix AI access before approving a retry.',
+        details: { state: expect.any(String), reason: expect.any(String), resumesAt: null },
+      },
+    });
+  });
+
+  it('409 RETRY_RECENTLY_QUEUED when the queue takes no new job', async () => {
+    const res = await retry((await failedEmail()).id);
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      error: {
+        code: 'RETRY_RECENTLY_QUEUED',
+        message: 'A processing attempt was queued recently. Try again in a few minutes.',
       },
     });
   });
