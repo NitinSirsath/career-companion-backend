@@ -1,4 +1,4 @@
-// Guarded Prisma CLI runner (Sprint 6 runbook step 3). Loads overriding .env.test, compares it
+// Guarded Prisma CLI runner. Loads overriding .env.test, compares it
 // with an independently exported TEST_DATABASE_URL, runs the existing safety guard, and only
 // then spawns the installed Prisma CLI with the validated environment. Requires a fresh build.
 const { config } = require('dotenv');
