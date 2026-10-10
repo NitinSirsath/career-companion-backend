@@ -282,186 +282,147 @@ async function incrementalSync(
   return latest;
 }
 
-/** Records that a sync failed, but only if it still owns the connection. */
-async function markSyncFailed(run: SyncRun, error: unknown) {
-  const category = syncCategory(error);
-  try {
-    await withOwnedSync(run.userId, run.connectionId, run.claim, (tx) =>
-      tx.gmailConnection.updateMany({
-        where: { id: run.connectionId, userId: run.userId, syncClaim: run.claim },
-        data: { syncState: 'FAILED', syncError: category, syncLeaseUntil: null },
-      }),
-    );
-  } catch (markErr) {
-    logDebug('gmail_sync_failure_state_skipped', {
-      userId: run.userId,
-      connectionId: run.connectionId,
-      category,
-      reason: syncCategory(markErr),
-    });
-  }
-}
-
-/** Persist the checkpoint after all page processing has succeeded. */
+/** Saves the new checkpoint and releases the sync, only if this attempt still owns it. */
 async function commitCheckpoint(
   run: SyncRun,
-  historyId: string,
   outcome: SyncOutcome,
-  startedAt: Date,
+  checkpoint: { historyId: string; lastSyncedAt: Date; lookbackDays: number },
+) {
+  const { userId, connectionId, claim, window } = run;
+  const committed = await withOwnedSync(userId, connectionId, claim, (tx) => {
+    checkDeadline(run);
+    outcome.checkpointCommitted = null;
+    return tx.gmailConnection.updateMany({
+      where: { id: connectionId, userId, syncClaim: claim, status: 'CONNECTED' },
+      data: {
+        syncStatus: 'IDLE',
+        syncClaim: null,
+        syncLeaseUntil: null,
+        lastHistoryId: checkpoint.historyId,
+        lastSyncedAt: checkpoint.lastSyncedAt,
+        lastSyncedLookbackDays: checkpoint.lookbackDays,
+        ...(window.unscanned && {
+          unscannedFrom: window.unscanned.from,
+          unscannedUntil: window.unscanned.until,
+        }),
+      },
+    });
+  });
+  if (committed.count !== 1) {
+    outcome.checkpointCommitted = false;
+    throw new SyncSupersededError();
+  }
+  outcome.checkpointCommitted = true;
+}
+
+/** An aborted attempt reports why it was aborted, not the error the abort surfaced as. */
+function deliveryError(caught: unknown, signal?: AbortSignal, budget?: AbortSignal) {
+  if (!signal?.aborted) return caught;
+  return budget?.aborted && signal.reason === budget.reason
+    ? new SyncDeadlineError()
+    : new SyncCancelledError();
+}
+
+/** Hands the claim back to the queued request, so a retry of the same job can take it. */
+async function markSyncFailed(
+  userId: string,
+  connectionId: string,
+  claim: string,
+  queuedClaim: string | undefined,
+  error: unknown,
 ) {
   try {
-    await withOwnedSync(run.userId, run.connectionId, run.claim, async (tx) => {
-      checkDeadline(run);
-      const updated = await tx.gmailConnection.updateMany({
-        where: { id: run.connectionId, userId: run.userId, syncClaim: run.claim },
-        data: {
-          lastHistoryId: historyId,
-          lastSyncedAt: startedAt,
-          lastSyncedLookbackDays: run.window.windowDays,
-          syncState: 'IDLE',
-          syncError: null,
-          syncLeaseUntil: null,
-        },
-      });
-      if (updated.count !== 1) throw new SyncSupersededError();
+    await prisma.gmailConnection.updateMany({
+      where: { id: connectionId, userId, syncClaim: claim },
+      data: {
+        syncStatus: 'FAILED',
+        syncClaim: queuedClaim ?? null,
+        syncLeaseUntil: null,
+        syncError:
+          googleAuthFailure(error) || error instanceof GmailAuthError
+            ? 'GMAIL_AUTH_FAILED'
+            : 'SYNC_FAILED',
+      },
     });
-    outcome.checkpointCommitted = true;
-    outcome.checkpointAdvanced = true;
-  } catch (err) {
-    outcome.checkpointCommitted = false;
-    throw err;
+  } catch {
+    /* A failed cleanup must not hide the original delivery outcome. */
   }
 }
 
-async function syncUser(userId: string, delivery: SyncDelivery = {}) {
-  const controller = new AbortController();
-  const signal = controller.signal;
-  const startedAt = new Date();
-  const budget = setTimeout(() => controller.abort(new SyncDeadlineError()), SYNC_ATTEMPT_BUDGET_MS);
-  budget.unref();
-  const claim = randomUUID();
-  let acquired: Awaited<ReturnType<typeof acquireSync>> | null = null;
-  const outcome: SyncOutcome = { checkpointCommitted: null, checkpointAdvanced: false };
-  const counts = { ingested: 0, skipped: 0 };
-  let releaseSignal: (() => void) | undefined;
-  const cleanup = () => {
-    clearTimeout(budget);
-    delivery.signal?.removeEventListener('abort', onDeliveryAbort);
-    releaseSignal?.();
-  };
-  const onDeliveryAbort = () => controller.abort(new SyncCancelledError());
-  if (delivery.signal?.aborted) onDeliveryAbort();
-  else {
-    delivery.signal?.addEventListener('abort', onDeliveryAbort, { once: true });
-    releaseSignal = () => delivery.signal?.removeEventListener('abort', onDeliveryAbort);
-  }
-  const run: SyncRun = {
+export async function syncUser(userId: string, queuedClaim?: string, delivery: SyncDelivery = {}) {
+  const started = Date.now();
+  const requestId = queuedClaim ?? `direct:${randomUUID()}`;
+  const claim = `${requestId}:attempt:${delivery.retryCount ?? 0}:${randomUUID()}`;
+  const context = {
+    trigger: delivery.trigger ?? 'manual',
     userId,
-    connectionId: '',
-    claim,
-    signal,
-    window: syncWindow({ now: startedAt, lastSyncedAt: null, lookbackDays: 1 }),
-    counts,
+    requestId,
+    jobId: delivery.jobId ?? null,
+    attemptId: claim,
+    retryCount: delivery.retryCount ?? 0,
+    retryLimit: delivery.retryLimit ?? 0,
   };
+  const outcome: SyncOutcome = { checkpointCommitted: false, checkpointAdvanced: false };
+  const counts = { ingested: 0, skipped: 0 };
+  let connectionId: string | undefined;
+  let budget: AbortSignal | undefined;
+  let signal: AbortSignal | undefined;
   try {
-    checkDeadline(run);
-    acquired = await acquireSync(userId, claim);
-    if (!acquired) throw new SyncInProgressError();
-    run.connectionId = acquired.connection.id;
-    run.window = syncWindow({
-      now: startedAt,
-      lastSyncedAt: acquired.connection.lastSyncedAt,
-      lookbackDays: acquired.connection.syncLookbackDays,
-    });
-    const { connection } = acquired;
-    const lookbackDays = connection.syncLookbackDays;
-    await withGmail(userId, async (gmail) => {
-      checkDeadline(run);
-      let historyId: string;
-      if (needsFullSync(connection, startedAt, lookbackDays)) {
-        historyId = await fullSync(run, gmail);
-      } else {
-        historyId = await incrementalSync(run, gmail, connection.lastHistoryId!);
-      }
-      await heartbeat(run);
-      await commitCheckpoint(run, historyId, outcome, startedAt);
-    }, signal);
-    logEvent('gmail_sync_completed', {
+    const { connection, now } = await acquireSync(userId, queuedClaim, claim);
+    budget = AbortSignal.timeout(SYNC_ATTEMPT_BUDGET_MS);
+    signal = delivery.signal ? AbortSignal.any([delivery.signal, budget]) : budget;
+    connectionId = connection.id;
+    const lookbackDays = connection.syncLookbackDays || 1;
+    const window = syncWindow({ now, lastSyncedAt: connection.lastSyncedAt, lookbackDays });
+    const run: SyncRun = { userId, connectionId, claim, signal, window, counts };
+    const startHistoryId = needsFullSync(connection, now, lookbackDays)
+      ? null
+      : connection.lastHistoryId;
+    logDebug('gmail_sync_started', { ...context });
+    const historyId = await withGmail(
       userId,
-      connectionId: run.connectionId,
-      trigger: delivery.trigger ?? 'manual',
-      jobId: delivery.jobId,
-      retryCount: delivery.retryCount,
-      retryLimit: delivery.retryLimit,
-      windowDays: run.window.windowDays,
-      ingested: counts.ingested,
-      skipped: counts.skipped,
-      checkpointAdvanced: outcome.checkpointAdvanced,
+      (gmail) =>
+        startHistoryId ? incrementalSync(run, gmail, startHistoryId) : fullSync(run, gmail),
+      { signal },
+    );
+    // Recover the DB-insert / queue-send gap even when the history no longer returns that email,
+    // and resume emails that waited for AI access.
+    checkDeadline(run);
+    await reofferPendingEmails(userId, () => heartbeat(run));
+    await heartbeat(run);
+    const lastSyncedAt = new Date();
+    await commitCheckpoint(run, outcome, { historyId, lastSyncedAt, lookbackDays });
+    outcome.checkpointAdvanced = historyId !== connection.lastHistoryId;
+    logEvent('gmail_sync_completed', {
+      ...context,
+      ...outcome,
+      windowDays: window.windowDays,
+      gapCapped: window.unscanned !== null,
+      userId,
+      messagesIngested: counts.ingested,
+      messagesSkipped: counts.skipped,
+      durationMs: Date.now() - started,
     });
     return {
-      success: true,
-      ...counts,
-      windowDays: run.window.windowDays,
+      synced: true,
+      messagesIngested: counts.ingested,
+      messagesSkipped: counts.skipped,
+      lastSyncedAt,
       checkpointAdvanced: outcome.checkpointAdvanced,
     };
-  } catch (error) {
-    const category = syncCategory(error);
-    const canRetry = category !== 'AUTH_REVOKED' && category !== 'SUPERSEDED';
-    if (acquired && !(error instanceof SyncInProgressError)) await markSyncFailed(run, error);
-    logError('gmail_sync_failed', {
-      userId,
-      connectionId: acquired?.connection.id,
-      trigger: delivery.trigger ?? 'manual',
-      jobId: delivery.jobId,
-      retryCount: delivery.retryCount,
-      retryLimit: delivery.retryLimit,
-      category,
-      canRetry,
-      checkpointCommitted: outcome.checkpointCommitted,
-      checkpointAdvanced: outcome.checkpointAdvanced,
+  } catch (caught) {
+    const error = deliveryError(caught, signal, budget);
+    const superseded = error instanceof SyncSupersededError;
+    if (superseded) outcome.checkpointCommitted = false;
+    if (connectionId && !superseded)
+      await markSyncFailed(userId, connectionId, claim, queuedClaim, error);
+    logError(superseded ? 'gmail_sync_superseded' : 'gmail_sync_failed', {
+      ...context,
+      durationMs: Date.now() - started,
+      ...outcome,
+      category: syncCategory(error),
     });
-    if (error instanceof SyncSupersededError || error instanceof SyncDeadlineError || error instanceof SyncCancelledError) throw error;
-    if (error instanceof SyncInProgressError) throw error;
-    if (error instanceof GmailAuthError || googleAuthFailure(error)) {
-      throw new GmailAuthError();
-    }
-    throw error;
-  } finally {
-    cleanup();
-  }
-}
-
-export async function syncNow(userId: string, delivery: SyncDelivery = {}) {
-  return syncUser(userId, delivery);
-}
-
-export async function syncWithRetry(userId: string, delivery: SyncDelivery = {}) {
-  const maxRetries = Math.min(5, Math.max(0, delivery.retryLimit ?? 2));
-  const retries = Math.max(0, delivery.retryCount ?? 0);
-  try {
-    return await syncUser(userId, delivery);
-  } catch (error) {
-    const category = syncCategory(error);
-    const retryable = category !== 'AUTH_REVOKED' && category !== 'SUPERSEDED';
-    if (retryable && retries < maxRetries) {
-      const delay = Math.min(60_000, 1000 * 2 ** retries);
-      logDebug('gmail_sync_retry_scheduled', {
-        userId,
-        jobId: delivery.jobId,
-        retryCount: retries + 1,
-        retryLimit: maxRetries,
-        delayMs: delay,
-        category,
-      });
-      throw error;
-    }
-    if (error instanceof GmailAuthError || googleAuthFailure(error)) {
-      throw new GmailAuthError();
-    }
+    if (googleAuthFailure(error)) throw new GmailAuthError();
     throw error;
   }
-}
-
-export async function syncUserWithRetry(userId: string, delivery: SyncDelivery = {}) {
-  return syncWithRetry(userId, delivery);
 }
