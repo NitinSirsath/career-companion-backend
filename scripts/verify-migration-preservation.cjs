@@ -1,4 +1,4 @@
-// Sprint 6 S6-05 fresh and additive-upgrade preservation lanes (runbook §4).
+// Fresh and additive-upgrade preservation lanes for the status and evidence migrations.
 //
 // FRESH_DATABASE_URL and UPGRADE_DATABASE_URL must name separate, EMPTY, local
 // career_companion_*test databases created for this check. Every migration goes through

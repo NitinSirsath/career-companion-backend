@@ -35,5 +35,5 @@ https://github.com/NitinSirsath/career-companion-docs/blob/main/docs/engineering
 - Size is guidance: a function over ~80 lines or a file over ~500 lines is a sign to split. Explain exceptions in the PR.
 - If code you must change breaks these standards, fix that part first in a separate refactor commit.
 - Formatting: Prettier (`.prettierrc`). Run `npm run format` before committing; CI fails on unformatted code.
-- Baseline: new violations fail lint. When you fix old code, run `npx eslint src/ scripts/ prisma/seed.ts --prune-suppressions` and commit the smaller file. Never add entries.
+- No lint baseline: every violation fails lint. Fix the code; don't add a suppressions file or a disable comment.
 - Before "done": npm run typecheck && npm run lint && npm run format:check && npm test. List exceptions in the PR.

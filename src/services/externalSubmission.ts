@@ -1,6 +1,6 @@
 import { AppError, CHANGE_REJECTED } from '../errors';
 /**
- * Automation submission intake and review (ADR-0002 decisions 5–8; MCP-03, MCP-05).
+ * Automation submission intake and review (ADR-0002 decisions 5–8).
  *
  * Domain only: no MCP code. The automation reports one confirmed submission per call, keyed by
  * `sourceRecordRef`. Each call runs as one transaction under a per-user advisory lock: check the
@@ -180,7 +180,7 @@ export function parseSubmissionInput(raw: unknown, now = new Date()): CanonicalS
   };
 }
 
-// ─── Matching keys (ADR-0002 decision 7 plus the MCP-03 edge-case rules) ────
+// ─── Matching keys (ADR-0002 decision 7 plus the edge-case rules below) ─────
 
 /** The existing normalization, shared with the Gmail matcher's behaviour: lowercase a–z and 0–9 only. */
 export const titleKey = (title: string) => title.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -397,7 +397,7 @@ export async function recordSubmission(
   }
 }
 
-// ─── Review (MCP-05) ────────────────────────────────────────────────────────
+// ─── Review ─────────────────────────────────────────────────────────────────
 
 export type ResolveAction =
   { action: 'link'; applicationId: string } | { action: 'create' } | { action: 'ignore' };

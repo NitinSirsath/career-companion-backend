@@ -328,11 +328,8 @@ export function failures(metrics: Metrics, baseline?: Metrics): string[] {
 }
 
 export function evaluationOutcome(metrics: Metrics, baseline?: Metrics) {
-  return failures(metrics, baseline).length
-    ? 'FAIL'
-    : metrics.refusedCalls
-      ? 'INCONCLUSIVE'
-      : 'PASS';
+  if (failures(metrics, baseline).length) return 'FAIL';
+  return metrics.refusedCalls ? 'INCONCLUSIVE' : 'PASS';
 }
 export function baselineMetrics(report: unknown): Metrics {
   const parsed = z

@@ -1,4 +1,4 @@
-// MCP-09 part B diagnostic: the official SDK client against a RUNNING Career Companion server, to tell
+// Diagnostic: the official SDK client against a RUNNING Career Companion server, to tell
 // server faults from AI-client faults. Lists the tool by default; with --send-fixture it also sends the
 // fixture's `applied` entries (synthetic data; repeats are recorded once and return already_recorded).
 // `expectedFirstRun` assumes the fixture's seedApplications exist for that user and nothing was sent before.

@@ -1,6 +1,6 @@
 import { SyncQueueError } from '../services/gmailSyncErrors';
 /**
- * Gmail OAuth routes (COM-19).
+ * Gmail OAuth routes.
  *
  * Endpoints:
  *   GET  /api/gmail/status       — connection status for authenticated user

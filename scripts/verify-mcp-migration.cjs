@@ -1,4 +1,4 @@
-// MCP feature (MCP-01) fresh and additive-upgrade preservation lanes for the automation
+// MCP feature: fresh and additive-upgrade preservation lanes for the automation
 // submissions migration (ADR-0002).
 //
 // FRESH_DATABASE_URL and UPGRADE_DATABASE_URL must name separate, EMPTY, local

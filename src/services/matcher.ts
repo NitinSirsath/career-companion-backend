@@ -183,7 +183,7 @@ export async function applyMatch(
         throw new AppError(409, 'APPLICATION_ARCHIVED', CHANGE_REJECTED);
       return null;
     }
-    // Fresh state check at the write boundary (S6-03). A user link is legal only for an email
+    // Fresh state check at the write boundary. A user link is legal only for an email
     // that is still unresolved, or as a replay of the same confirmed link. A resolution whose
     // pre-lock read was overtaken by another decision (another user link, an ignore, or a
     // completed automatic match) fails exactly as it would sequentially; effects never move.

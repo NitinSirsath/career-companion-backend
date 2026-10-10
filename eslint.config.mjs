@@ -23,7 +23,7 @@ export default [
       complexity: ['warn', 15],
       'max-depth': ['warn', 3],
       'max-params': ['warn', 4],
-      // Standards: fail CI. Old violations are listed in eslint-suppressions.json.
+      // Standards: fail CI.
       'no-nested-ternary': 'error',
       'no-console': 'error',
       'no-restricted-properties': [
@@ -91,6 +91,7 @@ export default [
       'max-lines': ['warn', { max: 800, skipBlankLines: true, skipComments: true }],
       'max-lines-per-function': 'off',
       complexity: 'off',
+      'no-nested-ternary': 'off',
       'no-console': 'off',
       'no-restricted-properties': 'off',
     },

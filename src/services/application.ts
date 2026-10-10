@@ -72,7 +72,7 @@ type RecentEventRow = {
 /**
  * Latest recorded event per application (createdAt DESC, id DESC) with its source email.
  * The LATERAL ... LIMIT 1 bounds the read to at most one event, and then at most one email,
- * per application (S6-02); history is never loaded just to pick its newest row.
+ * per application; history is never loaded just to pick its newest row.
  */
 async function loadRecentEvents(db: Db, applicationIds: string[]) {
   const recent = new Map<string, RecentEventRow>();
@@ -191,6 +191,32 @@ export async function createApplication(
   return mapToResponse(userId, application, null); // a new application has no history
 }
 
+function applicationOrder(
+  sort: ApplicationFilters['sort'],
+): Prisma.ApplicationOrderByWithRelationInput[] {
+  if (sort === 'applied_desc' || sort === 'applied_asc')
+    return [
+      { appliedAt: { sort: sort === 'applied_desc' ? 'desc' : 'asc', nulls: 'last' } },
+      { id: 'desc' },
+    ];
+  if (sort === 'company_asc') return [{ companyName: 'asc' }, { id: 'desc' }];
+  return [{ createdAt: 'desc' }, { id: 'desc' }];
+}
+
+/** The user's own status wins; the AI status counts only where the user set none. */
+function effectiveStatusFilter(
+  status: ApplicationFilters['effectiveStatus'],
+): Prisma.ApplicationWhereInput[] {
+  if (!status) return [];
+  if (status === 'UNKNOWN') return [{ userStatus: null, aiStatus: null }];
+  return [{ OR: [{ userStatus: status }, { userStatus: null, aiStatus: status }] }];
+}
+
+function actionOrigin(action: { origin: string | null; emailId: string | null }) {
+  if (action.origin === 'USER') return 'USER' as const;
+  return action.emailId ? ('EMAIL' as const) : null;
+}
+
 export async function listApplications(
   userId: string,
   limit: number = 20,
@@ -199,17 +225,7 @@ export async function listApplications(
 ): Promise<ApplicationResponse[]> {
   // Prisma's PostgreSQL contains operator uses LIKE: preserve literal %, _ and backslash.
   const search = filters.q?.replace(/[\\%_]/g, '\\$&');
-  const orderBy: Prisma.ApplicationOrderByWithRelationInput[] =
-    filters.sort === 'applied_desc' || filters.sort === 'applied_asc'
-      ? [
-          {
-            appliedAt: { sort: filters.sort === 'applied_desc' ? 'desc' : 'asc', nulls: 'last' },
-          },
-          { id: 'desc' },
-        ]
-      : filters.sort === 'company_asc'
-        ? [{ companyName: 'asc' }, { id: 'desc' }]
-        : [{ createdAt: 'desc' }, { id: 'desc' }];
+  const orderBy = applicationOrder(filters.sort);
   const applications = await prisma.application.findMany({
     where: {
       userId,
@@ -232,18 +248,7 @@ export async function listApplications(
               },
             ]
           : []),
-        ...(filters.effectiveStatus
-          ? filters.effectiveStatus === 'UNKNOWN'
-            ? [{ userStatus: null, aiStatus: null }]
-            : [
-                {
-                  OR: [
-                    { userStatus: filters.effectiveStatus },
-                    { userStatus: null, aiStatus: filters.effectiveStatus },
-                  ],
-                },
-              ]
-          : []),
+        ...effectiveStatusFilter(filters.effectiveStatus),
       ],
     },
     take: limit + 1,
@@ -453,7 +458,7 @@ export async function getApplicationActions(
     description: a.description,
     deadline: a.deadline,
     deadlinePrecision: a.deadlinePrecision,
-    origin: a.origin === 'USER' ? 'USER' : a.emailId ? 'EMAIL' : null,
+    origin: actionOrigin(a),
     actionRevision: a.actionRevision,
     clientRequestId: a.clientRequestId,
     snoozedUntil: a.snoozedUntil?.toISOString() ?? null,

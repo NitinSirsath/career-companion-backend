@@ -31,7 +31,7 @@ export function describeFailure(err: unknown) {
 /**
  * The only error handed to pg-boss for a failed email job. pg-boss serializes thrown errors
  * (message, stack, enumerable properties) into pgboss.job.output, so it carries the safe
- * category alone and never the original error (S6-R06).
+ * category alone and never the original error.
  */
 export class EmailJobFailure extends Error {
   constructor(category: string) {
@@ -54,6 +54,11 @@ async function withdrawDelivery(jobId: string) {
   } catch {
     logWarn('job_withdraw_failed', { jobId });
   }
+}
+
+function failureOutcome(terminal: boolean, exhausted: boolean) {
+  if (terminal) return 'failed_terminal';
+  return exhausted ? 'failed_exhausted' : 'retry_scheduled';
 }
 
 export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobData>) {
@@ -102,7 +107,7 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
       {
         jobId: job.id,
         emailId,
-        outcome: terminal ? 'failed_terminal' : exhausted ? 'failed_exhausted' : 'retry_scheduled',
+        outcome: failureOutcome(terminal, exhausted),
         errorCategory: failure.category,
         errorStage: failure.stage,
         durationMs: Date.now() - startTime,
@@ -117,7 +122,7 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
 }
 
 /**
- * Delivery invariant (S6-03): exactly one job per callback. Installed pg-boss 12.31 already
+ * Delivery invariant: exactly one job per callback. Installed pg-boss 12.31 already
  * defaults to batchSize=1; registration states it explicitly. If more than one job is ever
  * delivered, the callback fails so pg-boss retries every delivered job — none is acknowledged
  * without an attempted, attributable outcome.

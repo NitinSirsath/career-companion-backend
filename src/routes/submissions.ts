@@ -1,5 +1,5 @@
 /**
- * Review of automation submissions that need a person (ADR-0002 decision 7; MCP-05).
+ * Review of automation submissions that need a person (ADR-0002 decision 7).
  *
  *   GET  /api/submissions/pending       owner's NEEDS_REVIEW submissions, newest first
  *   POST /api/submissions/:id/resolve   { action: link, applicationId } | { action: create } | { action: ignore }
