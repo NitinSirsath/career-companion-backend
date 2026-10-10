@@ -1,9 +1,9 @@
 import type { JobWithMetadata } from 'pg-boss';
 import { EMAIL_PROCESSING_JOB, EmailProcessingJobData } from '../services/enqueue';
 import { getQueue } from '../services/queue';
-import { prisma } from '../db/prisma';
 import { AIAccessError, AIProviderError, TerminalAIError } from '../services/ai/errors';
 import { processEmail } from '../services/ai/pipeline';
+import { markEmailProcessing, recordEmailFailure, returnEmailToPending } from '../services/email';
 import { logDebug, logEvent, logWarn, logError } from '../utils/log';
 
 /**
@@ -65,10 +65,7 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
 
   try {
     // The worker alone moves an email (including a manually retried FAILED one) into PROCESSING.
-    await prisma.email.updateMany({
-      where: { id: emailId, userId, processingState: { not: 'COMPLETED' } },
-      data: { processingState: 'PROCESSING' },
-    });
+    await markEmailProcessing(userId, emailId);
     await processEmail(userId, emailId, { signal: job.signal });
     logDebug('job_completed', {
       jobId: job.id,
@@ -82,17 +79,7 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
       // Waiting for the user's AI access is not a processing failure (ADR-0001 decision 8): the
       // email returns to PENDING with no error fields, the job is acknowledged, and no email or
       // operation attempt is used. The reason lives once, on the user's AI configuration.
-      await prisma.email.updateMany({
-        where: { id: emailId, userId, processingState: { not: 'COMPLETED' } },
-        data: {
-          processingState: 'PENDING',
-          processingErrorCategory: null,
-          processingErrorDetails: null,
-          processingErrorStage: null,
-          processingRetryable: null,
-          processingFailedAt: null,
-        },
-      });
+      await returnEmailToPending(userId, emailId);
       await withdrawDelivery(job.id);
       logEvent('job_waiting_for_ai', {
         jobId: job.id,
@@ -108,18 +95,7 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
     const exhausted = !terminal && job.retryCount >= job.retryLimit;
     const final = terminal || exhausted;
 
-    // Completed emails are never downgraded. A failure at the final permitted delivery is FAILED.
-    await prisma.email.updateMany({
-      where: { id: emailId, userId, processingState: { not: 'COMPLETED' } },
-      data: {
-        processingState: final ? 'FAILED' : 'PROCESSING',
-        processingErrorCategory: failure.category,
-        processingErrorDetails: failure.details,
-        processingErrorStage: failure.stage,
-        processingRetryable: final ? false : failure.retryable,
-        processingFailedAt: new Date(),
-      },
-    });
+    await recordEmailFailure(userId, emailId, failure, final);
 
     logError(
       'job_failed',
