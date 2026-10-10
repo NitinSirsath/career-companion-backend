@@ -12,6 +12,7 @@ import { ExternalSubmission, Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db/prisma';
 import { LOCK_NAMESPACE, lockUser } from '../utils/advisoryLock';
+import { submissionDailyLimit } from '../utils/config';
 
 export const SUBMISSION_PLATFORMS = [
   'linkedin',
@@ -42,7 +43,6 @@ const LEGAL_SUFFIXES = new Set([
   'plc',
   'gmbh',
 ]);
-const DEFAULT_DAILY_SUBMISSION_LIMIT = 500;
 
 // Optional fields may be omitted or null; both mean "not reported".
 const optionalText = (max: number) => z.string().trim().max(max).nullish();
@@ -270,15 +270,6 @@ const addEvent = (tx: Tx, applicationId: string, externalSubmissionId: string) =
   });
 
 // ─── Intake ─────────────────────────────────────────────────────────────────
-
-/** New records per user per UTC day (0–5000, default 500; 0 stops all new submissions). */
-export function submissionDailyLimit(): number {
-  const raw = process.env.MCP_DAILY_SUBMISSION_LIMIT;
-  if (raw === undefined || raw === '') return DEFAULT_DAILY_SUBMISSION_LIMIT;
-  if (!/^\d+$/.test(raw) || Number(raw) > 5000)
-    throw new Error('Invalid MCP_DAILY_SUBMISSION_LIMIT');
-  return Number(raw);
-}
 
 const startOfUtcDay = (now: Date) =>
   new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
