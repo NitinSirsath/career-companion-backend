@@ -1,7 +1,7 @@
 import { prisma } from '../db/prisma';
 import { ArchiveApplication } from '../contracts/application';
 import { lockUser, LOCK_NAMESPACE } from '../utils/advisoryLock';
-import { DomainError } from './agenda';
+import { AppError, CHANGE_REJECTED } from '../errors';
 import { ApplicationService } from './application';
 import { suppressNotifications } from './notificationSuppression';
 export async function archiveApplication(userId: string, id: string, request: ArchiveApplication) {
@@ -9,9 +9,9 @@ export async function archiveApplication(userId: string, id: string, request: Ar
     await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
     await tx.$queryRaw`SELECT id FROM applications WHERE id=${id}::uuid AND "userId"=${userId}::uuid FOR UPDATE`;
     const row = await tx.application.findFirst({ where: { id, userId } });
-    if (!row) throw new DomainError('NOT_FOUND', 404);
+    if (!row) throw new AppError(404, 'NOT_FOUND', 'Not found');
     if (row.archiveRevision !== request.expectedArchiveRevision)
-      throw new DomainError('REVISION_CONFLICT');
+      throw new AppError(409, 'REVISION_CONFLICT', CHANGE_REJECTED);
     if (Boolean(row.archivedAt) !== request.archived) {
       await tx.application.update({
         where: { id },

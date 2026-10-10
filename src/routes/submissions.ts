@@ -12,11 +12,7 @@ import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { PendingSubmission, ResolveSubmissionRequestSchema } from '../contracts/submission';
 import { requireAuth } from '../middleware/auth';
-import {
-  SubmissionReviewError,
-  listPendingSubmissions,
-  resolveSubmission,
-} from '../services/externalSubmission';
+import { listPendingSubmissions, resolveSubmission } from '../services/externalSubmission';
 import { createPaginatedResponse, getPaginationParams } from '../utils/pagination';
 import { logEvent } from '../utils/log';
 
@@ -38,12 +34,6 @@ router.get('/pending', async (req: Request, res: Response, next: NextFunction) =
   }
 });
 
-const REVIEW_ERRORS = {
-  NOT_FOUND: [404, 'NOT_FOUND', 'Submission not found.'],
-  NOT_RESOLVABLE: [400, 'BAD_REQUEST', 'Submission is not in a resolvable state.'],
-  APPLICATION_NOT_FOUND: [403, 'FORBIDDEN', 'Application not found or access denied.'],
-} as const;
-
 router.post('/:id/resolve', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.auth!.user.id;
@@ -53,11 +43,6 @@ router.post('/:id/resolve', async (req: Request, res: Response, next: NextFuncti
     logEvent('submission_resolved', { userId, submissionId: id, matchState: resolved.matchState });
     res.status(200).json(resolved);
   } catch (err) {
-    if (err instanceof SubmissionReviewError) {
-      const [status, code, message] = REVIEW_ERRORS[err.reason];
-      res.status(status).json({ error: { code, message } });
-      return;
-    }
     next(err);
   }
 });

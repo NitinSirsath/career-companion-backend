@@ -5,15 +5,8 @@ import { TemporalValueSchema, resolveTemporal } from '../contracts/temporal';
 import { CandidateEnvelopeSchema } from './ai/temporal';
 import { lockUser, LOCK_NAMESPACE } from '../utils/advisoryLock';
 import { createPaginatedResponse } from '../utils/pagination';
+import { AppError, CHANGE_REJECTED } from '../errors';
 
-export class DomainError extends Error {
-  constructor(
-    readonly code: string,
-    readonly status = 409,
-  ) {
-    super(code);
-  }
-}
 const context = {
   application: { select: { companyName: true, jobTitle: true, archivedAt: true } },
   email: { select: { subject: true, threadId: true } },
@@ -94,12 +87,12 @@ export async function updateAgenda(userId: string, id: string, request: UpdateAg
   return prisma.$transaction(async (tx) => {
     await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
     const initial = await tx.agendaItem.findFirst({ where: { id, userId } });
-    if (!initial) throw new DomainError('NOT_FOUND', 404);
+    if (!initial) throw new AppError(404, 'NOT_FOUND', 'Not found');
     await tx.$queryRaw`SELECT id FROM emails WHERE id=${initial.emailId}::uuid FOR UPDATE`;
     await tx.$queryRaw`SELECT id FROM applications WHERE id=${initial.applicationId}::uuid FOR UPDATE`;
     await tx.$queryRaw`SELECT id FROM agenda_items WHERE id=${id}::uuid FOR UPDATE`;
     const app = await tx.application.findUniqueOrThrow({ where: { id: initial.applicationId } });
-    if (app.archivedAt) throw new DomainError('APPLICATION_ARCHIVED');
+    if (app.archivedAt) throw new AppError(409, 'APPLICATION_ARCHIVED', CHANGE_REJECTED);
     const row = await tx.agendaItem.findUniqueOrThrow({
       where: { id },
       include: {
@@ -107,22 +100,23 @@ export async function updateAgenda(userId: string, id: string, request: UpdateAg
         email: { select: { subject: true, threadId: true, applicationId: true, matchState: true } },
       },
     });
-    if (row.revision !== request.expectedRevision) throw new DomainError('REVISION_CONFLICT');
+    if (row.revision !== request.expectedRevision)
+      throw new AppError(409, 'REVISION_CONFLICT', CHANGE_REJECTED);
     if (
       row.retiredAt ||
       row.email.applicationId !== row.applicationId ||
       row.email.matchState !== 'MATCHED'
     )
-      throw new DomainError('AGENDA_RETIRED');
+      throw new AppError(409, 'AGENDA_RETIRED', CHANGE_REJECTED);
     const current = serialize(row);
     const timing = request.timing ? resolveTemporal(request.timing) : current.timing;
     const state = request.state ?? row.state;
     if (request.timing && timing.precision === 'UNRESOLVED')
-      throw new DomainError('TIMING_UNRESOLVED', 400);
+      throw new AppError(400, 'TIMING_UNRESOLVED', CHANGE_REJECTED);
     if (['CONFIRMED', 'COMPLETED'].includes(state) && timing.precision === 'UNRESOLVED')
-      throw new DomainError('TIMING_UNRESOLVED', 400);
+      throw new AppError(400, 'TIMING_UNRESOLVED', CHANGE_REJECTED);
     if (state === 'COMPLETED' && row.state !== 'CONFIRMED' && row.state !== 'COMPLETED')
-      throw new DomainError('CONFIRM_FIRST');
+      throw new AppError(409, 'CONFIRM_FIRST', CHANGE_REJECTED);
     if (state === row.state && JSON.stringify(timing) === JSON.stringify(current.timing))
       return current;
     return serialize(

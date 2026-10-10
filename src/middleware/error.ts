@@ -1,7 +1,7 @@
-import { DomainError } from '../services/agenda';
+import { AppError } from '../errors';
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
-import { logError } from '../utils/log';
+import { logError, logWarn } from '../utils/log';
 
 export function errorHandler(
   err: unknown,
@@ -10,27 +10,26 @@ export function errorHandler(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _next: NextFunction,
 ) {
-  logError(
-    'request_failed',
-    {
-      method: req.method,
-      path: req.originalUrl.split('?')[0],
-      status: statusFor(err),
-      userId: req.auth?.user.id,
-    },
-    err,
-  );
+  const fields = {
+    method: req.method,
+    path: req.originalUrl.split('?')[0],
+    status: statusFor(err),
+    userId: req.auth?.user.id,
+  };
 
-  if (err instanceof DomainError)
+  if (err instanceof AppError) {
+    // An expected outcome, not a fault: one short line, without a stack.
+    logWarn('request_failed', { ...fields, code: err.code });
     return res.status(err.status).json({
       error: {
         code: err.code,
-        message:
-          err.code === 'NOT_FOUND'
-            ? 'Not found'
-            : 'This change could not be saved. Refresh and review the current state.',
+        message: err.message,
+        ...(err.details ? { details: err.details } : {}),
       },
     });
+  }
+
+  logError('request_failed', fields, err);
 
   if (err instanceof ZodError) {
     return res.status(400).json({
@@ -63,7 +62,7 @@ export function errorHandler(
 
 /** The status the handler above sends for this error. */
 function statusFor(err: unknown): number {
-  if (err instanceof DomainError) return err.status;
+  if (err instanceof AppError) return err.status;
   if (err instanceof ZodError) return 400;
   if (err instanceof Error && err.name === 'UnauthorizedError') return 401;
   return 500;

@@ -1,4 +1,4 @@
-import { DomainError } from './agenda';
+import { AppError, CHANGE_REJECTED } from '../errors';
 /**
  * Automation submission intake and review (ADR-0002 decisions 5–8; MCP-03, MCP-05).
  *
@@ -254,7 +254,7 @@ async function linkApplication(
     SELECT id, "archivedAt" FROM applications WHERE id = ${applicationId}::uuid AND "userId" = ${userId}::uuid FOR UPDATE`;
   if (!locked.length) return false;
   if (locked[0].archivedAt) {
-    if (explicit) throw new DomainError('APPLICATION_ARCHIVED');
+    if (explicit) throw new AppError(409, 'APPLICATION_ARCHIVED', CHANGE_REJECTED);
     return false;
   }
   await tx.application.updateMany({
@@ -411,13 +411,9 @@ export async function recordSubmission(
 export type ResolveAction =
   { action: 'link'; applicationId: string } | { action: 'create' } | { action: 'ignore' };
 
-/** Expected review outcomes, mapped to the email resolve route's codes. */
-export class SubmissionReviewError extends Error {
-  constructor(readonly reason: 'NOT_FOUND' | 'NOT_RESOLVABLE' | 'APPLICATION_NOT_FOUND') {
-    super(reason);
-    this.name = 'SubmissionReviewError';
-  }
-}
+// Same codes and messages as the email resolve route.
+const notResolvable = () =>
+  new AppError(400, 'BAD_REQUEST', 'Submission is not in a resolvable state.');
 
 /**
  * Final user resolution of a NEEDS_REVIEW submission, under the same per-user lock as intake.
@@ -434,8 +430,8 @@ export async function resolveSubmission(
     const submission = await tx.externalSubmission.findFirst({
       where: { id: submissionId, userId },
     });
-    if (!submission) throw new SubmissionReviewError('NOT_FOUND');
-    if (submission.matchState !== 'NEEDS_REVIEW') throw new SubmissionReviewError('NOT_RESOLVABLE');
+    if (!submission) throw new AppError(404, 'NOT_FOUND', 'Submission not found.');
+    if (submission.matchState !== 'NEEDS_REVIEW') throw notResolvable();
 
     let applicationId: string | null = null;
     if (resolution.action === 'create')
@@ -446,11 +442,11 @@ export async function resolveSubmission(
           where: { id: resolution.applicationId, userId, archivedAt: { not: null } },
         })
       )
-        throw new DomainError('APPLICATION_ARCHIVED');
+        throw new AppError(409, 'APPLICATION_ARCHIVED', CHANGE_REJECTED);
       if (
         !(await linkApplication(tx, userId, resolution.applicationId, submission.submittedAt, true))
       )
-        throw new SubmissionReviewError('APPLICATION_NOT_FOUND');
+        throw new AppError(403, 'FORBIDDEN', 'Application not found or access denied.');
       applicationId = resolution.applicationId;
     }
     const matchState = ({ link: 'LINKED', create: 'CREATED', ignore: 'IGNORED' } as const)[
@@ -461,7 +457,7 @@ export async function resolveSubmission(
       where: { id: submissionId, userId, matchState: 'NEEDS_REVIEW' },
       data: { matchState, resolvedBy: 'USER', resolvedAt: now, applicationId },
     });
-    if (updated.count !== 1) throw new SubmissionReviewError('NOT_RESOLVABLE');
+    if (updated.count !== 1) throw notResolvable();
     if (applicationId) await addEvent(tx, applicationId, submissionId);
     return { id: submissionId, matchState, applicationId };
   }, TX_OPTIONS);

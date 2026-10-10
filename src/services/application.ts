@@ -1,4 +1,4 @@
-import { DomainError } from './agenda';
+import { AppError, CHANGE_REJECTED } from '../errors';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import {
@@ -13,22 +13,6 @@ import {
   deriveStatus,
 } from '../contracts';
 import { logError } from '../utils/log';
-
-export class ApplicationNotFoundError extends Error {
-  readonly code = 'NOT_FOUND';
-  constructor() {
-    super('Application not found');
-    this.name = 'ApplicationNotFoundError';
-  }
-}
-
-export class StatusConflictError extends Error {
-  readonly code = 'STATUS_CONFLICT';
-  constructor() {
-    super('The application status was changed elsewhere. Reload it before saving again.');
-    this.name = 'StatusConflictError';
-  }
-}
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -305,11 +289,15 @@ export class ApplicationService {
         SELECT "userStatus", "userStatusRevision", "archivedAt" FROM applications
         WHERE id = ${id}::uuid AND "userId" = ${userId}::uuid
         FOR UPDATE`;
-      if (!locked.length) throw new ApplicationNotFoundError();
+      if (!locked.length) throw new AppError(404, 'NOT_FOUND', 'Application not found');
       const current = locked[0];
-      if (current.archivedAt) throw new DomainError('APPLICATION_ARCHIVED');
+      if (current.archivedAt) throw new AppError(409, 'APPLICATION_ARCHIVED', CHANGE_REJECTED);
       if (current.userStatusRevision !== request.expectedUserStatusRevision)
-        throw new StatusConflictError();
+        throw new AppError(
+          409,
+          'STATUS_CONFLICT',
+          'The application status was changed elsewhere. Reload it before saving again.',
+        );
 
       const changed = current.userStatus !== request.userStatus;
       if (changed) {
@@ -324,7 +312,7 @@ export class ApplicationService {
       }
       // Same transaction snapshot as the acknowledged write.
       const application = await this.getApplication(userId, id, tx);
-      if (!application) throw new ApplicationNotFoundError();
+      if (!application) throw new AppError(404, 'NOT_FOUND', 'Application not found');
       return { application, changed };
     });
   }
