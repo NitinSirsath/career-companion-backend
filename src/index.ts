@@ -85,7 +85,7 @@ import { actionRouter } from './routes/action';
 import { aiRouter } from './routes/ai';
 import { integrationTokenRouter } from './routes/integrationTokens';
 import { submissionRouter } from './routes/submissions';
-import { testToolsRouter } from './routes/testTools';
+import { sandboxRouter } from './routes/sandbox';
 import { appModeRouter } from './routes/appMode';
 import { errorHandler } from './middleware/error';
 
@@ -103,7 +103,7 @@ app.use('/api/ai', aiRouter);
 app.use('/api/integration-tokens', integrationTokenRouter);
 app.use('/api/submissions', submissionRouter);
 // Dev mode only: answers 404 in prod (utils/config.ts).
-app.use('/api/test-tools', testToolsRouter);
+app.use('/api/sandbox', sandboxRouter);
 
 app.use(errorHandler);
 
