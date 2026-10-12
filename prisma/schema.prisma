@@ -8,12 +8,14 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid()) @db.Uuid
-  email     String   @unique
-  googleId  String?  @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  googleId     String?  @unique
+  name         String?
+  /// Salted scrypt hash for sign-in with email and password; null when the user has none.
+  passwordHash String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   agendaItems         AgendaItem[]
   applications        Application[]
@@ -27,6 +29,19 @@ model User {
   externalSubmissions ExternalSubmission[]
 
   @@map("users")
+}
+
+/// One failed sign-in with email and password. Kept only for the short window in which tries
+/// are counted (services/passwordLogin.ts). Never holds a password.
+model LoginAttempt {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String
+  ip        String
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([ip, createdAt])
+  @@map("login_attempts")
 }
 
 enum ApplicationStatus {

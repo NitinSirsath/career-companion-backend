@@ -1,3 +1,4 @@
+import type { UserProfile } from '../contracts/auth';
 import { prisma } from '../db/prisma';
 
 /**
@@ -23,9 +24,17 @@ export async function findOrCreateGoogleUser(googleId: string, email: string, na
 }
 
 /** What a signed-in user may see about their own account; null when the user was deleted. */
-export function getUserProfile(userId: string) {
-  return prisma.user.findUnique({
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+  const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, email: true, name: true },
+    select: { id: true, email: true, name: true, passwordHash: true, googleId: true },
   });
+  if (!user) return null;
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    hasPassword: user.passwordHash !== null,
+    hasGoogle: user.googleId !== null,
+  };
 }

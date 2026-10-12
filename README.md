@@ -58,6 +58,7 @@ Run `npm run dev` to start the development server.
 ## Scripts
 
 - `npm run dev` - Start dev server with nodemon/ts-node-dev
+- `npm run devmode` - Set up and start dev mode (see "Dev mode" below)
 - `npm run build` - Build for production using tsc
 - `npm run lint` - Run ESLint
 - `npm run format` - Run Prettier
@@ -93,6 +94,19 @@ Vitest loads `.env.test` with override enabled; confirm it contains that same te
 Local development uses **Google OAuth** for authentication. Copy `.env.example` to `.env`, set the Google OAuth variables in `.env`, and log in through the application before calling protected API routes.
 
 The `X-Development-User` header is retained only for automated tests. It works only when both `NODE_ENV=test` and `ENABLE_DEV_AUTH=true`; it is ignored in local development and production.
+
+### Sign-in with email and password
+
+Next to Google sign-in, a user can sign in with email and password.
+
+- `POST /api/auth/login` `{ email, password }` starts the same session as Google sign-in, under a fresh session ID, and answers the user profile. A wrong password, an unknown email and a user with no password all get the same 401 `INVALID_CREDENTIALS` ("Email or password is wrong.").
+- `POST /api/auth/password` `{ currentPassword?, newPassword }` (signed in) sets the first password or changes it. A user with a password must send the current one (403 `WRONG_PASSWORD` otherwise). A change signs the user out of every other session.
+- `POST /api/auth/register` `{ email, password, name? }` creates a user: **dev mode only**, 404 in prod mode. In prod mode a user is created only by Google sign-in, so every prod email is one Google has confirmed.
+- `GET /api/auth/me` also says `hasPassword` and `hasGoogle`.
+- In dev mode Google sign-in is off: `/api/auth/connect` and `/api/auth/callback` answer 404.
+- **Passwords:** 10 to 200 characters, stored only as a salted scrypt hash (`utils/passwordHash.ts`), never logged or returned.
+- **Guessing limit:** 5 wrong tries for one email within 15 minutes block that email, and 20 wrong tries from one network address block that address, until the tries are 15 minutes old (429 `TOO_MANY_ATTEMPTS` with `details.retryAfterSeconds`). A good sign-in clears the email's wrong tries. Behind a proxy, set `TRUST_PROXY_HOPS` so the address is the client's.
+- **Forgot password:** the app sends no email. In prod mode, sign in with Google and set a new password. In dev mode, create another test user.
 
 ### Making Authenticated Requests
 API calls to protected routes need a logged-in session cookie. For local development, authenticate with Google first and send the resulting `cc_session` cookie with API requests.

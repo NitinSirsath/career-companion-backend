@@ -1,11 +1,31 @@
+/**
+ * Sign-in routes.
+ *
+ *   GET  /api/auth/connect    start Google sign-in (prod mode only)
+ *   GET  /api/auth/callback   finish Google sign-in (prod mode only)
+ *   POST /api/auth/login      sign in with email and password
+ *   POST /api/auth/password   set the first password, or change it
+ *   POST /api/auth/register   create a user with a password (dev mode only)
+ *   GET  /api/auth/me         the signed-in user
+ *   GET|POST /api/auth/logout
+ *
+ * Request bodies are never logged, and validation errors never include submitted values.
+ */
 import { randomBytes } from 'crypto';
 import { Router, Request, Response, NextFunction } from 'express';
+import {
+  PasswordLoginRequestSchema,
+  RegisterRequestSchema,
+  SetPasswordRequestSchema,
+} from '../contracts/auth';
+import { devModeOnly, prodModeOnly } from '../middleware/appMode';
 import { requireAuth } from '../middleware/auth';
 import {
   googleLoginUrl,
   verifyGoogleLogin,
   warnIfGoogleLoginNotConfigured,
 } from '../services/googleOAuth';
+import { loginWithPassword, registerUser, setPassword } from '../services/passwordLogin';
 import { findOrCreateGoogleUser, getUserProfile } from '../services/user';
 import { frontendUrl, isProduction } from '../utils/config';
 import { logError } from '../utils/log';
@@ -18,7 +38,28 @@ const FRONTEND_DASHBOARD_PATH = '/';
 
 warnIfGoogleLoginNotConfigured();
 
-router.get('/connect', async (req: Request, res: Response, next: NextFunction) => {
+/** Starts the session of a user who just proved who they are, under a fresh session ID. */
+async function signIn(req: Request, userId: string) {
+  await new Promise<void>((resolve, reject) =>
+    req.session.regenerate((err) => (err ? reject(err) : resolve())),
+  );
+  req.session.userId = userId;
+  await new Promise<void>((resolve, reject) =>
+    req.session.save((err) => (err ? reject(err) : resolve())),
+  );
+}
+
+function handle(status: number, action: (req: Request) => Promise<unknown>) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.status(status).json(await action(req));
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+router.get('/connect', prodModeOnly, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const state = randomBytes(32).toString('hex');
     const authUrl = googleLoginUrl(state);
@@ -37,7 +78,7 @@ router.get('/connect', async (req: Request, res: Response, next: NextFunction) =
   }
 });
 
-router.get('/callback', async (req: Request, res: Response) => {
+router.get('/callback', prodModeOnly, async (req: Request, res: Response) => {
   const frontendLoginUrl = `${frontendUrl()}${FRONTEND_LOGIN_PATH}`;
   const frontendDashboardUrl = `${frontendUrl()}${FRONTEND_DASHBOARD_PATH}`;
 
@@ -67,19 +108,48 @@ router.get('/callback', async (req: Request, res: Response) => {
     const identity = await verifyGoogleLogin(code);
     const user = await findOrCreateGoogleUser(identity.googleId, identity.email, identity.name);
 
-    await new Promise<void>((resolve, reject) =>
-      req.session.regenerate((err) => (err ? reject(err) : resolve())),
-    );
-    req.session.userId = user.id;
-    await new Promise<void>((resolve, reject) =>
-      req.session.save((err) => (err ? reject(err) : resolve())),
-    );
+    await signIn(req, user.id);
     return res.redirect(302, frontendDashboardUrl);
   } catch (err) {
     logError('google_login_failed', {}, err);
     return res.redirect(302, `${frontendLoginUrl}?error=server_error`);
   }
 });
+
+router.post(
+  '/login',
+  handle(200, async (req) => {
+    const userId = await loginWithPassword(
+      PasswordLoginRequestSchema.parse(req.body),
+      req.ip ?? '',
+    );
+    await signIn(req, userId);
+    return getUserProfile(userId);
+  }),
+);
+
+router.post(
+  '/register',
+  devModeOnly,
+  handle(201, async (req) => {
+    const userId = await registerUser(RegisterRequestSchema.parse(req.body));
+    await signIn(req, userId);
+    return getUserProfile(userId);
+  }),
+);
+
+router.post(
+  '/password',
+  requireAuth,
+  handle(200, async (req) => {
+    const userId = req.auth!.user.id;
+    await setPassword(userId, SetPasswordRequestSchema.parse(req.body), {
+      ip: req.ip ?? '',
+      sessionId: req.sessionID,
+    });
+    return getUserProfile(userId);
+  }),
+);
 
 router.get('/me', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
