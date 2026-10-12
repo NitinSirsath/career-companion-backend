@@ -55,7 +55,6 @@ export async function fetchMessageMetadata(
   gmailMessageId: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<{ labelIds: string[] | null; snippet: string | null }> {
-
   return withGmail(
     userId,
     async (gmail) => {
@@ -73,7 +72,6 @@ export async function fetchMessageBody(
   gmailMessageId: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<string> {
-
   return withGmail(
     userId,
     async (gmail) => {
