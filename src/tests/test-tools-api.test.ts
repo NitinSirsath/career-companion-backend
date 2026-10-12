@@ -59,7 +59,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   vi.stubEnv('ENABLE_DEV_AUTH', 'true');
-  vi.stubEnv('TEST_TOOLS_ENABLED', 'true');
+  vi.stubEnv('APP_MODE', 'dev');
   await prisma.email.deleteMany({ where: { userId: { in: [owner, other] } } });
   await prisma.application.deleteMany({ where: { userId: { in: [owner, other] } } });
   await prisma.aIConfiguration.deleteMany({ where: { userId: { in: [owner, other] } } });
@@ -78,7 +78,7 @@ afterAll(async () => {
 
 describe('test tools switch', () => {
   it('answers 404 on every path when off, before login', async () => {
-    vi.stubEnv('TEST_TOOLS_ENABLED', '');
+    vi.stubEnv('APP_MODE', '');
     expect((await status()).status).toBe(404);
     expect((await status().set(as(OWNER))).status).toBe(404);
     expect((await deliver(template('offer'))).status).toBe(404);
@@ -86,7 +86,7 @@ describe('test tools switch', () => {
     expect(await prisma.email.count({ where: { userId: owner } })).toBe(0);
   });
 
-  it('stays off when the database name has no "test", even with the flag on', async () => {
+  it('stays off when the database is not the one for dev mode, even with APP_MODE=dev', async () => {
     vi.stubEnv('DATABASE_URL', 'postgresql://u:p@localhost:5432/career_companion_db?schema=public');
     expect((await status().set(as(OWNER))).status).toBe(404);
     expect((await deliver(template('offer'))).status).toBe(404);
@@ -166,7 +166,7 @@ describe('test inbox', () => {
     const { gmailMessageId } = await prisma.email.findUniqueOrThrow({
       where: { id: body.emailId },
     });
-    vi.stubEnv('TEST_TOOLS_ENABLED', '');
+    vi.stubEnv('APP_MODE', '');
     await expect(fetchMessageMetadata(owner, gmailMessageId)).rejects.toThrow('test tools are off');
     await expect(fetchMessageBody(owner, gmailMessageId)).rejects.toThrow('test tools are off');
     await configureAI(owner);
