@@ -19,6 +19,7 @@ model User {
   applications        Application[]
   gmailConnection     GmailConnection?
   emails              Email[]
+  outgoingEmails      OutgoingEmail[]
   aiConfiguration     AIConfiguration?
   aiBatches           AIBatch[]
   aiUsageDays         AIUsageDay[]
@@ -86,6 +87,12 @@ enum EmailProcessingState {
   FAILED
 }
 
+/// The user's own answer to what an email asks for: handled, or asked again after a reply.
+enum EmailRequestState {
+  DONE
+  OPEN
+}
+
 model Email {
   aiOperations            AIOperation[]
   aiProcessingResult      AIProcessingResult?
@@ -105,6 +112,11 @@ model Email {
   processingErrorStage    String?
   processingRetryable     Boolean?
   processingFailedAt      DateTime?
+  /// When the user first opened this email's conversation. Null shows the conversation as new.
+  seenAt                  DateTime?
+  /// Set only by the user, for the request this email makes. Null means the user gave no answer.
+  requestUserState        EmailRequestState?
+  requestUserStateAt      DateTime?
   applicationId           String?                  @db.Uuid // nullable FK to Application
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
@@ -119,7 +131,25 @@ model Email {
   @@unique([userId, gmailMessageId]) // idempotency constraint
   @@index([userId])
   @@index([userId, relevanceState]) // future AI processing queue queries
+  @@index([userId, threadId]) // conversation grouping
   @@map("emails")
+}
+
+/// A message the user sent in a conversation we already hold. Only its IDs and time are stored,
+/// to show that the user replied. It is never classified, matched or sent to AI.
+model OutgoingEmail {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  gmailMessageId String
+  threadId       String
+  sentAt         DateTime
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, gmailMessageId])
+  @@index([userId, threadId])
+  @@map("outgoing_emails")
 }
 
 /// Content of a test-inbox email (manual test environment only; services/testTools). Its email's
