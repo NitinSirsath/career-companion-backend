@@ -8,6 +8,8 @@ import {
   SIMULATED_ID_PREFIX,
   type DeliverTestEmailRequest,
   type DeliverTestEmailResponse,
+  type DeliverTestReplyRequest,
+  type DeliverTestReplyResponse,
   type ResetTestDataResponse,
 } from '../../contracts/testTools';
 import { AppError } from '../../errors';
@@ -40,9 +42,31 @@ export async function deliverTestEmail(
   return { emailId: email.id, threadId };
 }
 
+/** Records the test user's reply in a test thread, as a Gmail sync records a sent message. */
+export async function deliverTestReply(
+  userId: string,
+  input: DeliverTestReplyRequest,
+): Promise<DeliverTestReplyResponse> {
+  const thread = await prisma.email.findFirst({
+    where: { userId, threadId: input.threadId },
+    select: { id: true },
+  });
+  if (!thread) throw new AppError(404, 'NOT_FOUND', 'Test thread not found.');
+  const reply = await prisma.outgoingEmail.create({
+    data: {
+      userId,
+      gmailMessageId: `${SIMULATED_ID_PREFIX}${randomUUID()}`,
+      threadId: input.threadId,
+      sentAt: new Date(),
+    },
+  });
+  return { sentAt: reply.sentAt.toISOString() };
+}
+
 /**
- * Deletes what a test user made: emails (with their AI rows and test content), applications
- * (with events, actions and agenda), automation submissions, AI batches and AI day counts, and
+ * Deletes what a test user made: emails (with their AI rows and test content), recorded replies,
+ * applications (with events, actions and agenda), automation submissions, AI batches and AI day
+ * counts, and
  * clears an AI rate-limit pause. Keeps the user, AI settings, Gmail connection and integration
  * tokens. Refused when the user has any real Gmail email: real mail is never deleted.
  */
@@ -59,6 +83,7 @@ export async function resetTestData(userId: string): Promise<ResetTestDataRespon
         'This user has real Gmail mail. Reset never deletes real mail: use a separate test login or a fresh test database.',
       );
     const emails = await tx.email.deleteMany({ where: { userId } });
+    await tx.outgoingEmail.deleteMany({ where: { userId } });
     const applications = await tx.application.deleteMany({ where: { userId } });
     await tx.externalSubmission.deleteMany({ where: { userId } });
     await tx.aIBatch.deleteMany({ where: { userId } });
