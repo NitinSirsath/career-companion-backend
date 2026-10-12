@@ -4,7 +4,7 @@ import { projectAgenda } from './agenda';
 import { Prisma, Email, Application, Action } from '@prisma/client';
 import type { CorrectEmailMatchRequest } from '../contracts/email';
 import { lockUser, LOCK_NAMESPACE } from '../utils/advisoryLock';
-import { parseActionDeadline } from '../utils/actionDeadline';
+import { requestOf } from './emailRequest';
 import { prisma } from '../db/prisma';
 import {
   ApplicationStatus,
@@ -75,26 +75,7 @@ export async function matchEmailToApplication(emailId: string): Promise<void> {
     return;
   }
 
-  // Normalize
-  const normalizedCompany = normalize(companyName);
-  const normalizedRole = role ? normalize(role) : null;
-
-  // Find candidate applications for this user
-  const applications = await prisma.application.findMany({
-    where: { userId, archivedAt: null },
-  });
-
-  const candidates = applications.filter((app) => {
-    const appCompany = normalize(app.companyName);
-    if (appCompany !== normalizedCompany) return false;
-
-    if (normalizedRole && app.jobTitle) {
-      const appRole = normalize(app.jobTitle);
-      if (appRole !== normalizedRole) return false;
-    }
-
-    return true;
-  });
+  const candidates = await candidateApplications(prisma, userId, companyName, role);
 
   if (candidates.length === 1) {
     // Exact match
@@ -133,6 +114,27 @@ function normalize(str: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '')
     .trim();
+}
+
+/** Two company names that the matcher treats as the same company. */
+export const sameCompany = (a: string, b: string) => normalize(a) === normalize(b);
+
+/**
+ * The user's active applications an email about this company and role may belong to: the same
+ * company, and the same role where both name one.
+ */
+export async function candidateApplications(
+  db: Prisma.TransactionClient,
+  userId: string,
+  companyName: string,
+  role: string | null,
+) {
+  const normalizedRole = role ? normalize(role) : null;
+  const applications = await db.application.findMany({ where: { userId, archivedAt: null } });
+  return applications.filter((app) => {
+    if (!sameCompany(app.companyName, companyName)) return false;
+    return !(normalizedRole && app.jobTitle) || normalize(app.jobTitle) === normalizedRole;
+  });
 }
 
 export async function applyMatch(
@@ -517,6 +519,8 @@ export function inferState(aiResult: AIProcessingResult): ApplicationStatus | nu
     return ApplicationStatus.ASSESSMENT;
   if (aiResult.recruiterName || aiResult.category === 'RECRUITER')
     return ApplicationStatus.RECRUITER_CONTACT;
+  // A confirmation or status update with no stronger signal: the company has the application.
+  if (aiResult.category === 'FOLLOW_UP') return ApplicationStatus.APPLIED;
   return null;
 }
 
@@ -594,14 +598,17 @@ async function applyEffects(
   if (existing) return reuseAction(tx, app, existing, reactivate);
 
   const action = await createActionFromEmail(tx, email, app, aiResult, {
-    actionStatus,
+    // The user may have handled the request before the email had an application.
+    actionStatus:
+      actionStatus === 'PENDING' && email.requestUserState === 'DONE' ? 'COMPLETED' : actionStatus,
     snoozedUntil,
   });
   if (app.archivedAt || (snoozedUntil && snoozedUntil > new Date())) {
     await suppressNotifications(tx, [action.id]);
     return null;
   }
-  return action.id;
+  // A request the user already handled needs no reminder.
+  return action.status === 'PENDING' ? action.id : null;
 }
 
 /** Moves the application's AI status forward when the email suggests it, and records the event once. */
@@ -671,9 +678,10 @@ async function createActionFromEmail(
   aiResult: AIProcessingResult,
   carried: { actionStatus: Action['status']; snoozedUntil: Date | null },
 ) {
-  const deadlineText = aiResult.actionRequired ? aiResult.actionDeadline : aiResult.followUpDate;
-  const parsed = parseActionDeadline(deadlineText, email.receivedAt);
-  if (deadlineText?.trim() && !parsed.deadline)
+  const request = requestOf(aiResult, email.receivedAt);
+  if (!request) throw new Error('EMAIL_HAS_NO_REQUEST');
+  const parsed = request.deadline;
+  if (request.deadlineText?.trim() && !parsed.deadline)
     logEvent('action_deadline_unclear', { emailId: email.id, reason: parsed.reason });
   return tx.action.create({
     data: {
@@ -682,10 +690,9 @@ async function createActionFromEmail(
       status: carried.actionStatus,
       origin: 'EMAIL',
       snoozedUntil: carried.actionStatus === 'PENDING' ? carried.snoozedUntil : null,
-      type: aiResult.actionRequired ? 'ACTION_REQUIRED' : 'FOLLOW_UP_REQUIRED',
-      description: aiResult.actionRequired
-        ? aiResult.requestedAction || 'Action required'
-        : 'Follow up required',
+      type: request.kind === 'ACTION' ? 'ACTION_REQUIRED' : 'FOLLOW_UP_REQUIRED',
+      description:
+        request.kind === 'ACTION' ? request.text || 'Action required' : 'Follow up required',
       deadline: parsed.deadline,
       deadlinePrecision: parsed.precision,
     },
