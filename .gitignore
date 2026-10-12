@@ -8,4 +8,5 @@ build/
 *.log
 *.tsbuildinfo
 !.env.test.example
+!.env.dev.example
 scratch/
