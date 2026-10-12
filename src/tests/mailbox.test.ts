@@ -355,7 +355,7 @@ describe('the test inbox as a mailbox', () => {
   const THREAD = 'sim-thread-00000000-aaaa';
 
   beforeEach(async () => {
-    vi.stubEnv('TEST_TOOLS_ENABLED', 'true');
+    vi.stubEnv('APP_MODE', 'dev');
     await simulated(THREAD, 'first', new Date(Date.UTC(2026, 9, 1)));
     await simulated(THREAD, 'second', new Date(Date.UTC(2026, 9, 3)));
   });
@@ -409,7 +409,7 @@ describe('the test inbox as a mailbox', () => {
   it('hides test threads from other users and when test tools are off', async () => {
     await prisma.gmailConnection.deleteMany({ where: { userId: owner } });
     expect((await thread(THREAD, OWNER)).status).toBe(404);
-    vi.stubEnv('TEST_TOOLS_ENABLED', '');
+    vi.stubEnv('APP_MODE', '');
     expect((await thread(THREAD, OTHER)).status).toBe(404);
     expect((await inbox('', OTHER)).body.error.code).toBe('GMAIL_NOT_CONNECTED');
   });
