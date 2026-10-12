@@ -4,6 +4,8 @@
  * for a new variable; `.env.example` explains what each one is for.
  */
 
+import type { AppMode } from '../contracts/appMode';
+
 // ─── Runtime ────────────────────────────────────────────────────────────────
 
 export const isProduction = () => process.env.NODE_ENV === 'production';
@@ -181,14 +183,15 @@ export function parseMCP_DAILY_SUBMISSION_LIMIT(value: string | undefined): numb
 export const submissionDailyLimit = () =>
   parseMCP_DAILY_SUBMISSION_LIMIT(process.env.MCP_DAILY_SUBMISSION_LIMIT);
 
-// ─── Test tools (manual test environment only) ──────────────────────────────
-// The test inbox and reset are on only when TEST_TOOLS_ENABLED=true AND the database name
-// contains "test", so a copied flag can never turn them on against a live database.
+// ─── App mode ───────────────────────────────────────────────────────────────
+// One setting switches the app: prod (the default) or dev. Dev mode is for manual testing with
+// made-up mail. It runs only on its own database, so it can never touch live data, and prod
+// never runs on the dev database.
 
-export function parseTEST_TOOLS_ENABLED(value: string | undefined): boolean {
-  if (value === undefined || value === '' || value === 'false') return false;
-  if (value === 'true') return true;
-  throw new Error('TEST_TOOLS_ENABLED must be empty, false, or true');
+export function parseAPP_MODE(value: string | undefined): AppMode {
+  if (value === undefined || value === '' || value === 'prod') return 'prod';
+  if (value === 'dev') return 'dev';
+  throw new Error('APP_MODE must be empty, prod, or dev');
 }
 
 /** The database name in DATABASE_URL, or null when it is missing or not a plain URL. */
@@ -204,22 +207,42 @@ export function databaseName(url: string | undefined): string | null {
 export const isTestDatabase = (url: string | undefined): boolean =>
   /test/i.test(databaseName(url) ?? '');
 
-/** Checked again on every use, so changing the environment at runtime cannot bypass startup. */
-export function testToolsEnabled(): boolean {
+/** The dev database is the one whose name ends in `_dev`. */
+export const isDevDatabase = (url: string | undefined): boolean =>
+  /_dev$/i.test(databaseName(url) ?? '');
+
+/** Automated tests run dev mode on their fixture database, which has its own guard. */
+const devDatabaseAllowed = (env: NodeJS.ProcessEnv): boolean =>
+  env.NODE_ENV === 'test' ? isTestDatabase(env.DATABASE_URL) : isDevDatabase(env.DATABASE_URL);
+
+/** Checked again on every use, so changing the environment at run time cannot bypass startup. */
+export function devMode(): boolean {
   try {
     return (
-      parseTEST_TOOLS_ENABLED(process.env.TEST_TOOLS_ENABLED) &&
-      isTestDatabase(process.env.DATABASE_URL)
+      parseAPP_MODE(process.env.APP_MODE) === 'dev' &&
+      !isProduction() &&
+      devDatabaseAllowed(process.env)
     );
   } catch {
     return false;
   }
 }
 
-function validateTestTools(env: NodeJS.ProcessEnv) {
-  if (parseTEST_TOOLS_ENABLED(env.TEST_TOOLS_ENABLED) && !isTestDatabase(env.DATABASE_URL))
+export const appMode = (): AppMode => (devMode() ? 'dev' : 'prod');
+
+function validateAppMode(env: NodeJS.ProcessEnv) {
+  if (env.TEST_TOOLS_ENABLED === 'true')
+    throw new Error('TEST_TOOLS_ENABLED was replaced by APP_MODE=dev');
+  const dev = parseAPP_MODE(env.APP_MODE) === 'dev';
+  if (dev && env.NODE_ENV === 'production')
+    throw new Error('APP_MODE=dev is forbidden with NODE_ENV=production');
+  if (dev && !devDatabaseAllowed(env))
     throw new Error(
-      'TEST_TOOLS_ENABLED=true needs a DATABASE_URL, written out in full, whose database name contains "test". Test tools never run on live data.',
+      'APP_MODE=dev needs a DATABASE_URL, written out in full, whose database name ends in "_dev". Dev mode never runs on live data.',
+    );
+  if (!dev && env.NODE_ENV !== 'test' && isDevDatabase(env.DATABASE_URL))
+    throw new Error(
+      'This database belongs to dev mode (its name ends in "_dev"). Set APP_MODE=dev or use another database.',
     );
 }
 
@@ -249,7 +272,7 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env) {
   parseGmailSchedule(env);
   parseAI_TRIAGE_BATCH_ENABLED(env.AI_TRIAGE_BATCH_ENABLED);
   parseAI_TRIAGE_BATCH_SIZE(env.AI_TRIAGE_BATCH_SIZE);
-  validateTestTools(env);
+  validateAppMode(env);
   if (env.NODE_ENV !== 'production') return;
   if (env.ENABLE_DEV_AUTH === 'true')
     throw new Error('Development authentication is forbidden in production');
