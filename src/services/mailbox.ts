@@ -13,7 +13,7 @@ import type {
 } from '../contracts';
 import { isSimulatedId } from '../contracts/testTools';
 import { AppError } from '../errors';
-import { testToolsEnabled } from '../utils/config';
+import { devMode } from '../utils/config';
 import { googleStatus, withGmail } from './gmailClient';
 import { gmailCallOptions } from './googleTransport';
 import { listSimulatedThreads, readSimulatedThread } from './testTools/simulatedMailbox';
@@ -83,7 +83,7 @@ export async function listMailboxThreads(
   pageToken?: string,
 ): Promise<ListMailboxThreadsResponse> {
   // The test environment has no Gmail: its test inbox stands in.
-  if (testToolsEnabled() && !(await gmailConnected(userId))) return listSimulatedThreads(userId);
+  if (devMode() && !(await gmailConnected(userId))) return listSimulatedThreads(userId);
   const page = await readGmail(userId, READ_BUDGET_MS, async (gmail, signal) => {
     const list = await gmail.users.threads.list(
       { userId: 'me', labelIds: ['INBOX'], maxResults: PAGE_SIZE, pageToken },

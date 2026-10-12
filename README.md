@@ -231,11 +231,15 @@ AI_TRIAGE_BATCH_ENABLED is **off by default**. Unset, empty, or false means off;
 
 When enabled, new unclassified emails are grouped into per-user triage jobs. The batch contract only sends bounded sender, subject, labels and preview metadata plus per-batch keys; no Gmail or database IDs are sent to the provider. The existing per-email extraction and matching path remains unchanged.
 
-### Manual test environment (test inbox and reset)
+### Dev mode (`APP_MODE=dev`)
 
-For clean manual testing without Gmail, a second account or live data. **Never turn it on for live.** Only the emails are fake: they are read by the AI provider the test user connects, with a real key.
+One setting switches the app: `APP_MODE=prod` (the default, also when empty) or `APP_MODE=dev`. Dev mode is for manual testing with made-up mail, without a second account or live data. Only the emails are made up: they are read by the AI provider the test user connects, with a real key.
 
-- `TEST_TOOLS_ENABLED=true` turns on `/api/test-tools` (status, deliver a test email, reset). Startup fails unless `DATABASE_URL` is written out in full (no `${...}`) and its database name contains `test`, for example `career_companion_testenv`. Do not reuse the automated test database: `npm test` wipes it. When off, every `/api/test-tools` path answers 404.
-- A test email is saved with a `sim-` Gmail ID and goes to the same queue as a newly synced Gmail email. `services/gmailFetcher.ts` reads its content from `simulated_email_contents` instead of Gmail. `gmailSync.ts` is unchanged.
-- Reset deletes the user's emails, applications, submissions, AI batches and AI day counts, and clears an AI rate-limit pause. It keeps the user, AI settings, Gmail connection and tokens. It is refused (409 `REAL_MAIL_PRESENT`) if the user has any real Gmail email.
-- Frontend: build or run it with `VITE_TEST_TOOLS=true` to show the TEST banner and the Test inbox on the Gmail page.
+- **One command:** `npm run devmode`. On first run it makes `.env.dev` from `.env.dev.example` and fills in the four secrets. Every run it creates the dev database when it is missing, brings it to the latest structure (`prisma migrate deploy`) and starts the backend. It never deletes data. No Google or Gmail key is needed.
+- **Two env files:** `.env` is prod mode (see `.env.example`), `.env.dev` is dev mode. `.env.dev` lists every setting, so nothing is taken from `.env`. To switch mode, start with `npm run dev` or `npm run devmode`.
+- **Database rule:** dev mode starts only when `DATABASE_URL` is written out in full (no `${...}`) and its database name ends in `_dev`, for example `career_companion_dev`. Prod mode refuses a database whose name ends in `_dev`. Automated tests keep their `test` databases, so `npm test` can never wipe the dev database. All three use the same schema and migrations.
+- **Never in production:** `APP_MODE=dev` with `NODE_ENV=production` stops startup. The checks run again on every use, so changing the environment at run time cannot get around them.
+- `GET /api/app-mode` (public) answers `{ "mode": "dev" | "prod" }`. The frontend reads it; it has no mode setting of its own.
+- `TEST_TOOLS_ENABLED` is gone: `TEST_TOOLS_ENABLED=true` stops startup with a pointer to `APP_MODE=dev`.
+- Test inbox (`/api/test-tools`: status, deliver a test email, reset) runs in dev mode only and answers 404 in prod mode. A test email is saved with a `sim-` Gmail ID and goes to the same queue as a newly synced Gmail email; `services/gmailFetcher.ts` reads its content from `simulated_email_contents` instead of Gmail. Reset deletes the user's emails, applications, submissions, AI batches and AI day counts, and clears an AI rate-limit pause; it is refused (409 `REAL_MAIL_PRESENT`) if the user has any real Gmail email.
+

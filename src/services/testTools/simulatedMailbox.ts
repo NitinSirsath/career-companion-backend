@@ -6,7 +6,7 @@ import { prisma } from '../../db/prisma';
 import type { ListMailboxThreadsResponse, MailMessage, MailThread } from '../../contracts';
 import { SIMULATED_ID_PREFIX } from '../../contracts/testTools';
 import { AppError } from '../../errors';
-import { testToolsEnabled } from '../../utils/config';
+import { devMode } from '../../utils/config';
 import { simulatedSnippet } from './simulatedMail';
 
 const PAGE_SIZE = 20;
@@ -38,7 +38,7 @@ export async function listSimulatedThreads(userId: string): Promise<ListMailboxT
 }
 
 export async function readSimulatedThread(userId: string, threadId: string): Promise<MailThread> {
-  const emails = testToolsEnabled()
+  const emails = devMode()
     ? await prisma.email.findMany({
         where: { userId, threadId },
         include: { simulatedContent: { select: { body: true } } },

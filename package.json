@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "devmode": "node scripts/devmode.cjs",
     "lint": "eslint src/ scripts/ prisma/seed.ts",
     "format": "prettier --write src/ scripts/ prisma/seed.ts",
     "format:check": "prettier --check src/ scripts/ prisma/seed.ts",
