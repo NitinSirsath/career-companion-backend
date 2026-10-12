@@ -1,0 +1,39 @@
+name: Finish COM-185 once (temporary)
+# Renames and deletes files on feat/COM-185-app-mode and commits only that.
+# Lives only on the throwaway branch tmp/COM-185-finish, which is deleted afterwards.
+on:
+  push:
+    branches: [tmp/COM-185-finish]
+permissions:
+  contents: write
+concurrency:
+  group: finish-COM-185-once
+  cancel-in-progress: false
+jobs:
+  finish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/COM-185-app-mode
+      - name: Check the hand commits
+        run: |
+          if [ "$(git rev-parse 'HEAD^{tree}')" != "2a021a499666fe084f35185fd499e47223ed5523" ]; then
+            echo "The hand commits do not match the reviewed files. Nothing was changed."
+            exit 1
+          fi
+      - name: Rename and delete
+        run: |
+          git rm -q src/tests/test-tools-config.test.ts
+      - name: Commit only the reviewed result
+        run: |
+          if [ "$(git write-tree)" != "e3c71e9ace328b20a8796816ec5ea0e1b8a1e772" ]; then
+            echo "The result does not match the reviewed tree. Nothing was pushed."
+            git status --short
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'test: remove the test-tools config test (COM-185)'
+          git push origin HEAD:feat/COM-185-app-mode
