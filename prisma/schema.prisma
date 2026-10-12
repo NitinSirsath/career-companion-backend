@@ -42,6 +42,7 @@ model LoginAttempt {
   @@index([email, createdAt])
   @@index([ip, createdAt])
   @@map("login_attempts")
+}
 
 enum ApplicationStatus {
   APPLIED
