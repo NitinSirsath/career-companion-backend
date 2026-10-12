@@ -1,12 +1,12 @@
 /**
- * Test tools API (manual test environment only; see the test tools section of utils/config.ts).
+ * Test tools API (dev mode only; see the app mode section of utils/config.ts).
  *
  *   GET  /api/test-tools/status   { enabled: true }
  *   POST /api/test-tools/emails   deliver one test email
  *   POST /api/test-tools/replies  record the test user's reply in a test thread
  *   POST /api/test-tools/reset    delete this user's test data ({ confirm: 'RESET' })
  *
- * When test tools are off, every path answers 404 before authentication.
+ * Outside dev mode, every path answers 404 before authentication.
  */
 import { NextFunction, Request, Response, Router } from 'express';
 import {
@@ -17,12 +17,12 @@ import {
 import { AppError } from '../errors';
 import { requireAuth } from '../middleware/auth';
 import { deliverTestEmail, deliverTestReply, resetTestData } from '../services/testTools/inbox';
-import { testToolsEnabled } from '../utils/config';
+import { devMode } from '../utils/config';
 
 const router = Router();
 
 router.use((_req: Request, _res: Response, next: NextFunction) => {
-  next(testToolsEnabled() ? undefined : new AppError(404, 'NOT_FOUND', 'Not found'));
+  next(devMode() ? undefined : new AppError(404, 'NOT_FOUND', 'Not found'));
 });
 router.use(requireAuth);
 
