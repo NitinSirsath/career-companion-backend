@@ -11,6 +11,8 @@ export const LOCK_NAMESPACE = {
   externalSubmissions: 0x4d435001,
   /** Integration token creation, to enforce the active-token limit. */
   integrationTokens: 0x4d435002,
+  /** Sending in a sandbox mailbox, so its history numbers have no gaps or repeats. */
+  sandboxMailbox: 0x4d435004,
 } as const;
 
 /** Holds the lock until the surrounding transaction ends. */
