@@ -1,0 +1,44 @@
+name: Finish COM-186 once (temporary)
+# Renames and deletes files on feat/COM-186-mail-sandbox and commits only that.
+# Lives only on the throwaway branch tmp/COM-186-finish, which is deleted afterwards.
+on:
+  push:
+    branches: [tmp/COM-186-finish]
+permissions:
+  contents: write
+concurrency:
+  group: finish-COM-186-once
+  cancel-in-progress: false
+jobs:
+  finish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/COM-186-mail-sandbox
+      - name: Check the hand commits
+        run: |
+          if [ "$(git rev-parse 'HEAD^{tree}')" != "0fa0f3c36fe0f1519844a80bd5eda1c0c7bb3d4d" ]; then
+            echo "The hand commits do not match the reviewed files. Nothing was changed."
+            exit 1
+          fi
+      - name: Rename and delete
+        run: |
+          git rm -q src/contracts/testTools.ts
+          git rm -q src/routes/testTools.ts
+          git rm -q src/services/testTools/inbox.ts
+          git rm -q src/services/testTools/simulatedMail.ts
+          git rm -q src/services/testTools/simulatedMailbox.ts
+          git rm -q src/tests/test-tools-api.test.ts
+      - name: Commit only the reviewed result
+        run: |
+          if [ "$(git write-tree)" != "93c334c68cda8950bc53960c52825ce5e69a5e0a" ]; then
+            echo "The result does not match the reviewed tree. Nothing was pushed."
+            git status --short
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore(sandbox): remove the old test inbox (COM-187)'
+          git push origin HEAD:feat/COM-186-mail-sandbox
