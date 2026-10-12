@@ -5,7 +5,7 @@
  * The authorization code and the tokens are never logged.
  */
 import { google } from 'googleapis';
-import { gmailOAuth, googleLoginOAuth, missingGoogleLoginVars } from '../utils/config';
+import { devMode, gmailOAuth, googleLoginOAuth, missingGoogleLoginVars } from '../utils/config';
 import { decryptToken, loadEncryptionKey } from '../utils/gmailTokenEncryption';
 import { logWarn } from '../utils/log';
 import {
@@ -23,7 +23,8 @@ const GOOGLE_ISSUERS = ['https://accounts.google.com', 'accounts.google.com'];
 
 /** Says at startup, not at the first login, that Google login cannot work yet. */
 export function warnIfGoogleLoginNotConfigured() {
-  const missing = missingGoogleLoginVars();
+  // Dev mode has no Google sign-in, so its missing keys are no problem.
+  const missing = devMode() ? [] : missingGoogleLoginVars();
   if (!missing.length) return;
   logWarn('google_oauth_not_configured', {
     missing,
