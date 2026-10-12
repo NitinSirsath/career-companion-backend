@@ -124,6 +124,8 @@ export async function exchangeGmailCode(code: string) {
 
 /** Best effort: a failed revoke must not block disconnecting. Takes the stored (encrypted) token. */
 export async function revokeGmailAccess(encryptedAccessToken: string): Promise<void> {
+  // Dev mode holds no Google grant: its connection is the sandbox mailbox.
+  if (devMode()) return;
   try {
     await gmailClient(GOOGLE_REVOKE_TIMEOUT_MS).revokeToken(decryptToken(encryptedAccessToken));
   } catch (error) {

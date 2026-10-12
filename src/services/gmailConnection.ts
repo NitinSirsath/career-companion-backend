@@ -98,6 +98,15 @@ export async function saveGmailGrant(
   return true;
 }
 
+/**
+ * Dev mode: connects the user's sandbox mailbox in place of a Gmail account. There is no Google
+ * grant, so the saved token is a placeholder that nothing reads.
+ */
+export async function connectSandboxMailbox(userId: string): Promise<void> {
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+  await saveGmailGrant(userId, user.email, { accessToken: 'sandbox-mailbox' });
+}
+
 /** The saved (still encrypted) access token to revoke on disconnect; null when not connected. */
 export async function connectedAccessToken(userId: string): Promise<string | null> {
   const connection = await prisma.gmailConnection.findUnique({

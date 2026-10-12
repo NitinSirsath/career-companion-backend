@@ -4,7 +4,8 @@ import { SyncQueueError } from '../services/gmailSyncErrors';
  *
  * Endpoints:
  *   GET  /api/gmail/status       — connection status for authenticated user
- *   GET  /api/gmail/connect      — initiate OAuth flow (redirect to Google)
+ *   GET  /api/gmail/connect      — initiate OAuth flow (redirect to Google); in dev mode,
+ *                                  connect the sandbox mailbox at once
  *   GET  /api/gmail/callback     — Google OAuth callback handler
  *   POST /api/gmail/disconnect   — revoke and clear GmailConnection
  *
@@ -19,14 +20,16 @@ import { SyncQueueError } from '../services/gmailSyncErrors';
 
 import { randomBytes } from 'crypto';
 import { Router, Request, Response, NextFunction } from 'express';
+import { prodModeOnly } from '../middleware/appMode';
 import { requireAuth } from '../middleware/auth';
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
 import { GmailSettingsPatchSchema } from '../contracts/gmail';
-import { frontendUrl, isProduction } from '../utils/config';
+import { devMode, frontendUrl, isProduction } from '../utils/config';
 import { logError } from '../utils/log';
 import { listEmails } from '../services/email';
 import {
   clearGmailConnection,
+  connectSandboxMailbox,
   connectedAccessToken,
   readGmailStatus,
   saveGmailGrant,
@@ -61,6 +64,12 @@ router.get('/status', async (req: Request, res: Response, next: NextFunction) =>
 
 router.get('/connect', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Dev mode has no Google account: the sandbox mailbox is connected at once.
+    if (devMode()) {
+      await connectSandboxMailbox(req.auth!.user.id);
+      return res.redirect(302, `${frontendUrl()}${FRONTEND_GMAIL_PATH}`);
+    }
+
     // Generate a cryptographically random CSRF state token (32 bytes = 64 hex chars).
     const state = `${req.auth!.user.id}.${randomBytes(32).toString('hex')}`;
     const authUrl = gmailConsentUrl(state);
@@ -84,7 +93,7 @@ router.get('/connect', async (req: Request, res: Response, next: NextFunction) =
 
 // ─── GET /api/gmail/callback ─────────────────────────────────────────────────
 
-router.get('/callback', async (req: Request, res: Response) => {
+router.get('/callback', prodModeOnly, async (req: Request, res: Response) => {
   const frontendGmailUrl = `${frontendUrl()}${FRONTEND_GMAIL_PATH}`;
 
   try {

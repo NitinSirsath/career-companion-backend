@@ -254,6 +254,18 @@ One setting switches the app: `APP_MODE=prod` (the default, also when empty) or 
 - **Database rule:** dev mode starts only when `DATABASE_URL` is written out in full (no `${...}`) and its database name ends in `_dev`, for example `career_companion_dev`. Prod mode refuses a database whose name ends in `_dev`. Automated tests keep their `test` databases, so `npm test` can never wipe the dev database. All three use the same schema and migrations.
 - **Never in production:** `APP_MODE=dev` with `NODE_ENV=production` stops startup. The checks run again on every use, so changing the environment at run time cannot get around them.
 - `GET /api/app-mode` (public) answers `{ "mode": "dev" | "prod" }`. The frontend reads it; it has no mode setting of its own.
-- `TEST_TOOLS_ENABLED` is gone: `TEST_TOOLS_ENABLED=true` stops startup with a pointer to `APP_MODE=dev`.
-- Test inbox (`/api/test-tools`: status, deliver a test email, reset) runs in dev mode only and answers 404 in prod mode. A test email is saved with a `sim-` Gmail ID and goes to the same queue as a newly synced Gmail email; `services/gmailFetcher.ts` reads its content from `simulated_email_contents` instead of Gmail. Reset deletes the user's emails, applications, submissions, AI batches and AI day counts, and clears an AI rate-limit pause; it is refused (409 `REAL_MAIL_PRESENT`) if the user has any real Gmail email.
+- `TEST_TOOLS_ENABLED` and the old test inbox (`/api/test-tools`) are gone: `TEST_TOOLS_ENABLED=true` stops startup with a pointer to `APP_MODE=dev`, and a migration drops `simulated_email_contents` and the made-up `sim-` rows.
+
+#### Mail sandbox
+
+In dev mode every user has a **sandbox mailbox** that stands in for their Gmail account. No Google account or key is used, and nothing ever leaves the app.
+
+- **Send, then sync.** `POST /api/sandbox/messages` puts a mail from any typed address in the user's sandbox inbox. It writes only to `sandbox_messages`. The mail reaches the app when a sync pulls it, with the same code as real Gmail mail: manual sync, scheduled sync, the look-back window, the history checkpoint, "new mails only" and the noting of the user's replies all run unchanged (`services/gmailSync.ts` is not touched).
+- **How:** every Gmail call goes through `withGmail` (`services/gmailClient.ts`). In dev mode it hands the caller `services/sandbox/gmail.ts`, which answers the calls the app makes (`getProfile`, `messages.list|get`, `history.list`, `threads.list|get`, `labels.list`, `attachments.get`) from the sandbox tables in Gmail's own response shapes. No Google client is built in dev mode. A test fails when the app starts to make a Gmail call the sandbox does not answer.
+- **Same shape as Gmail:** a sandbox message has Gmail-style IDs, a history number, labels (`INBOX` + `CATEGORY_PERSONAL`, or `SENT`), the usual headers, and its text as a plain part and an HTML part (`services/sandbox/message.ts`). A reply quotes the mail it answers.
+- **Connect:** in dev mode `GET /api/gmail/connect` connects the sandbox mailbox at once and returns to the Gmail page. `/api/gmail/callback` answers 404. Disconnect calls nothing at Google.
+- **API** (`/api/sandbox`, 404 before login in prod mode): `GET /threads?folder=inbox|sent`, `GET /threads/:id` (both sides with text and what the app did with each mail), `POST /messages` (new mail to the user), `POST /threads/:id/replies` (`as: "me" | "them"`), `GET /senders` (addresses used before), `POST /reset` (`{ "confirm": "RESET" }`: empties the mailbox and what the app made from it, keeps the user, the AI settings and the connection).
+- **What the app did** with a mail is one of: `NOT_SYNCED`, `WAITING_FOR_AI`, `AI_KEY_MISSING`, `AI_FAILED`, `NOT_JOB_MAIL`, `JOB_MAIL`, and for the user's own mail `REPLY_RECORDED`. Nothing is ever filled in for the AI: with no AI key a synced mail waits and says `AI_KEY_MISSING`.
+- Of the user's own sandbox mail the app keeps what it keeps in prod: message ID, thread ID and sent time. The text stays in the sandbox.
+
 

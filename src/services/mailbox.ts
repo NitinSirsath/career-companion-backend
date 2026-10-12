@@ -11,12 +11,9 @@ import type {
   MailThread,
   MailboxThread,
 } from '../contracts';
-import { isSimulatedId } from '../contracts/testTools';
 import { AppError } from '../errors';
-import { devMode } from '../utils/config';
 import { googleStatus, withGmail } from './gmailClient';
 import { gmailCallOptions } from './googleTransport';
-import { listSimulatedThreads, readSimulatedThread } from './testTools/simulatedMailbox';
 
 const PAGE_SIZE = 20;
 /** Far above any written email; a longer text is cut and marked as cut. */
@@ -82,8 +79,6 @@ export async function listMailboxThreads(
   userId: string,
   pageToken?: string,
 ): Promise<ListMailboxThreadsResponse> {
-  // The test environment has no Gmail: its test inbox stands in.
-  if (devMode() && !(await gmailConnected(userId))) return listSimulatedThreads(userId);
   const page = await readGmail(userId, READ_BUDGET_MS, async (gmail, signal) => {
     const list = await gmail.users.threads.list(
       { userId: 'me', labelIds: ['INBOX'], maxResults: PAGE_SIZE, pageToken },
@@ -145,7 +140,6 @@ async function readThreadSummary(
 
 /** One thread with every message's text, the user's own messages included. Drafts are left out. */
 export async function readMailThread(userId: string, threadId: string): Promise<MailThread> {
-  if (isSimulatedId(threadId)) return readSimulatedThread(userId, threadId);
   const { thread, labels } = await readGmail(userId, READ_BUDGET_MS, async (gmail, signal) => {
     const [found, labelList] = await Promise.all([
       gmail.users.threads.get(
