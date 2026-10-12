@@ -243,4 +243,3 @@ One setting switches the app: `APP_MODE=prod` (the default, also when empty) or 
 - `TEST_TOOLS_ENABLED` is gone: `TEST_TOOLS_ENABLED=true` stops startup with a pointer to `APP_MODE=dev`.
 - Test inbox (`/api/test-tools`: status, deliver a test email, reset) runs in dev mode only and answers 404 in prod mode. A test email is saved with a `sim-` Gmail ID and goes to the same queue as a newly synced Gmail email; `services/gmailFetcher.ts` reads its content from `simulated_email_contents` instead of Gmail. Reset deletes the user's emails, applications, submissions, AI batches and AI day counts, and clears an AI rate-limit pause; it is refused (409 `REAL_MAIL_PRESENT`) if the user has any real Gmail email.
 
-
