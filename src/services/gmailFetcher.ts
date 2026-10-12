@@ -2,7 +2,6 @@ import { gmail_v1 } from 'googleapis';
 import { gmailCallOptions } from './googleTransport';
 import { withGmail } from './gmailClient';
 
-
 function extractTextFromParts(parts: gmail_v1.Schema$MessagePart[]): string {
   let htmlText = '';
 
