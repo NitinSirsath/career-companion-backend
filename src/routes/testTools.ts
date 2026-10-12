@@ -3,15 +3,20 @@
  *
  *   GET  /api/test-tools/status   { enabled: true }
  *   POST /api/test-tools/emails   deliver one test email
+ *   POST /api/test-tools/replies  record the test user's reply in a test thread
  *   POST /api/test-tools/reset    delete this user's test data ({ confirm: 'RESET' })
  *
  * When test tools are off, every path answers 404 before authentication.
  */
 import { NextFunction, Request, Response, Router } from 'express';
-import { DeliverTestEmailRequestSchema, ResetTestDataRequestSchema } from '../contracts/testTools';
+import {
+  DeliverTestEmailRequestSchema,
+  DeliverTestReplyRequestSchema,
+  ResetTestDataRequestSchema,
+} from '../contracts/testTools';
 import { AppError } from '../errors';
 import { requireAuth } from '../middleware/auth';
-import { deliverTestEmail, resetTestData } from '../services/testTools/inbox';
+import { deliverTestEmail, deliverTestReply, resetTestData } from '../services/testTools/inbox';
 import { testToolsEnabled } from '../utils/config';
 
 const router = Router();
@@ -39,6 +44,13 @@ router.post(
   '/emails',
   handle(201, (req) =>
     deliverTestEmail(req.auth!.user.id, DeliverTestEmailRequestSchema.parse(req.body)),
+  ),
+);
+
+router.post(
+  '/replies',
+  handle(201, (req) =>
+    deliverTestReply(req.auth!.user.id, DeliverTestReplyRequestSchema.parse(req.body)),
   ),
 );
 

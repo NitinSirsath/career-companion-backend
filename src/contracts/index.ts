@@ -20,3 +20,5 @@ export * from './workspace';
 
 export * from './agenda';
 export * from './temporal';
+export * from './conversation';
+export * from './mailbox';

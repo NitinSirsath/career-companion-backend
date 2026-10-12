@@ -106,7 +106,7 @@ interface SyncRun {
   /** Aborts when the attempt's time budget is used up or the delivery is cancelled. */
   signal: AbortSignal;
   window: ReturnType<typeof syncWindow>;
-  counts: { ingested: number; skipped: number };
+  counts: { ingested: number; skipped: number; sent: number };
 }
 
 /** null while the commit is in flight: its outcome is not known until the transaction returns. */
@@ -208,6 +208,79 @@ async function ingestMessages(run: SyncRun, gmail: gmail_v1.Gmail, ids: string[]
   }
 }
 
+type SentRef = { id: string; threadId: string };
+
+const sentRef = (m: gmail_v1.Schema$Message): SentRef[] =>
+  m.id && m.threadId ? [{ id: m.id, threadId: m.threadId }] : [];
+
+/** Sent by the user and not also delivered to their own inbox. */
+const isSentOnly = (m: gmail_v1.Schema$Message) =>
+  !!m.labelIds?.includes('SENT') && !m.labelIds.includes('INBOX');
+
+/**
+ * Notes the user's own messages in conversations we already hold, so a conversation can show
+ * that the user replied. Only IDs and the sent time are stored: the content is never read, and
+ * a sent message is never classified, matched or offered to AI.
+ */
+async function recordSentMessages(run: SyncRun, gmail: gmail_v1.Gmail, refs: SentRef[]) {
+  if (!refs.length) return;
+  const { userId } = run;
+  const held = await prisma.email.findMany({
+    where: { userId, threadId: { in: refs.map((ref) => ref.threadId) } },
+    select: { threadId: true },
+    distinct: ['threadId'],
+  });
+  const heldThreads = new Set(held.map((email) => email.threadId));
+  const recorded = await prisma.outgoingEmail.findMany({
+    where: { userId, gmailMessageId: { in: refs.map((ref) => ref.id) } },
+    select: { gmailMessageId: true },
+  });
+  const known = new Set(recorded.map((sent) => sent.gmailMessageId));
+  for (const ref of refs) {
+    if (!heldThreads.has(ref.threadId) || known.has(ref.id)) continue;
+    known.add(ref.id);
+    await heartbeat(run);
+    const message = await fetchMessage(run, gmail, ref.id);
+    const sentAt = message?.internalDate ? new Date(Number(message.internalDate)) : null;
+    if (!message || !isSentOnly(message) || !sentAt || isNaN(sentAt.getTime())) continue;
+    checkDeadline(run);
+    await withOwnedSync(userId, run.connectionId, run.claim, (tx) => {
+      checkDeadline(run);
+      return tx.outgoingEmail.upsert({
+        where: { userId_gmailMessageId: { userId, gmailMessageId: ref.id } },
+        create: { userId, gmailMessageId: ref.id, threadId: ref.threadId, sentAt },
+        update: {},
+      });
+    });
+    run.counts.sent++;
+  }
+}
+
+/** Reads the sent mail of the sync window. Skipped while we hold no conversation to reply to. */
+async function scanSentMail(run: SyncRun, gmail: gmail_v1.Gmail) {
+  const anyThread = await prisma.email.findFirst({
+    where: { userId: run.userId, threadId: { not: null } },
+    select: { id: true },
+  });
+  if (!anyThread) return;
+  let pageToken: string | undefined;
+  do {
+    await heartbeat(run);
+    const page = await gmail.users.messages.list(
+      {
+        userId: 'me',
+        labelIds: ['SENT'],
+        q: `newer_than:${run.window.windowDays}d`,
+        maxResults: 100,
+        pageToken,
+      },
+      gmailCallOptions(run.signal),
+    );
+    await recordSentMessages(run, gmail, (page.data.messages ?? []).flatMap(sentRef));
+    pageToken = page.data.nextPageToken ?? undefined;
+  } while (pageToken);
+}
+
 /** Scans the inbox for the whole sync window. Returns the checkpoint for the next sync. */
 async function fullSync(run: SyncRun, gmail: gmail_v1.Gmail): Promise<string> {
   // Capture checkpoint BEFORE scanning so mail arriving during the scan remains discoverable.
@@ -234,17 +307,28 @@ async function fullSync(run: SyncRun, gmail: gmail_v1.Gmail): Promise<string> {
     );
     pageToken = page.data.nextPageToken ?? undefined;
   } while (pageToken);
+  await scanSentMail(run, gmail);
   return baseline;
 }
 
 /** Message IDs that arrived in, or were moved into, the inbox. */
 const inboxArrivals = (history: gmail_v1.Schema$History[]) =>
   history.flatMap((h) => [
-    ...(h.messagesAdded ?? []).flatMap((m) => (m.message?.id ? [m.message.id] : [])),
+    ...(h.messagesAdded ?? []).flatMap((m) =>
+      m.message?.id && !isSentOnly(m.message) ? [m.message.id] : [],
+    ),
     ...(h.labelsAdded ?? []).flatMap((m) =>
       m.labelIds?.includes('INBOX') && m.message?.id ? [m.message.id] : [],
     ),
   ]);
+
+/** Messages the user sent since the last checkpoint. */
+const sentArrivals = (history: gmail_v1.Schema$History[]) =>
+  history.flatMap((h) =>
+    (h.messagesAdded ?? []).flatMap((m) =>
+      m.message && isSentOnly(m.message) ? sentRef(m.message) : [],
+    ),
+  );
 
 /**
  * Reads only what changed since the last checkpoint. Gmail forgets old checkpoints; when it
@@ -276,6 +360,8 @@ async function incrementalSync(
       throw err;
     }
     await ingestMessages(run, gmail, inboxArrivals(page.data.history ?? []));
+    // After the inbox, so a reply to mail from this same page finds its conversation.
+    await recordSentMessages(run, gmail, sentArrivals(page.data.history ?? []));
     latest = page.data.historyId ?? latest;
     pageToken = page.data.nextPageToken ?? undefined;
   } while (pageToken);
@@ -363,7 +449,7 @@ export async function syncUser(userId: string, queuedClaim?: string, delivery: S
     retryLimit: delivery.retryLimit ?? 0,
   };
   const outcome: SyncOutcome = { checkpointCommitted: false, checkpointAdvanced: false };
-  const counts = { ingested: 0, skipped: 0 };
+  const counts = { ingested: 0, skipped: 0, sent: 0 };
   let connectionId: string | undefined;
   let budget: AbortSignal | undefined;
   let signal: AbortSignal | undefined;
@@ -401,6 +487,7 @@ export async function syncUser(userId: string, queuedClaim?: string, delivery: S
       userId,
       messagesIngested: counts.ingested,
       messagesSkipped: counts.skipped,
+      sentRecorded: counts.sent,
       durationMs: Date.now() - started,
     });
     return {

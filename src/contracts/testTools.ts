@@ -40,6 +40,13 @@ export const DeliverTestEmailResponseSchema = z.object({
 });
 export type DeliverTestEmailResponse = z.infer<typeof DeliverTestEmailResponseSchema>;
 
+// POST /api/test-tools/replies
+/** Records that the test user replied in a test thread, as a Gmail sync would for a sent mail. */
+export const DeliverTestReplyRequestSchema = z.strictObject({ threadId: SimulatedThreadIdSchema });
+export type DeliverTestReplyRequest = z.infer<typeof DeliverTestReplyRequestSchema>;
+export const DeliverTestReplyResponseSchema = z.object({ sentAt: z.string() });
+export type DeliverTestReplyResponse = z.infer<typeof DeliverTestReplyResponseSchema>;
+
 // POST /api/test-tools/reset
 export const ResetTestDataRequestSchema = z.strictObject({ confirm: z.literal('RESET') });
 export type ResetTestDataRequest = z.infer<typeof ResetTestDataRequestSchema>;
