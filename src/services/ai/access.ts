@@ -62,6 +62,12 @@ export const NEEDS_ATTENTION_ISSUES: readonly AIAccessIssue[] = [
   'KEY_UNREADABLE',
 ];
 
+/** True while a provider pause is running: it ends by itself at `resumesAt`. */
+export const isProviderPause = (
+  status: AccessStatus,
+): status is AccessStatus & { resumesAt: Date } =>
+  status.state === 'LIMITED' && status.resumesAt !== null && status.reason !== 'SAFETY_LIMIT';
+
 /** Hidden providers are built and evaluated outside production, never offered in it. */
 export const isOffered = (provider: CatalogProvider) =>
   provider.status === 'supported' || !isProduction();
