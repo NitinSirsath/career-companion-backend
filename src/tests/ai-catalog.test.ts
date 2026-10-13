@@ -92,18 +92,18 @@ describe('AI provider and model catalog', () => {
     expect(resolveModel(retiring, 'fast', 'gemini-2.5-flash').source).toBe('SELECTED');
     vi.setSystemTime(new Date('2026-01-02T00:00:00Z'));
     expect(resolveModel(retiring, 'fast', 'gemini-2.5-flash')).toMatchObject({
-      model: { id: 'gemini-2.5-flash-lite' },
+      model: { id: 'gemini-3.5-flash-lite' },
       source: 'REPLACED_RETIRED',
     });
   });
 
-  it('offers Gemini 3 models for new keys without changing the recommended ones', () => {
+  it('recommends the Gemini 3 models, which a new key can use, and still offers the 2.5 models', () => {
     const gemini = getCatalogProvider('gemini')!;
-    expect(recommendedModel(gemini, 'fast').id).toBe('gemini-2.5-flash-lite');
-    expect(recommendedModel(gemini, 'detailed').id).toBe('gemini-2.5-flash');
-    expect(resolveModel(gemini, 'fast', 'gemini-3.5-flash-lite').source).toBe('SELECTED');
-    expect(resolveModel(gemini, 'fast', 'gemini-3.8-flash').source).toBe('SELECTED');
-    expect(resolveModel(gemini, 'detailed', 'gemini-3.8-flash').source).toBe('SELECTED');
+    expect(recommendedModel(gemini, 'fast').id).toBe('gemini-3.5-flash-lite');
+    expect(recommendedModel(gemini, 'detailed').id).toBe('gemini-3.8-flash');
+    expect(resolveModel(gemini, 'fast', 'gemini-2.5-flash-lite').source).toBe('SELECTED');
+    expect(resolveModel(gemini, 'fast', 'gemini-2.5-flash').source).toBe('SELECTED');
+    expect(resolveModel(gemini, 'detailed', 'gemini-2.5-flash').source).toBe('SELECTED');
     expect(resolveModel(gemini, 'detailed', 'gemini-3.5-flash-lite').source).toBe(
       'REPLACED_RETIRED',
     );
