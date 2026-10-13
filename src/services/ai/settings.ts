@@ -30,7 +30,7 @@ import {
   stateOf,
 } from './access';
 import { CLASSIFICATION_INPUT_LIMITS as LIMITS, EXTRACTION_BODY_LIMIT } from './contracts';
-import { AIAccessError, ProviderFailure } from './errors';
+import { AIAccessError, ProviderFailure, isRefusal } from './errors';
 import { SAMPLE_EMAIL } from './sampleEmail';
 import { CredentialUnreadableError, openApiKey, sealApiKey } from './credentials';
 import { createProviderClient, VerifyResult } from './providers';
@@ -96,7 +96,7 @@ export async function readSettings(userId: string): Promise<AISettingsResponse> 
   };
 }
 
-/** Counts one content-free verification against the user's daily cap. */
+/** Counts one key check against the user's daily cap. */
 async function reserveVerification(userId: string, now: Date) {
   const day = utcDay(now);
   await prisma.aIUsageDay.upsert({
@@ -335,7 +335,7 @@ export async function checkSettings(userId: string): Promise<CheckAISettingsResp
   ]);
   logAccessCheck(userId, provider, 'check', result);
   if (result.result === 'VERIFIED') {
-    // A model lookup proves access, not that a rate limit has cleared: a cooldown stays.
+    // A key check proves access, not that a rate limit has cleared: a cooldown stays.
     const clears = config.accessIssue && NEEDS_ATTENTION_ISSUES.includes(config.accessIssue);
     await prisma.aIConfiguration.updateMany({
       where: guarded,
@@ -416,20 +416,15 @@ export async function runSampleTest(userId: string): Promise<AISampleTestRespons
     } catch (err) {
       const kind = err instanceof ProviderFailure ? err.kind : 'OUTCOME_UNKNOWN';
       logEvent('ai_sample_test', { userId, provider: access.provider, outcome: kind, ...usage });
-      if (
-        kind === 'KEY_REJECTED' ||
-        kind === 'ACCOUNT_OR_BILLING' ||
-        kind === 'MODEL_UNAVAILABLE' ||
-        kind === 'RATE_LIMITED'
-      ) {
+      if (isRefusal(kind)) {
         const resumesAt = await prisma.$transaction((tx) =>
           noteProviderFailure(tx, access, kind, now, {
             modelId: model,
             retryAfterMs: (err as ProviderFailure).retryAfterMs,
           }),
         );
-        if (kind === 'RATE_LIMITED')
-          throw unavailable(new AIAccessError('RATE_LIMITED', resumesAt));
+        if (kind === 'RATE_LIMITED' || kind === 'PROVIDER_BUSY')
+          throw unavailable(new AIAccessError(kind, resumesAt));
         throw new AppError(422, 'AI_ACCESS_REJECTED', 'The provider refused this key or model.', {
           reason: kind,
           modelId: kind === 'MODEL_UNAVAILABLE' ? model : null,
