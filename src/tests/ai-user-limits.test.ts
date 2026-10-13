@@ -14,7 +14,7 @@ import { configureAI, fakeAccess } from './helpers/aiAccess';
 
 const schema = z.object({ decision: z.string() });
 const contract = { version: 'v1', schema, role: 'fast' as const };
-const FAST_MODEL = 'gemini-2.5-flash-lite';
+const FAST_MODEL = 'gemini-3.5-flash-lite';
 
 let a: string;
 let b: string;
@@ -148,6 +148,44 @@ describe('per-user provider cooldown', () => {
     expect(next).not.toHaveBeenCalled();
     await run(b, await newEmail(b), ok());
     expect(await config(b)).toMatchObject({ cooldownUntil: null, consecutiveFailures: 0 });
+  });
+
+  it('treats a busy provider as a refusal: the mail waits, no attempt is used, nothing is held', async () => {
+    const emailId = await newEmail(a);
+    const error = await failure(run(a, emailId, refuse('PROVIDER_BUSY', { status: 504 })));
+    expect(error).toMatchObject({ name: 'AIAccessError', reason: 'PROVIDER_BUSY' });
+    expect(secondsFromNow(error.resumesAt)).toBe(60);
+    expect(await op(emailId)).toMatchObject({
+      status: 'PENDING',
+      attempts: 0,
+      errorCode: 'PROVIDER_BUSY',
+    });
+    expect(await config(a)).toMatchObject({ accessIssue: 'PROVIDER_BUSY', consecutiveFailures: 1 });
+
+    // During the pause nothing is sent for this user; another user is not affected.
+    const next = ok();
+    expect(await failure(run(a, await newEmail(a), next))).toMatchObject({
+      reason: 'PROVIDER_BUSY',
+    });
+    expect(next).not.toHaveBeenCalled();
+    await run(b, await newEmail(b), ok());
+
+    // The same mail is read at the first try after the pause, and the busy state is cleared.
+    await configureAI(a, { cooldownUntil: new Date(Date.now() - 1000) });
+    await run(a, emailId, ok());
+    expect(await op(emailId)).toMatchObject({ status: 'COMPLETED', attempts: 1 });
+    expect(await config(a)).toMatchObject({
+      accessIssue: null,
+      cooldownUntil: null,
+      consecutiveFailures: 0,
+    });
+  });
+
+  it('lets a busy pause grow like a rate limit while the provider stays busy', async () => {
+    await configureAI(a, { consecutiveFailures: 3 });
+    expect(
+      secondsFromNow((await failure(run(a, await newEmail(a), refuse('PROVIDER_BUSY')))).resumesAt),
+    ).toBe(480);
   });
 
   it('bounds a long retry-after to one hour', async () => {
