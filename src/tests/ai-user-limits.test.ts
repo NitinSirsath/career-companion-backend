@@ -10,7 +10,13 @@ import {
   SchemaValidationFailure,
 } from '../services/ai/errors';
 import { nextUtcMidnight, utcDay } from '../services/ai/usage';
+import { enqueueAiResume } from '../services/enqueue';
 import { configureAI, fakeAccess } from './helpers/aiAccess';
+
+vi.mock('../services/enqueue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/enqueue')>()),
+  enqueueAiResume: vi.fn(async () => 'job-id'),
+}));
 
 const schema = z.object({ decision: z.string() });
 const contract = { version: 'v1', schema, role: 'fast' as const };
@@ -66,6 +72,7 @@ beforeAll(async () => {
   b = (await prisma.user.create({ data: { email: 'b@limits.test' } })).id;
 });
 beforeEach(async () => {
+  vi.mocked(enqueueAiResume).mockClear();
   process.env.AI_USER_DAILY_CALL_LIMIT = '100';
   await prisma.email.deleteMany({ where: { userId: { in: [a, b] } } });
   await prisma.aIUsageDay.deleteMany({ where: { userId: { in: [a, b] } } });
@@ -161,6 +168,8 @@ describe('per-user provider cooldown', () => {
       errorCode: 'PROVIDER_BUSY',
     });
     expect(await config(a)).toMatchObject({ accessIssue: 'PROVIDER_BUSY', consecutiveFailures: 1 });
+    // The waiting mail is read by itself when the pause ends: one job, for this user only.
+    expect(vi.mocked(enqueueAiResume).mock.calls).toEqual([[a, error.resumesAt]]);
 
     // During the pause nothing is sent for this user; another user is not affected.
     const next = ok();
@@ -179,6 +188,16 @@ describe('per-user provider cooldown', () => {
       cooldownUntil: null,
       consecutiveFailures: 0,
     });
+  });
+
+  it('still pauses and reports busy when the resume job cannot be queued', async () => {
+    vi.mocked(enqueueAiResume).mockRejectedValueOnce(new Error('queue down'));
+    const emailId = await newEmail(a);
+    expect(await failure(run(a, emailId, refuse('PROVIDER_BUSY')))).toMatchObject({
+      name: 'AIAccessError',
+      reason: 'PROVIDER_BUSY',
+    });
+    expect(await op(emailId)).toMatchObject({ status: 'PENDING', attempts: 0 });
   });
 
   it('lets a busy pause grow like a rate limit while the provider stays busy', async () => {
@@ -225,6 +244,8 @@ describe('refusals and unusable outcomes', () => {
       });
       expect(await op(emailId)).toMatchObject({ status: 'PENDING', attempts: 0, errorCode: kind });
       expect(await config(a)).toMatchObject({ accessIssue: kind, cooldownUntil: null });
+      // Only the user can fix this, so no automatic try is queued.
+      expect(enqueueAiResume).not.toHaveBeenCalled();
       // The call was sent, so it counts toward the safety limit.
       expect((await usage(a))!.calls).toBe(1);
     },
@@ -250,6 +271,8 @@ describe('refusals and unusable outcomes', () => {
     const saved = await config(a);
     expect(saved).toMatchObject({ accessIssue: 'PROVIDER_UNAVAILABLE', consecutiveFailures: 1 });
     expect(secondsFromNow(saved.cooldownUntil)).toBe(120);
+    // The held mail stays held; the other waiting mail is offered again when the pause ends.
+    expect(vi.mocked(enqueueAiResume).mock.calls).toEqual([[a, saved.cooldownUntil]]);
 
     const next = ok();
     expect(await failure(run(a, await newEmail(a), next))).toMatchObject({
