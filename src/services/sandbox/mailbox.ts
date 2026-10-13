@@ -10,6 +10,7 @@ import { randomBytes, randomUUID } from 'crypto';
 import type { SandboxMessage as StoredMessage } from '@prisma/client';
 import {
   parseSandboxAddress,
+  parseSandboxCc,
   type ListSandboxThreadsResponse,
   type ReplySandboxMailRequest,
   type ResetSandboxResponse,
@@ -40,6 +41,8 @@ interface NewMessage {
   labelIds: string[];
   sender: string;
   recipient: string;
+  /** The other people on the mail. Left out when there are none. */
+  cc?: string | null;
   subject: string;
   inReplyTo?: string;
   referenceIds?: string;
@@ -87,6 +90,7 @@ export async function sendSandboxMail(
     labelIds: RECEIVED_LABELS,
     sender: input.from,
     recipient: await userAddress(userId),
+    cc: parseSandboxCc(input.cc ?? '')?.join(', ') || null,
     subject: input.subject,
     body: input.body,
   });
@@ -117,7 +121,7 @@ export async function replyInSandbox(
     threadId,
     ...(input.as === 'me'
       ? { labelIds: SENT_LABELS, sender: me, recipient: them }
-      : { labelIds: RECEIVED_LABELS, sender: them, recipient: me }),
+      : { labelIds: RECEIVED_LABELS, sender: them, recipient: me, cc: copiedPeople(thread) }),
     subject: /^re:/i.test(subject) ? subject : `Re: ${subject}`,
     inReplyTo: answered.messageId,
     referenceIds: [answered.referenceIds, answered.messageId].filter(Boolean).join(' '),
@@ -141,6 +145,7 @@ export async function deliverSentMail(
     labelIds: SENT_LABELS,
     sender: await userAddress(userId),
     recipient: mail.to,
+    cc: mail.cc,
     subject: mail.subject,
     inReplyTo: mail.inReplyTo,
     referenceIds: mail.references,
@@ -161,6 +166,12 @@ async function threadMessages(userId: string, threadId: string): Promise<StoredM
 function otherPerson(thread: StoredMessage[]): string {
   const received = thread.filter((message) => !sentByUser(message));
   return received.length ? received[received.length - 1].sender : thread[0].recipient;
+}
+
+/** The people in Cc of the newest mail to the user. They stay on it when that person writes again. */
+function copiedPeople(thread: StoredMessage[]): string | null {
+  const received = thread.filter((message) => !sentByUser(message));
+  return received.length ? received[received.length - 1].cc : null;
 }
 
 /** One page of conversations that have a mail in the folder, newest first. */
@@ -231,6 +242,7 @@ export async function readSandboxThread(
       id: message.id,
       from: message.sender,
       to: message.recipient,
+      cc: message.cc,
       date: message.internalDate.toISOString(),
       sentByUser: sentByUser(message),
       text: message.body,
