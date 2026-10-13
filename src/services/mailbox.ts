@@ -4,12 +4,15 @@
  */
 import { gmail_v1 } from 'googleapis';
 import { prisma } from '../db/prisma';
-import type {
-  ListMailboxThreadsResponse,
-  MailAttachment,
-  MailMessage,
-  MailThread,
-  MailboxThread,
+import {
+  mailAddressOf,
+  mailboxKey,
+  splitMailAddresses,
+  type ListMailboxThreadsResponse,
+  type MailAttachment,
+  type MailMessage,
+  type MailThread,
+  type MailboxThread,
 } from '../contracts';
 import { AppError } from '../errors';
 import { googleStatus, withGmail } from './gmailClient';
@@ -138,8 +141,18 @@ async function readThreadSummary(
   };
 }
 
+/** The user's own mail address at Gmail. Null without a connection. */
+export async function mailboxAddress(userId: string): Promise<string | null> {
+  const connection = await prisma.gmailConnection.findUnique({
+    where: { userId },
+    select: { gmailEmail: true },
+  });
+  return connection?.gmailEmail ?? null;
+}
+
 /** One thread with every message's text, the user's own messages included. Drafts are left out. */
 export async function readMailThread(userId: string, threadId: string): Promise<MailThread> {
+  const own = await mailboxAddress(userId);
   const { thread, labels } = await readGmail(userId, READ_BUDGET_MS, async (gmail, signal) => {
     const [found, labelList] = await Promise.all([
       gmail.users.threads.get(
@@ -154,11 +167,13 @@ export async function readMailThread(userId: string, threadId: string): Promise<
   const messages = (thread.messages ?? [])
     .filter((message) => !message.labelIds?.includes('DRAFT'))
     .map((message) => toMailMessage(message, names));
+  const answered = replyTarget(thread, own);
   return {
     threadId,
     subject: messages[0]?.subject ?? null,
     messages,
-    replyTo: replyTarget(thread)?.to ?? null,
+    replyTo: answered?.to ?? null,
+    replyCc: answered?.cc ?? [],
   };
 }
 
@@ -166,6 +181,8 @@ export async function readMailThread(userId: string, threadId: string): Promise<
 export interface ReplyTarget {
   /** The answered mail's Reply-To when it has one, else its sender, as Gmail holds it. */
   to: string;
+  /** Everyone else on the answered mail. A reply to all also goes to them. */
+  cc: string[];
   subject: string | null;
   /** The answered mail's Message-ID and References headers, which keep the reply in the thread. */
   messageId: string | null;
@@ -177,10 +194,36 @@ export interface ReplyTarget {
 }
 
 /**
+ * Everyone else on the answered mail: its To and Cc addresses as written, each once, without the
+ * user's own mailbox and without the address the reply goes to anyway.
+ */
+function otherRecipients(
+  answered: gmail_v1.Schema$Message,
+  to: string,
+  own: string | null,
+): string[] {
+  const taken = new Set(splitMailAddresses(to).map(mailboxKey));
+  if (own) taken.add(mailboxKey(own));
+  const listed = [header(answered, 'to'), header(answered, 'cc')].flatMap((line) =>
+    line ? splitMailAddresses(line) : [],
+  );
+  return listed.filter((entry) => {
+    const mailbox = mailboxKey(entry);
+    if (!mailAddressOf(entry).includes('@') || taken.has(mailbox)) return false;
+    taken.add(mailbox);
+    return true;
+  });
+}
+
+/**
  * The newest mail of the thread that someone else wrote: a reply from the app answers that one.
  * Null when nobody else wrote, so the app never writes to an address the user did not hear from.
+ * `own` is the user's own address, which is never among the other people of a reply to all.
  */
-export function replyTarget(thread: gmail_v1.Schema$Thread): ReplyTarget | null {
+export function replyTarget(
+  thread: gmail_v1.Schema$Thread,
+  own: string | null,
+): ReplyTarget | null {
   const answered = (thread.messages ?? [])
     .filter((message) => !message.labelIds?.some((label) => label === 'DRAFT' || label === 'SENT'))
     .pop();
@@ -189,6 +232,7 @@ export function replyTarget(thread: gmail_v1.Schema$Thread): ReplyTarget | null 
   const date = answered.internalDate ? new Date(Number(answered.internalDate)) : null;
   return {
     to,
+    cc: otherRecipients(answered, to, own),
     subject: header(answered, 'subject'),
     messageId: header(answered, 'message-id'),
     references: header(answered, 'references'),
