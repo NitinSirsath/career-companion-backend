@@ -223,6 +223,8 @@ model GmailConnection {
   accessTokenExpiresAt   DateTime?
   accessToken            String
   refreshToken           String?
+  /// True when the saved Google grant also allows sending mail (replies from the app).
+  canSend                Boolean               @default(false)
   lastHistoryId          String?
   lastSyncedAt           DateTime?
   syncClaim              String?
