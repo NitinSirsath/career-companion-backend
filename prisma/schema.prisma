@@ -501,7 +501,8 @@ model AICallBudget {
 
 /// Why a user's AI access cannot be used now. Needs attention: KEY_REJECTED, ACCOUNT_OR_BILLING,
 /// MODEL_UNAVAILABLE, KEY_UNREADABLE (stored key cannot be decrypted; re-enter it). Limited (with
-/// cooldownUntil): RATE_LIMITED, PROVIDER_UNAVAILABLE.
+/// cooldownUntil): RATE_LIMITED, PROVIDER_BUSY (the provider answered that it is overloaded),
+/// PROVIDER_UNAVAILABLE (the provider did not answer).
 enum AIAccessIssue {
   KEY_REJECTED
   ACCOUNT_OR_BILLING
@@ -509,6 +510,7 @@ enum AIAccessIssue {
   KEY_UNREADABLE
   RATE_LIMITED
   PROVIDER_UNAVAILABLE
+  PROVIDER_BUSY
 }
 
 /// One active AI setup per user (ADR-0001 decision 5). The key is write-only AES-256-GCM
