@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MailCategorySchema } from './conversation';
+import { splitMailAddresses } from './mailbox';
 
 // ─── Mail sandbox (dev mode only; 404 in prod) ───────────────────────────────
 // A dev-mode user's sandbox mailbox stands in for their Gmail account. A mail sent here reaches
@@ -35,12 +36,32 @@ export const SandboxAddressSchema = z
     message: 'Use a mail address, with or without a name.',
   });
 
+/** More people than any test of a reply to all needs. */
+export const SANDBOX_CC_LIMIT = 10;
+
+/** The typed Cc line as its addresses. Null when a part is not a mail address or there are too many. */
+export function parseSandboxCc(value: string): string[] | null {
+  const addresses = splitMailAddresses(value);
+  const valid = addresses.every((address) => parseSandboxAddress(address) !== null);
+  return valid && addresses.length <= SANDBOX_CC_LIMIT ? addresses : null;
+}
+
+export const SandboxCcSchema = z
+  .string()
+  .trim()
+  .max(2000)
+  .refine((value) => parseSandboxCc(value) !== null, {
+    message: `Use mail addresses with commas between them, at most ${SANDBOX_CC_LIMIT}.`,
+  });
+
 const Body = z.string().trim().min(1).max(8000);
 
 // POST /api/sandbox/messages
 /** A new mail from anyone to the user. It starts a conversation in the user's sandbox inbox. */
 export const SendSandboxMailRequestSchema = z.strictObject({
   from: SandboxAddressSchema,
+  /** Other people on the mail, so a reply to all can be tried. Left out or empty: nobody. */
+  cc: SandboxCcSchema.optional(),
   subject: z.string().trim().max(300),
   body: Body,
 });
@@ -142,6 +163,8 @@ export const SandboxMessageSchema = z.object({
   id: z.string(),
   from: z.string(),
   to: z.string(),
+  /** The other people on the mail. Null when there are none. */
+  cc: z.string().nullable(),
   date: IsoDateTime,
   sentByUser: z.boolean(),
   /** The whole text, with the earlier mail quoted below a reply. */
