@@ -31,6 +31,7 @@ function headersOf(message: SandboxMessage): gmail_v1.Schema$MessagePartHeader[]
     { name: 'Subject', value: message.subject },
     { name: 'From', value: message.sender },
     { name: 'To', value: message.recipient },
+    ...(message.cc ? [{ name: 'Cc', value: message.cc }] : []),
     { name: 'Content-Type', value: `multipart/alternative; boundary="sandbox-${message.id}"` },
   ];
 }
@@ -95,6 +96,7 @@ export function toGmailMessage(
 /** What the sandbox keeps of a mail handed to Gmail's send call. */
 export interface RawMail {
   to: string;
+  cc?: string;
   subject: string;
   inReplyTo?: string;
   references?: string;
@@ -128,8 +130,10 @@ export function fromRawMail(raw: string): RawMail | null {
   }
   const to = headers.get('to');
   if (!to || headers.get('content-transfer-encoding') !== 'base64') return null;
+  const cc = headers.get('cc');
   return {
     to: decodeWords(to),
+    ...(cc ? { cc: decodeWords(cc) } : {}),
     subject: decodeWords(headers.get('subject') ?? ''),
     inReplyTo: headers.get('in-reply-to'),
     references: headers.get('references'),
