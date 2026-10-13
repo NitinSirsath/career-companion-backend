@@ -9,7 +9,17 @@ export const QUEUE_NAMES = [
   'discord-notification-job',
   'gmail-sync-job',
   'relevance-triage-job',
+  'ai-resume-job',
 ] as const;
+
+/**
+ * Queues that limit jobs per singleton key (the user). `stately`: one queued and one running.
+ * `short`: one queued, so a job that is running can queue the next one.
+ */
+const QUEUE_POLICIES: Partial<Record<(typeof QUEUE_NAMES)[number], 'stately' | 'short'>> = {
+  'relevance-triage-job': 'stately',
+  'ai-resume-job': 'short',
+};
 let started: PgBoss | undefined;
 export const getStartedQueue = () => started;
 
@@ -23,7 +33,8 @@ export function getQueue(): Promise<PgBoss> {
       try {
         await boss.start();
         for (const name of QUEUE_NAMES) {
-          if (name === 'relevance-triage-job') await boss.createQueue(name, { policy: 'stately' });
+          const policy = QUEUE_POLICIES[name];
+          if (policy) await boss.createQueue(name, { policy });
           else await boss.createQueue(name);
         }
         await boss.createQueue(GMAIL_SCHEDULE_QUEUE);
