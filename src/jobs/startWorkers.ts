@@ -1,3 +1,4 @@
+import { startAiResumeWorker } from './aiResumeJob';
 import { startGmailScheduledSync } from './gmailScheduledSyncJob';
 import { GMAIL_SCHEDULE_QUEUE } from '../services/gmailSchedule';
 import { startGmailSyncWorker } from './gmailSyncJob';
@@ -39,6 +40,11 @@ export function defaultWorkers(): WorkerRegistration[] {
       queue: QUEUE_NAMES[3],
       start: startRelevanceTriageWorker,
       failureEvent: 'relevance_triage_worker_start_failed',
+    },
+    {
+      queue: QUEUE_NAMES[4],
+      start: startAiResumeWorker,
+      failureEvent: 'ai_resume_worker_start_failed',
     },
   ];
 }
