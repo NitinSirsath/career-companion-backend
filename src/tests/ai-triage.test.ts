@@ -326,28 +326,32 @@ describe('COM-125 relevance batch pure behavior', () => {
       }),
     ).toMatchObject({ status: 'RETRYABLE', attempts: 1 });
   });
-  it('22 a refusal restores the attempt and leaves the email pending', async () => {
-    const email = await prisma.email.create({ data: { userId, gmailMessageId: 'refused-1' } });
-    classify.mockRejectedValue(new ProviderFailure('RATE_LIMITED'));
-    await expect(
-      classifyBatch(
-        userId,
-        [{ emailId: email.id, input: { sender: null, subject: 'x', labels: [], snippet: null } }],
-        provider,
-      ),
-    ).rejects.toBeInstanceOf(AIAccessError);
-    expect(
-      await prisma.aIOperation.findUnique({
-        where: {
-          emailId_operation_version: {
-            emailId: email.id,
-            operation: 'classification',
-            version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH,
+  it.each(['RATE_LIMITED', 'PROVIDER_BUSY'] as const)(
+    '22 a refusal (%s) restores the attempt and leaves the email pending',
+    async (kind) => {
+      const email = await prisma.email.create({
+        data: { userId, gmailMessageId: `refused-${kind}` },
+      });
+      classify.mockRejectedValue(new ProviderFailure(kind));
+      await expect(
+        classifyBatch(
+          userId,
+          [{ emailId: email.id, input: { sender: null, subject: 'x', labels: [], snippet: null } }],
+          provider,
+        ),
+      ).rejects.toBeInstanceOf(AIAccessError);
+      expect(
+        await prisma.aIOperation.findUnique({
+          where: {
+            emailId_operation_version: {
+              emailId: email.id,
+              operation: 'classification',
+              version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH,
           },
-        },
-      }),
-    ).toMatchObject({ status: 'PENDING', attempts: 0 });
-  });
+        }),
+      ).toMatchObject({ status: 'PENDING', attempts: 0 });
+    },
+  );
   it('23 unknown outcome holds every item', async () => {
     const email = await prisma.email.create({ data: { userId, gmailMessageId: 'unknown-1' } });
     classify.mockRejectedValue(new ProviderFailure('OUTCOME_UNKNOWN'));
