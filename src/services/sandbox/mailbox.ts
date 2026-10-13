@@ -22,6 +22,7 @@ import {
 } from '../../contracts/sandbox';
 import { prisma } from '../../db/prisma';
 import { AppError } from '../../errors';
+import { PAUSE_ISSUES } from '../ai/usage';
 import { lockUser, LOCK_NAMESPACE } from '../../utils/advisoryLock';
 import { sandboxMailResults, sentByUser } from './appResult';
 import { RECEIVED_LABELS, SENT_LABELS, snippetOf } from './message';
@@ -253,7 +254,7 @@ export async function resetSandbox(userId: string): Promise<ResetSandboxResponse
       data: { cooldownUntil: null, consecutiveFailures: 0 },
     });
     await tx.aIConfiguration.updateMany({
-      where: { userId, accessIssue: { in: ['RATE_LIMITED', 'PROVIDER_UNAVAILABLE'] } },
+      where: { userId, accessIssue: { in: PAUSE_ISSUES } },
       data: { accessIssue: null, accessIssueModel: null },
     });
     // The mailbox starts again at history 0, so the next sync must start again too.
