@@ -162,7 +162,7 @@ describe('email worker attributable outcomes', () => {
     expect((await email()).processingState).toBe('FAILED');
   });
 
-  it.each(['NOT_SET_UP', 'KEY_REJECTED', 'RATE_LIMITED', 'SAFETY_LIMIT'] as const)(
+  it.each(['NOT_SET_UP', 'KEY_REJECTED', 'RATE_LIMITED', 'PROVIDER_BUSY', 'SAFETY_LIMIT'] as const)(
     'waits as PENDING when AI access is unavailable (%s): acknowledged, no retry used, no error stored',
     async (reason) => {
       await prisma.email.update({
