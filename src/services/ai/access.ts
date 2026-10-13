@@ -15,7 +15,7 @@ import { AICapabilities, BoundModels, bindCapabilities } from './capabilities';
 import { CredentialUnreadableError, openApiKey } from './credentials';
 import { AIAccessError, AccessReason } from './errors';
 import { createProviderClient } from './providers';
-import { nextUtcMidnight, userDailyCallLimit, utcDay } from './usage';
+import { nextUtcMidnight, pauseReason, userDailyCallLimit, utcDay } from './usage';
 import { isProduction } from '../../utils/config';
 import { logError } from '../../utils/log';
 
@@ -74,7 +74,13 @@ export function offeredProvider(id: string): CatalogProvider | undefined {
 /** The state an access reason belongs to. */
 export function stateOf(reason: AccessReason): AccessState {
   if (reason === 'NOT_SET_UP') return 'NOT_SET_UP';
-  return ['RATE_LIMITED', 'PROVIDER_UNAVAILABLE', 'SAFETY_LIMIT', 'PAUSED'].includes(reason)
+  return [
+    'RATE_LIMITED',
+    'PROVIDER_BUSY',
+    'PROVIDER_UNAVAILABLE',
+    'SAFETY_LIMIT',
+    'PAUSED',
+  ].includes(reason)
     ? 'LIMITED'
     : 'NEEDS_ATTENTION';
 }
@@ -98,11 +104,7 @@ export function deriveAccess(
   if (config.accessIssue && NEEDS_ATTENTION_ISSUES.includes(config.accessIssue))
     return status('NEEDS_ATTENTION', config.accessIssue, null, config.accessIssueModel);
   if (config.cooldownUntil && config.cooldownUntil > now)
-    return status(
-      'LIMITED',
-      config.accessIssue === 'PROVIDER_UNAVAILABLE' ? 'PROVIDER_UNAVAILABLE' : 'RATE_LIMITED',
-      config.cooldownUntil,
-    );
+    return status('LIMITED', pauseReason(config.accessIssue), config.cooldownUntil);
   if (callsToday >= limit) return status('LIMITED', 'SAFETY_LIMIT', nextUtcMidnight(now));
   return status('READY', null);
 }

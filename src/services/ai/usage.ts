@@ -6,10 +6,10 @@
  * represent, mirror or predict any provider quota, billing or rate limit. Counts are records of
  * what Career Companion sent, not provider billing data.
  */
-import { Prisma } from '@prisma/client';
+import { AIAccessIssue, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import type { AIUsage } from './contracts';
-import { AIAccessError, FailureKind, aiSetting } from './errors';
+import { AIAccessError, FailureKind, PAUSE_FAILURE_KINDS, aiSetting } from './errors';
 import * as config from '../../utils/config';
 import { logWarn } from '../../utils/log';
 
@@ -25,6 +25,17 @@ const RETRY_AFTER_MAX_MS = 60 * 60_000;
 export const userDailyCallLimit = () => aiSetting(config.userDailyCallLimit);
 
 export const utcDay = (now: Date) => now.toISOString().slice(0, 10);
+
+/** Stored problems that pass by themselves: each comes with a cooldown, and a success clears it. */
+export const PAUSE_ISSUES: AIAccessIssue[] = [
+  'RATE_LIMITED',
+  'PROVIDER_BUSY',
+  'PROVIDER_UNAVAILABLE',
+];
+
+/** Why an active cooldown is running, from the stored problem. */
+export const pauseReason = (issue: AIAccessIssue | null | undefined) =>
+  issue === 'PROVIDER_BUSY' || issue === 'PROVIDER_UNAVAILABLE' ? issue : 'RATE_LIMITED';
 
 export function nextUtcMidnight(now: Date): Date {
   const next = new Date(now);
@@ -45,10 +56,7 @@ export async function reserveUserCall(tx: Prisma.TransactionClient, userId: stri
     select: { cooldownUntil: true, accessIssue: true },
   });
   if (config?.cooldownUntil && config.cooldownUntil > now)
-    throw new AIAccessError(
-      config.accessIssue === 'PROVIDER_UNAVAILABLE' ? 'PROVIDER_UNAVAILABLE' : 'RATE_LIMITED',
-      config.cooldownUntil,
-    );
+    throw new AIAccessError(pauseReason(config.accessIssue), config.cooldownUntil);
   const day = utcDay(now);
   await tx.aIUsageDay.upsert({
     where: { userId_day: { userId, day } },
@@ -84,14 +92,12 @@ export interface AccessIdentity {
   revision: number;
 }
 
-function cooldownMs(
-  kind: 'RATE_LIMITED' | 'OUTCOME_UNKNOWN',
-  failures: number,
-  retryAfterMs?: number,
-) {
-  if (kind === 'RATE_LIMITED' && retryAfterMs !== undefined)
+type PauseKind = (typeof PAUSE_FAILURE_KINDS)[number] | 'OUTCOME_UNKNOWN';
+
+function cooldownMs(kind: PauseKind, failures: number, retryAfterMs?: number) {
+  if (kind !== 'OUTCOME_UNKNOWN' && retryAfterMs !== undefined)
     return Math.min(Math.max(retryAfterMs, RETRY_AFTER_MIN_MS), RETRY_AFTER_MAX_MS);
-  const base = kind === 'RATE_LIMITED' ? RATE_LIMIT_BASE_MS : UNKNOWN_OUTCOME_BASE_MS;
+  const base = kind === 'OUTCOME_UNKNOWN' ? UNKNOWN_OUTCOME_BASE_MS : RATE_LIMIT_BASE_MS;
   return Math.min(base * 2 ** failures, MAX_COOLDOWN_MS);
 }
 
@@ -100,17 +106,15 @@ function cooldownMs(
  * a cooldown ends (null when the problem needs the user's attention instead).
  *
  * - Key, account/billing and model problems need the user's attention.
- * - Rate limits pause this user only, with growth on consecutive failures, capped at 30 minutes.
+ * - A rate limit or a busy provider pauses this user only, with growth on consecutive failures,
+ *   capped at 30 minutes.
  * - An unknown outcome pauses this user briefly too, so an outage holds at most one uncertain
  *   operation per window instead of one per email.
  */
 export async function noteProviderFailure(
   tx: Prisma.TransactionClient,
   access: AccessIdentity,
-  kind: Extract<
-    FailureKind,
-    'KEY_REJECTED' | 'ACCOUNT_OR_BILLING' | 'MODEL_UNAVAILABLE' | 'RATE_LIMITED' | 'OUTCOME_UNKNOWN'
-  >,
+  kind: Exclude<FailureKind, 'INVALID_OUTPUT' | 'INVALID_REQUEST'>,
   now: Date,
   details: { modelId?: string; retryAfterMs?: number } = {},
 ): Promise<Date | null> {
@@ -135,7 +139,7 @@ export async function noteProviderFailure(
   await tx.aIConfiguration.updateMany({
     where,
     data: {
-      accessIssue: kind === 'RATE_LIMITED' ? 'RATE_LIMITED' : 'PROVIDER_UNAVAILABLE',
+      accessIssue: kind === 'OUTCOME_UNKNOWN' ? 'PROVIDER_UNAVAILABLE' : kind,
       accessIssueModel: null,
       cooldownUntil: resumesAt,
       consecutiveFailures: { increment: 1 },
@@ -153,12 +157,7 @@ export async function noteProviderSuccess(access: AccessIdentity) {
         revision: access.revision,
         // Only limitations are cleared; a needs-attention issue recorded concurrently stays.
         AND: [
-          {
-            OR: [
-              { accessIssue: null },
-              { accessIssue: { in: ['RATE_LIMITED', 'PROVIDER_UNAVAILABLE'] } },
-            ],
-          },
+          { OR: [{ accessIssue: null }, { accessIssue: { in: PAUSE_ISSUES } }] },
           {
             OR: [
               { consecutiveFailures: { gt: 0 } },

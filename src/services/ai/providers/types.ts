@@ -19,7 +19,10 @@ export interface StructuredResponse {
   usage: AIUsage;
 }
 
-/** Content-free check that a key authenticates and can use the given models (no tokens). */
+/**
+ * Check that a key authenticates and can use the given models. It never sends anything of the
+ * user's: a model lookup, or a fixed tiny request where a lookup proves nothing.
+ */
 export type VerifyResult =
   | { result: 'VERIFIED' }
   | {

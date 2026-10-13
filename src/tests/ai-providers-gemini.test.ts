@@ -58,9 +58,10 @@ describe('Gemini error mapping (plan §3.6)', () => {
     ],
     ['404 model', googleError(404, { status: 'NOT_FOUND' }), 'MODEL_UNAVAILABLE'],
     ['429', googleError(429, { status: 'RESOURCE_EXHAUSTED' }), 'RATE_LIMITED'],
-    ['503 overloaded', googleError(503, { status: 'UNAVAILABLE' }), 'RATE_LIMITED'],
+    ['503 high demand', googleError(503, { status: 'UNAVAILABLE' }), 'PROVIDER_BUSY'],
+    ['504 deadline expired', googleError(504, { status: 'DEADLINE_EXCEEDED' }), 'PROVIDER_BUSY'],
     ['500', googleError(500, { status: 'INTERNAL' }), 'OUTCOME_UNKNOWN'],
-    ['504', googleError(504), 'OUTCOME_UNKNOWN'],
+    ['502', googleError(502), 'OUTCOME_UNKNOWN'],
     ['408', googleError(408), 'OUTCOME_UNKNOWN'],
     ['other 400', googleError(400, { status: 'INVALID_ARGUMENT' }), 'INVALID_REQUEST'],
     [
@@ -73,7 +74,7 @@ describe('Gemini error mapping (plan §3.6)', () => {
   ])('%s → %s', (_label, err, kind) => {
     const mapped = classifyGeminiError(err);
     expect(mapped.kind).toBe(kind);
-    expect(mapped.isRetryable).toBe(kind === 'RATE_LIMITED');
+    expect(mapped.isRetryable).toBe(kind === 'RATE_LIMITED' || kind === 'PROVIDER_BUSY');
     // Nothing from the provider's text, and no original error, travels with the failure.
     expect(`${JSON.stringify(mapped)} ${inspect(mapped)} ${mapped.stack}`).not.toContain(
       'SENTINEL',
@@ -253,28 +254,54 @@ describe('Gemini adapter', () => {
   });
 });
 
-describe('Gemini content-free verification', () => {
+describe('Gemini key check', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('looks up each model once, with a short timeout, and sends no content', async () => {
-    mockGet.mockResolvedValue({ name: 'models/x' });
+  it('sends one tiny fixed request to each model, with a short timeout, and looks nothing up', async () => {
+    mockGenerateContent.mockResolvedValue({ text: 'OK' });
     expect(
       await client().verifyModels([
-        'gemini-2.5-flash-lite',
+        'gemini-3.5-flash-lite',
         'gemini-2.5-flash',
         'gemini-2.5-flash',
       ]),
     ).toEqual({
       result: 'VERIFIED',
     });
-    expect(mockGet).toHaveBeenCalledTimes(2);
-    expect(mockGet).toHaveBeenCalledWith({
-      model: 'gemini-2.5-flash-lite',
-      config: { httpOptions: { timeout: 10_000 } },
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+    expect(mockGenerateContent).toHaveBeenNthCalledWith(1, {
+      model: 'gemini-3.5-flash-lite',
+      contents: 'Reply with OK.',
+      config: {
+        maxOutputTokens: 16,
+        thinkingConfig: { thinkingLevel: 'MINIMAL' },
+        httpOptions: { timeout: 10_000 },
+      },
     });
-    expect(mockGenerateContent).not.toHaveBeenCalled();
+    expect(mockGenerateContent).toHaveBeenNthCalledWith(2, {
+      model: 'gemini-2.5-flash',
+      contents: 'Reply with OK.',
+      config: {
+        maxOutputTokens: 16,
+        thinkingConfig: { thinkingBudget: 0 },
+        httpOptions: { timeout: 10_000 },
+      },
+    });
+    expect(mockGet).not.toHaveBeenCalled();
+  });
+
+  it('refuses a model that Google describes but does not serve to this key', async () => {
+    mockGet.mockResolvedValue({ name: 'models/gemini-2.5-flash' });
+    mockGenerateContent
+      .mockResolvedValueOnce({ text: 'OK' })
+      .mockRejectedValueOnce(googleError(404, { status: 'NOT_FOUND' }));
+    expect(await client().verifyModels(['gemini-3.5-flash-lite', 'gemini-2.5-flash'])).toEqual({
+      result: 'REJECTED',
+      kind: 'MODEL_UNAVAILABLE',
+      modelId: 'gemini-2.5-flash',
+    });
   });
 
   it.each([
@@ -291,10 +318,12 @@ describe('Gemini content-free verification', () => {
       { result: 'REJECTED', kind: 'MODEL_UNAVAILABLE', modelId: 'gemini-2.5-flash-lite' },
     ],
     [googleError(429), { result: 'INCONCLUSIVE' }],
+    [googleError(503, { status: 'UNAVAILABLE' }), { result: 'INCONCLUSIVE' }],
+    [googleError(504, { status: 'DEADLINE_EXCEEDED' }), { result: 'INCONCLUSIVE' }],
     [googleError(500), { result: 'INCONCLUSIVE' }],
     [new TypeError('fetch failed'), { result: 'INCONCLUSIVE' }],
-  ])('maps a lookup failure (%#) without throwing', async (err, expected) => {
-    mockGet.mockRejectedValue(err);
+  ])('maps a failed check (%#) without throwing', async (err, expected) => {
+    mockGenerateContent.mockRejectedValue(err);
     expect(await client().verifyModels(['gemini-2.5-flash-lite'])).toEqual(expected);
   });
 });

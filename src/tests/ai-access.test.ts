@@ -73,6 +73,18 @@ describe('access state precedence (plan §3.7)', () => {
       { state: 'LIMITED', reason: 'PROVIDER_UNAVAILABLE' },
     ],
     [
+      'provider busy',
+      { ...base, accessIssue: 'PROVIDER_BUSY', cooldownUntil: later },
+      0,
+      { state: 'LIMITED', reason: 'PROVIDER_BUSY', resumesAt: later },
+    ],
+    [
+      'busy pause that has passed',
+      { ...base, accessIssue: 'PROVIDER_BUSY', cooldownUntil: now },
+      0,
+      { state: 'READY' },
+    ],
+    [
       'passed cooldown',
       { ...base, accessIssue: 'RATE_LIMITED', cooldownUntil: now },
       0,
@@ -151,13 +163,13 @@ describe('resolving a user’s own AI access', () => {
       userId,
       provider: 'gemini',
       revision: 4,
-      models: { fast: { id: 'gemini-2.5-flash-lite' }, detailed: { id: 'gemini-2.5-flash' } },
+      models: { fast: { id: 'gemini-3.5-flash-lite' }, detailed: { id: 'gemini-2.5-flash' } },
     });
   });
 
   it('falls back to the recommended model when a selection left the catalog', async () => {
     await configureAI(userId, { fastModel: 'gemini-1.0-retired' });
-    expect((await resolveAIAccess(userId)).models.fast.id).toBe('gemini-2.5-flash-lite');
+    expect((await resolveAIAccess(userId)).models.fast.id).toBe('gemini-3.5-flash-lite');
   });
 
   it('marks an unreadable key as needing attention and logs no key material', async () => {

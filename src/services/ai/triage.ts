@@ -10,6 +10,7 @@ import {
   RetryableAIError,
   TerminalAIError,
   aiSetting,
+  isRefusal,
 } from './errors';
 import {
   AI_CONTRACT_VERSIONS,
@@ -398,16 +399,6 @@ async function saveDecision(
       : { processingState: 'PENDING', ...CLEARED_FAILURE },
   });
 }
-
-const REFUSALS = [
-  'KEY_REJECTED',
-  'ACCOUNT_OR_BILLING',
-  'MODEL_UNAVAILABLE',
-  'RATE_LIMITED',
-] as const;
-type Refusal = (typeof REFUSALS)[number];
-const isRefusal = (kind: string | undefined): kind is Refusal =>
-  kind !== undefined && (REFUSALS as readonly string[]).includes(kind);
 
 function batchFailureStatus(kind: string | undefined) {
   if (isRefusal(kind)) return 'REFUSED';

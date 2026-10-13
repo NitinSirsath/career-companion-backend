@@ -1,6 +1,6 @@
 import { GoogleGenAI, Schema, ThinkingLevel, Type } from '@google/genai';
 import { z } from 'zod';
-import type { CatalogProvider } from '../../../contracts/aiCatalog';
+import type { CatalogModel, CatalogProvider } from '../../../contracts/aiCatalog';
 import { ACCESS_FAILURE_KINDS, ProviderFailure } from '../errors';
 import { ProviderClient, VERIFY_TIMEOUT_MS, VerifyResult } from './types';
 
@@ -86,6 +86,10 @@ function googleErrorBody(err: unknown): {
  * Gemini API error mapping (plan §3.6). Starting table; each row must be confirmed with a real key
  * before Gemini is offered in production. Anything unrecognized is an unknown outcome: the
  * conservative choice, held and never replayed.
+ *
+ * 503 ("high demand") and 504 ("deadline expired") are Google's own answers that it did not do the
+ * work, and Google does not charge a request that fails with a 400 or 500 error. Both are a busy
+ * provider, not a limit on the user's account and not an unknown outcome.
  */
 export function classifyGeminiError(err: unknown): ProviderFailure {
   if (err instanceof ProviderFailure) return err;
@@ -105,10 +109,25 @@ export function classifyGeminiError(err: unknown): ProviderFailure {
   if (status === 403 || body.status === 'FAILED_PRECONDITION')
     return new ProviderFailure('ACCOUNT_OR_BILLING', details);
   if (status === 404) return new ProviderFailure('MODEL_UNAVAILABLE', details);
-  if (status === 429 || status === 503) return new ProviderFailure('RATE_LIMITED', details);
+  if (status === 429) return new ProviderFailure('RATE_LIMITED', details);
+  if (status === 503 || status === 504) return new ProviderFailure('PROVIDER_BUSY', details);
   if (status === 408 || status >= 500) return new ProviderFailure('OUTCOME_UNKNOWN', details);
   return new ProviderFailure('INVALID_REQUEST', details);
 }
+
+/** The model's thinking setting, kept at the minimum the model allows. */
+function thinkingConfig(model: CatalogModel | undefined) {
+  const reasoning = model?.reasoning;
+  if (reasoning && 'thinkingBudget' in reasoning)
+    return { thinkingConfig: { thinkingBudget: reasoning.thinkingBudget } };
+  if (reasoning && 'thinkingLevel' in reasoning)
+    return { thinkingConfig: { thinkingLevel: THINKING_LEVELS[reasoning.thinkingLevel] } };
+  return {};
+}
+
+/** The fixed text of a key check. It holds nothing of the user's. */
+const VERIFY_INPUT = 'Reply with OK.';
+const VERIFY_MAX_OUTPUT_TOKENS = 16;
 
 export function createGeminiClient(provider: CatalogProvider, apiKey: string): ProviderClient {
   // One SDK attempt: a hidden retry could repeat a call whose outcome is already charged.
@@ -129,14 +148,7 @@ export function createGeminiClient(provider: CatalogProvider, apiKey: string): P
             responseSchema: geminiSchema(contract.schema),
             ...(model.temperature === null ? {} : { temperature: model.temperature }),
             maxOutputTokens: contract.maxOutputTokens,
-            ...(model.reasoning && 'thinkingBudget' in model.reasoning
-              ? { thinkingConfig: { thinkingBudget: model.reasoning.thinkingBudget } }
-              : {}),
-            ...(model.reasoning && 'thinkingLevel' in model.reasoning
-              ? {
-                  thinkingConfig: { thinkingLevel: THINKING_LEVELS[model.reasoning.thinkingLevel] },
-                }
-              : {}),
+            ...thinkingConfig(model),
             httpOptions: { timeout: model.timeoutMs },
           },
         });
@@ -163,12 +175,22 @@ export function createGeminiClient(provider: CatalogProvider, apiKey: string): P
       }
     },
 
+    /**
+     * Sends one very small real request to each model. Looking the model up is not enough: Google
+     * describes a model to every key, also to a key it refuses every real request from. The
+     * answer is not read, kept or logged.
+     */
     async verifyModels(modelIds): Promise<VerifyResult> {
       for (const modelId of new Set(modelIds)) {
         try {
-          await client.models.get({
+          await client.models.generateContent({
             model: modelId,
-            config: { httpOptions: { timeout: VERIFY_TIMEOUT_MS } },
+            contents: VERIFY_INPUT,
+            config: {
+              maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS,
+              ...thinkingConfig(provider.models.find((model) => model.id === modelId)),
+              httpOptions: { timeout: VERIFY_TIMEOUT_MS },
+            },
           });
         } catch (err) {
           const { kind } = classifyGeminiError(err);

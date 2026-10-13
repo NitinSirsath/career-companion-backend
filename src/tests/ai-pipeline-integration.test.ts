@@ -122,7 +122,7 @@ describe('Gmail → user-provided AI → application pipeline', () => {
     });
     expect(done.aiProcessingResult).toMatchObject({
       provider: 'gemini',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
       companyName: 'Northwind Robotics',
     });
     expect(
@@ -134,13 +134,13 @@ describe('Gmail → user-provided AI → application pipeline', () => {
       {
         operation: 'classification',
         provider: 'gemini',
-        model: 'gemini-2.5-flash-lite',
+        model: 'gemini-3.5-flash-lite',
         status: 'COMPLETED',
       },
       {
         operation: 'extraction',
         provider: 'gemini',
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.8-flash',
         status: 'COMPLETED',
       },
     ]);
