@@ -165,6 +165,7 @@ Every AI call uses the session or job user's own provider key, from a curated co
 | `POST /api/ai/settings/check` | Re-verify the saved key ("Check again"). |
 | `POST /api/ai/settings/sample-test` | Run both capabilities on a built-in synthetic email. |
 | `DELETE /api/ai/settings` | Remove the configuration and its key. |
+| `POST /api/ai/waiting/read` | "Read waiting mails now": end a running pause and offer the waiting mail again. Answers with the AI settings. |
 | `POST /api/emails/:id/retry` | Gains `{ acceptPossibleDuplicateCharge: true }` for approving one more attempt after 409 `AI_RETRY_NEEDS_APPROVAL`. |
 
 **Configuration**
@@ -180,6 +181,7 @@ See [STABILIZATION.md](STABILIZATION.md) for rollout and support.
   - `access.ts`: per-user access resolution;
   - `operations.ts`: the ledger;
   - `usage.ts`: safety limit, counts, cooldown;
+  - `offer.ts`: offers waiting mail to the worker, also by itself when a pause ends (`ai-resume-job`);
   - `credentials.ts`: key sealing;
   - `settings.ts`: the settings API.
 - `src/eval/ai/`: the manual evaluation runner (`npm run ai:eval`). See its README.
