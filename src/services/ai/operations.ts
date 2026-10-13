@@ -10,6 +10,7 @@ import {
   RetryableAIError,
   SchemaValidationFailure,
   TerminalAIError,
+  isRefusal,
 } from './errors';
 import { noteProviderFailure, noteProviderSuccess, recordTokens, reserveUserCall } from './usage';
 import { logDebug, logEvent, logWarn } from '../../utils/log';
@@ -41,8 +42,8 @@ export interface OperationResult<T> {
  * - Access is resolved before the claim, so waiting for AI uses no attempt and no call.
  * - The claim reserves one call against the user's daily safety limit and respects the user's
  *   provider cooldown. One user's limit or cooldown never affects another user.
- * - A refusal (key, account, model, rate limit) releases the claim and restores the attempt: it
- *   was rejected before any work was done. The user's access state records it.
+ * - A refusal (key, account, model, rate limit, busy provider) releases the claim and restores
+ *   the attempt: it was rejected before any work was done. The user's access state records it.
  * - Each user approval (`approvedRetries`) permits exactly one call beyond MAX_ATTEMPTS.
  */
 export async function runOperation<T>(request: OperationRequest<T>): Promise<OperationResult<T>> {
@@ -204,12 +205,7 @@ async function recordFailure(
   if (failure?.usage) await recordTokens(access.userId, now, failure.usage);
   let thrown: unknown;
   await prisma.$transaction(async (tx) => {
-    if (
-      kind === 'KEY_REJECTED' ||
-      kind === 'ACCOUNT_OR_BILLING' ||
-      kind === 'MODEL_UNAVAILABLE' ||
-      kind === 'RATE_LIMITED'
-    ) {
+    if (isRefusal(kind)) {
       // Refused before any work was done: the claim is released and the attempt is not charged.
       await tx.aIOperation.updateMany({
         where: { id: existing.id, status: 'PROCESSING' },
