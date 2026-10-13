@@ -8,6 +8,7 @@
  */
 import { AIAccessIssue, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
+import { enqueueAiResume } from '../enqueue';
 import type { AIUsage } from './contracts';
 import { AIAccessError, FailureKind, PAUSE_FAILURE_KINDS, aiSetting } from './errors';
 import * as config from '../../utils/config';
@@ -146,6 +147,20 @@ export async function noteProviderFailure(
     },
   });
   return resumesAt;
+}
+
+/**
+ * Queues the automatic read for the moment a pause ends, so waiting mail does not wait for the
+ * next sync. Called after the transaction that recorded the pause. Best effort: if the job cannot
+ * be queued, the next sync offers the waiting mail again.
+ */
+export async function resumeAfterPause(userId: string, resumesAt: Date | null): Promise<void> {
+  if (!resumesAt) return;
+  try {
+    await enqueueAiResume(userId, resumesAt);
+  } catch {
+    logWarn('ai_resume_not_queued', { userId });
+  }
 }
 
 /** A successful call clears a passed limitation and resets cooldown growth. Best effort. */

@@ -91,6 +91,7 @@ describe('bounded worker registration', () => {
 it('registers triage without changing the existing queue positions', () => {
   const queues = defaultWorkers().map((worker) => worker.queue);
   expect(queues).toContain(QUEUE_NAMES[3]);
+  expect(queues).toContain(QUEUE_NAMES[4]);
   expect(queues).toContain(QUEUE_NAMES[0]);
   expect(queues).toContain(QUEUE_NAMES[1]);
   expect(queues).toContain(QUEUE_NAMES[2]);

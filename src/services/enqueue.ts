@@ -62,6 +62,35 @@ export async function enqueueRelevanceTriage(userId: string): Promise<string | n
   );
 }
 
+export const AI_RESUME_JOB = 'ai-resume-job';
+/** The job starts a moment after the pause ends, so the pause is surely over when it runs. */
+const AI_RESUME_MARGIN_MS = 2_000;
+
+export interface AiResumeJobData {
+  userId: string;
+}
+
+export const aiResumeJobOptions = (userId: string, pauseEndsAt: Date) => ({
+  singletonKey: `resume:${userId}`,
+  startAfter: new Date(pauseEndsAt.getTime() + AI_RESUME_MARGIN_MS),
+  retryLimit: 3,
+  retryDelay: 60,
+  retryBackoff: true,
+  expireInSeconds: 300,
+});
+
+/**
+ * Queues the job that offers a user's waiting mail again when a pause ends. The queue keeps one
+ * waiting job per user: a second send while one waits returns null.
+ */
+export async function enqueueAiResume(userId: string, pauseEndsAt: Date): Promise<string | null> {
+  return (await getQueue()).send(
+    AI_RESUME_JOB,
+    { userId },
+    aiResumeJobOptions(userId, pauseEndsAt),
+  );
+}
+
 export const NOTIFICATION_JOB = 'discord-notification-job';
 
 export interface NotificationJobData {

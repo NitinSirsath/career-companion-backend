@@ -4,8 +4,10 @@
  */
 import { prisma } from '../../db/prisma';
 import { enqueueEmailProcessingJob, enqueueRelevanceTriage } from '../enqueue';
-import { getAccessState } from './access';
+import { getAccessState, isProviderPause } from './access';
 import { triageBatchEnabled } from './triage';
+import { resumeAfterPause } from './usage';
+import { logEvent } from '../../utils/log';
 
 export const REOFFER_LIMIT = 100;
 
@@ -19,8 +21,8 @@ export async function enqueueForProcessing(userId: string, emailId: string): Pro
  * Re-offers up to 100 of the user's PENDING emails to the worker, newest first, so fresh mail is
  * not stuck behind a backlog. Covers the DB-insert / queue-send gap and emails that waited for AI
  * access. Does nothing while the user's AI access is not ready: those emails wait and are
- * re-offered by the next sync or after the user fixes access (no scheduler). Enqueueing is
- * idempotent per email (singleton key).
+ * re-offered when a pause ends (`resumeWaitingEmails`), by the next sync, or after the user fixes
+ * access. Enqueueing is idempotent per email (singleton key).
  */
 export async function reofferPendingEmails(
   userId: string,
@@ -52,4 +54,20 @@ export async function reofferPendingEmails(
     await enqueueEmailProcessingJob(userId, email.id);
   }
   return pending.length;
+}
+
+/**
+ * Runs when a pause ends (the job queued when the pause started). If a newer pause is running,
+ * the read waits for that one. Otherwise the waiting mail is offered again; if the provider is
+ * still busy, the first call starts the next, longer pause and queues the next try. Problems that
+ * need the user (key, billing, model) and the daily safety limit get no automatic try.
+ */
+export async function resumeWaitingEmails(userId: string): Promise<void> {
+  const access = await getAccessState(userId);
+  if (isProviderPause(access)) {
+    await resumeAfterPause(userId, access.resumesAt);
+    return;
+  }
+  const offered = await reofferPendingEmails(userId);
+  logEvent('ai_resumed_after_pause', { userId, offered, access: access.state });
 }

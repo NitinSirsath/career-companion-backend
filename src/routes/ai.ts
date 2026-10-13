@@ -6,6 +6,7 @@
  *   POST   /api/ai/settings/check  re-verify the saved key ("Check again")
  *   POST   /api/ai/settings/sample-test  run both capabilities on a built-in synthetic email
  *   DELETE /api/ai/settings        remove the configuration and its key
+ *   POST   /api/ai/waiting/read    end a running pause and offer the waiting mail again
  *
  * The user always comes from the session; no route takes a user or configuration ID. Request
  * bodies are never logged, and validation errors never include submitted values.
@@ -21,6 +22,7 @@ import {
   runSampleTest,
   saveSettings,
 } from '../services/ai/settings';
+import { readWaitingNow } from '../services/ai/waiting';
 
 const router = Router();
 router.use(requireAuth);
@@ -66,6 +68,14 @@ router.post(
 router.delete(
   '/settings',
   handle((req) => removeSettings(req.auth!.user.id)),
+);
+
+router.post(
+  '/waiting/read',
+  handle((req) => {
+    EmptyBody.parse(req.body ?? {});
+    return readWaitingNow(req.auth!.user.id);
+  }),
 );
 
 export const aiRouter = router;

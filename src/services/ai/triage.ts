@@ -22,7 +22,13 @@ import {
   buildRelevanceBatchInput,
   mapBatchResults,
 } from './contracts';
-import { noteProviderFailure, noteProviderSuccess, recordTokens, reserveUserCall } from './usage';
+import {
+  noteProviderFailure,
+  noteProviderSuccess,
+  recordTokens,
+  reserveUserCall,
+  resumeAfterPause,
+} from './usage';
 import { failureError, failureKind } from './operations';
 import * as config from '../../utils/config';
 import { logEvent, logWarn } from '../../utils/log';
@@ -494,9 +500,10 @@ async function failBatch(
         retryAfterMs: failure?.retryAfterMs,
       });
     if (kind === 'OUTCOME_UNKNOWN')
-      await noteProviderFailure(tx, ctx.access, 'OUTCOME_UNKNOWN', ctx.now);
+      return noteProviderFailure(tx, ctx.access, 'OUTCOME_UNKNOWN', ctx.now);
     return null;
   });
+  await resumeAfterPause(ctx.userId, resumesAt);
   logWarn('ai_batch_failed', {
     batchId: ctx.batchId,
     userId: ctx.userId,

@@ -122,6 +122,15 @@ export const AISampleTestResponseSchema = z.object({
 });
 export type AISampleTestResponse = z.infer<typeof AISampleTestResponseSchema>;
 
+// ─── POST /api/ai/waiting/read ──────────────────────────────────────────────
+
+/**
+ * "Read waiting mails now": ends a running pause and offers the waiting mail again. Answers with
+ * the AI settings as they are right after that; the result of the new try shows in a later read.
+ */
+export const ReadWaitingMailResponseSchema = AISettingsResponseSchema;
+export type ReadWaitingMailResponse = z.infer<typeof ReadWaitingMailResponseSchema>;
+
 // ─── DELETE /api/ai/settings ────────────────────────────────────────────────
 
 export const RemoveAISettingsResponseSchema = z.object({ removed: z.literal(true) });

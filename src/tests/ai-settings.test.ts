@@ -5,7 +5,7 @@ import { prisma } from '../db/prisma';
 import { openApiKey, sealApiKey } from '../services/ai/credentials';
 import { createProviderClient, VerifyResult } from '../services/ai/providers';
 import { utcDay } from '../services/ai/usage';
-import { reofferPendingEmails } from '../services/ai/offer';
+import { reofferPendingEmails, resumeWaitingEmails } from '../services/ai/offer';
 import { configureAI } from './helpers/aiAccess';
 import { JobExtractionSchema } from '../services/ai/contracts';
 import { ProviderFailure } from '../services/ai/errors';
@@ -59,6 +59,7 @@ describe('AI settings API: authentication and reading', () => {
     ['get', '/api/ai/settings'],
     ['put', '/api/ai/settings'],
     ['post', '/api/ai/settings/check'],
+    ['post', '/api/ai/waiting/read'],
     ['delete', '/api/ai/settings'],
   ] as const)('requires a session for %s %s', async (method, path) => {
     const res = await request(app)[method](path).send({});
@@ -336,7 +337,7 @@ describe('check again and remove', () => {
   });
 });
 
-describe('re-offering waiting emails (no scheduler)', () => {
+describe('re-offering waiting emails', () => {
   it('re-offers nothing while the user has no usable AI access', async () => {
     await prisma.email.create({ data: { userId, gmailMessageId: 'wait-1' } });
     expect(await reofferPendingEmails(userId)).toBe(0);
@@ -375,6 +376,116 @@ describe('re-offering waiting emails (no scheduler)', () => {
     });
     expect(offered.map((e) => e.gmailMessageId)).not.toContain('bulk-0'); // the oldest waits for the next sync
     expect(offered.map((e) => e.gmailMessageId)).not.toContain('done');
+  });
+});
+
+const jobs = () => send.mock.calls.map((call) => (call as unknown[]).slice(0, 2));
+
+describe('reading waiting mail by itself when a pause ends', () => {
+  it('offers the waiting mail again once the pause is over', async () => {
+    await configureAI(userId, {
+      accessIssue: 'PROVIDER_BUSY',
+      cooldownUntil: new Date(Date.now() - 1000),
+      consecutiveFailures: 1,
+    });
+    const waiting = await prisma.email.create({ data: { userId, gmailMessageId: 'resume-1' } });
+    await resumeWaitingEmails(userId);
+    expect(jobs()).toEqual([['email-processing-job', { userId, emailId: waiting.id }]]);
+  });
+
+  it('waits for the newer pause when one is running, and offers nothing', async () => {
+    const until = new Date(Date.now() + 90_000);
+    await configureAI(userId, { accessIssue: 'PROVIDER_BUSY', cooldownUntil: until });
+    await prisma.email.create({ data: { userId, gmailMessageId: 'resume-2' } });
+    await resumeWaitingEmails(userId);
+    expect(jobs()).toEqual([['ai-resume-job', { userId }]]);
+    expect((send.mock.calls[0] as unknown[])[2]).toMatchObject({
+      startAfter: new Date(until.getTime() + 2000),
+    });
+  });
+
+  it.each([
+    ['a key problem', { accessIssue: 'KEY_REJECTED' }, {}],
+    ['the daily safety limit', {}, { calls: 500 }],
+  ] as const)('makes no automatic try for %s', async (_label, state, used) => {
+    await configureAI(userId, state);
+    await prisma.aIUsageDay.create({ data: { userId, day: utcDay(new Date()), ...used } });
+    await prisma.email.create({ data: { userId, gmailMessageId: 'resume-3' } });
+    await resumeWaitingEmails(userId);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('read waiting mails now', () => {
+  const readNow = (body: object = {}, email = OWNER) =>
+    request(app).post('/api/ai/waiting/read').set(as(email)).send(body);
+
+  it('ends a running pause, keeps the count of failed tries and offers the waiting mail', async () => {
+    await configureAI(userId, {
+      accessIssue: 'PROVIDER_BUSY',
+      cooldownUntil: new Date(Date.now() + 25 * 60_000),
+      consecutiveFailures: 4,
+    });
+    const waiting = await prisma.email.create({ data: { userId, gmailMessageId: 'now-1' } });
+    await prisma.email.create({
+      data: { userId, gmailMessageId: 'now-done', processingState: 'COMPLETED' },
+    });
+    const res = await readNow();
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      access: { state: 'READY', reason: null, resumesAt: null },
+      waitingEmails: 1,
+    });
+    expect(JSON.stringify(res.body)).not.toContain('SENTINEL');
+    // If the provider is still busy, the next pause grows from here instead of starting over.
+    expect(await config()).toMatchObject({ cooldownUntil: null, consecutiveFailures: 4 });
+    expect(jobs()).toEqual([['email-processing-job', { userId, emailId: waiting.id }]]);
+  });
+
+  it('offers waiting mail that was left after a pause ended', async () => {
+    await configureAI(userId, {
+      accessIssue: 'RATE_LIMITED',
+      cooldownUntil: new Date(Date.now() - 1000),
+    });
+    const waiting = await prisma.email.create({ data: { userId, gmailMessageId: 'now-2' } });
+    expect((await readNow()).status).toBe(200);
+    expect(jobs()).toEqual([['email-processing-job', { userId, emailId: waiting.id }]]);
+  });
+
+  it.each([
+    ['a key problem', { accessIssue: 'KEY_REJECTED' }, {}, 'KEY_REJECTED'],
+    ['a refused model', { accessIssue: 'MODEL_UNAVAILABLE' }, {}, 'MODEL_UNAVAILABLE'],
+    ['the daily safety limit', {}, { calls: 500 }, 'SAFETY_LIMIT'],
+  ] as const)('changes nothing and offers nothing for %s', async (_label, state, used, reason) => {
+    await configureAI(userId, state);
+    await prisma.aIUsageDay.create({ data: { userId, day: utcDay(new Date()), ...used } });
+    await prisma.email.create({ data: { userId, gmailMessageId: 'now-3' } });
+    const res = await readNow();
+    expect(res.status).toBe(200);
+    expect(res.body.access.reason).toBe(reason);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('answers a user without AI as not set up', async () => {
+    const res = await readNow();
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ configured: false, access: { state: 'NOT_SET_UP' } });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("never touches another user's pause or mail", async () => {
+    await configureAI(userId, {
+      accessIssue: 'PROVIDER_BUSY',
+      cooldownUntil: new Date(Date.now() + 60_000),
+    });
+    await prisma.email.create({ data: { userId, gmailMessageId: 'now-4' } });
+    expect((await readNow({}, OTHER)).status).toBe(200);
+    expect((await config())!.cooldownUntil).not.toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('rejects any body', async () => {
+    expect((await readNow({ userId: 'someone-else' })).status).toBe(400);
   });
 });
 
@@ -463,6 +574,11 @@ describe('sample-email test', () => {
     });
     expect(res.body.error.details.resumesAt).toEqual(expect.any(String));
     expect((await config())!.accessIssue).toBe('PROVIDER_BUSY');
+    expect(send).toHaveBeenCalledWith(
+      'ai-resume-job',
+      { userId },
+      expect.objectContaining({ singletonKey: `resume:${userId}` }),
+    );
   });
 
   it('reports unusable output without holding anything', async () => {

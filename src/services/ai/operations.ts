@@ -12,7 +12,13 @@ import {
   TerminalAIError,
   isRefusal,
 } from './errors';
-import { noteProviderFailure, noteProviderSuccess, recordTokens, reserveUserCall } from './usage';
+import {
+  noteProviderFailure,
+  noteProviderSuccess,
+  recordTokens,
+  reserveUserCall,
+  resumeAfterPause,
+} from './usage';
 import { logDebug, logEvent, logWarn } from '../../utils/log';
 
 export const MAX_ATTEMPTS = 3;
@@ -204,6 +210,7 @@ async function recordFailure(
   const kind = failure?.kind;
   if (failure?.usage) await recordTokens(access.userId, now, failure.usage);
   let thrown: unknown;
+  let resumesAt: Date | null = null;
   await prisma.$transaction(async (tx) => {
     if (isRefusal(kind)) {
       // Refused before any work was done: the claim is released and the attempt is not charged.
@@ -216,7 +223,7 @@ async function recordFailure(
           retryAfter: null,
         },
       });
-      const resumesAt = await noteProviderFailure(tx, access, kind, now, {
+      resumesAt = await noteProviderFailure(tx, access, kind, now, {
         modelId,
         retryAfterMs: failure!.retryAfterMs,
       });
@@ -242,12 +249,13 @@ async function recordFailure(
     });
     if (kind === 'OUTCOME_UNKNOWN') {
       // A short per-user pause keeps an outage from holding one uncertain call per email.
-      await noteProviderFailure(tx, access, 'OUTCOME_UNKNOWN', now);
+      resumesAt = await noteProviderFailure(tx, access, 'OUTCOME_UNKNOWN', now);
       thrown = new AIOutcomeUnknownError();
     } else {
       thrown = err;
     }
   });
+  await resumeAfterPause(access.userId, resumesAt);
   if (thrown instanceof AIProviderError) thrown.operationStage = operation;
   logWarn('ai_call_failed', {
     userId: access.userId,

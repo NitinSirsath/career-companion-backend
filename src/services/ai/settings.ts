@@ -41,6 +41,7 @@ import {
   noteProviderSuccess,
   recordTokens,
   reserveUserCall,
+  resumeAfterPause,
   userDailyCallLimit,
   utcDay,
 } from './usage';
@@ -423,6 +424,7 @@ export async function runSampleTest(userId: string): Promise<AISampleTestRespons
             retryAfterMs: (err as ProviderFailure).retryAfterMs,
           }),
         );
+        await resumeAfterPause(userId, resumesAt);
         if (kind === 'RATE_LIMITED' || kind === 'PROVIDER_BUSY')
           throw unavailable(new AIAccessError(kind, resumesAt));
         throw new AppError(422, 'AI_ACCESS_REJECTED', 'The provider refused this key or model.', {
