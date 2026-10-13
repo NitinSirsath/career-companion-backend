@@ -1,5 +1,6 @@
 /**
- * The two Google OAuth grants: login (who the user is) and Gmail (read-only mailbox access).
+ * The two Google OAuth grants: login (who the user is) and Gmail (reading the mailbox, and
+ * sending the user's own replies).
  * Routes keep the browser side of the flow: state cookies and redirects.
  *
  * The authorization code and the tokens are never logged.
@@ -16,7 +17,8 @@ import {
 } from './googleTransport';
 
 const LOGIN_SCOPE = ['openid', 'email', 'profile'];
-const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const GMAIL_READ_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
 const GOOGLE_ISSUERS = ['https://accounts.google.com', 'accounts.google.com'];
 
 // ─── Login ──────────────────────────────────────────────────────────────────
@@ -92,11 +94,18 @@ export function gmailConsentUrl(state: string): string {
   loadEncryptionKey();
   return gmailClient().generateAuthUrl({
     access_type: 'offline',
-    scope: GMAIL_SCOPE,
+    scope: [GMAIL_READ_SCOPE, GMAIL_SEND_SCOPE],
     prompt: 'consent', // Always ask for consent, so Google returns a refresh token.
     state,
   });
 }
+
+/**
+ * True when the grant covers sending. The user can untick a permission on Google's screen, so
+ * what was asked for proves nothing: only the scopes Google lists with the tokens count.
+ */
+export const grantsSending = (scope: string | null | undefined): boolean =>
+  !!scope && scope.split(/\s+/).includes(GMAIL_SEND_SCOPE);
 
 /** Exchanges the consent code for the mailbox address and its tokens. */
 export async function exchangeGmailCode(code: string) {
@@ -118,6 +127,7 @@ export async function exchangeGmailCode(code: string) {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
       expiryDate: tokens.expiry_date,
+      canSend: grantsSending(tokens.scope),
     },
   };
 }

@@ -5,7 +5,8 @@ import { SyncQueueError } from '../services/gmailSyncErrors';
  * Endpoints:
  *   GET  /api/gmail/status       — connection status for authenticated user
  *   GET  /api/gmail/connect      — initiate OAuth flow (redirect to Google); in dev mode,
- *                                  connect the sandbox mailbox at once
+ *                                  connect the sandbox mailbox at once. `?returnTo=` names
+ *                                  the mail page to come back to instead of the Gmail page
  *   GET  /api/gmail/callback     — Google OAuth callback handler
  *   POST /api/gmail/disconnect   — revoke and clear GmailConnection
  *
@@ -44,7 +45,17 @@ const router = Router();
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 const STATE_COOKIE_NAME = 'gmail_oauth_state';
+const RETURN_COOKIE_NAME = 'gmail_oauth_return';
 const FRONTEND_GMAIL_PATH = '/gmail';
+const OAUTH_COOKIE_MAX_AGE_MS = 5 * 60 * 1000; // enough time to complete the OAuth flow
+
+/**
+ * Where to send the user after connecting: the mail they came from, or the Gmail page. Only a
+ * mail details path of this app is accepted, so the value can never lead to another site.
+ */
+const MAIL_PAGE = /^\/mails\/(gmail\/)?[A-Za-z0-9_-]{1,128}$/;
+const returnPath = (value: unknown): string =>
+  typeof value === 'string' && MAIL_PAGE.test(value) ? value : FRONTEND_GMAIL_PATH;
 
 // ─── Protect all routes with dev auth ───────────────────────────────────────
 
@@ -64,10 +75,11 @@ router.get('/status', async (req: Request, res: Response, next: NextFunction) =>
 
 router.get('/connect', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const returnTo = returnPath(req.query.returnTo);
     // Dev mode has no Google account: the sandbox mailbox is connected at once.
     if (devMode()) {
       await connectSandboxMailbox(req.auth!.user.id);
-      return res.redirect(302, `${frontendUrl()}${FRONTEND_GMAIL_PATH}`);
+      return res.redirect(302, `${frontendUrl()}${returnTo}`);
     }
 
     // Generate a cryptographically random CSRF state token (32 bytes = 64 hex chars).
@@ -77,13 +89,17 @@ router.get('/connect', async (req: Request, res: Response, next: NextFunction) =
     // Store state in a signed, short-lived, HttpOnly, SameSite=Lax cookie.
     // The cookie secret comes from OAUTH_STATE_COOKIE_SECRET.
     // cookie-parser's signedCookies support is used for tamper detection.
-    res.cookie(STATE_COOKIE_NAME, state, {
+    const cookie = {
       httpOnly: true,
       sameSite: 'lax',
-      maxAge: 5 * 60 * 1000, // 5 minutes — enough time to complete the OAuth flow
+      maxAge: OAUTH_COOKIE_MAX_AGE_MS,
       signed: true,
       secure: isProduction(),
-    });
+    } as const;
+    res.cookie(STATE_COOKIE_NAME, state, cookie);
+    // Kept for the same few minutes; an earlier try's page must not outlive it.
+    if (returnTo === FRONTEND_GMAIL_PATH) res.clearCookie(RETURN_COOKIE_NAME);
+    else res.cookie(RETURN_COOKIE_NAME, returnTo, cookie);
 
     return res.redirect(302, authUrl);
   } catch (err) {
@@ -108,6 +124,7 @@ router.get('/callback', prodModeOnly, async (req: Request, res: Response) => {
     if (error === 'access_denied') {
       // Clear state cookie regardless.
       res.clearCookie(STATE_COOKIE_NAME);
+      res.clearCookie(RETURN_COOKIE_NAME);
       return res.redirect(302, `${frontendGmailUrl}?gmailError=denied`);
     }
 
@@ -116,6 +133,8 @@ router.get('/callback', prodModeOnly, async (req: Request, res: Response) => {
 
     // Clear the state cookie immediately — it is single-use.
     res.clearCookie(STATE_COOKIE_NAME);
+    const returnTo = returnPath(req.signedCookies?.[RETURN_COOKIE_NAME]);
+    res.clearCookie(RETURN_COOKIE_NAME);
 
     if (!storedState || !state || storedState !== state || !state.startsWith(`${userId}.`)) {
       // Do NOT log `state` param — it could reveal correlation data.
@@ -145,7 +164,7 @@ router.get('/callback', prodModeOnly, async (req: Request, res: Response) => {
     const saved = await saveGmailGrant(userId, gmailEmail, grant);
     if (!saved) return res.redirect(302, `${frontendGmailUrl}?gmailError=account_change`);
 
-    return res.redirect(302, frontendGmailUrl);
+    return res.redirect(302, `${frontendUrl()}${returnTo}`);
   } catch (err) {
     // Do not expose error details to the browser — redirect with a generic error.
     logError('gmail_oauth_failed', {}, err);
