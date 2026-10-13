@@ -100,8 +100,8 @@ describe('saving verifies first and stores a write-only key', () => {
       configured: true,
       provider: 'gemini',
       models: {
-        fast: { id: 'gemini-2.5-flash-lite', source: 'RECOMMENDED' },
-        detailed: { id: 'gemini-2.5-flash', source: 'RECOMMENDED' },
+        fast: { id: 'gemini-3.5-flash-lite', source: 'RECOMMENDED' },
+        detailed: { id: 'gemini-3.8-flash', source: 'RECOMMENDED' },
       },
       access: { state: 'READY', verified: true },
       consent: { disclosure: DISCLOSURE, current: true },
@@ -111,7 +111,7 @@ describe('saving verifies first and stores a write-only key', () => {
     expect(saved.encryptedApiKey).not.toContain('SENTINEL');
     expect(openApiKey(userId, saved.encryptedApiKey)).toBe(KEY); // trimmed
     expect(saved).toMatchObject({ consentDisclosure: DISCLOSURE, accessIssue: null });
-    expect(client.verifyModels).toHaveBeenCalledWith(['gemini-2.5-flash-lite', 'gemini-2.5-flash']);
+    expect(client.verifyModels).toHaveBeenCalledWith(['gemini-3.5-flash-lite', 'gemini-3.8-flash']);
     expect(send.mock.calls.map((call) => (call as unknown[])[1])).toEqual([
       { userId, emailId: newer.id },
       { userId, emailId: older.id },
@@ -407,7 +407,7 @@ describe('sample-email test', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
       provider: 'gemini',
-      models: { fast: 'gemini-2.5-flash-lite', detailed: 'gemini-2.5-flash' },
+      models: { fast: 'gemini-3.5-flash-lite', detailed: 'gemini-3.8-flash' },
       classification: { decision: 'RELEVANT', category: 'INTERVIEW' },
       extraction: {
         companyName: 'Northwind Robotics',
@@ -450,6 +450,19 @@ describe('sample-email test', () => {
       details: { reason: 'ACCOUNT_OR_BILLING' },
     });
     expect((await config())!.accessIssue).toBe('ACCOUNT_OR_BILLING');
+  });
+
+  it('reports a busy provider as a pause, not as a refused key or model', async () => {
+    await configureAI(userId);
+    client.generateStructured.mockRejectedValue(new ProviderFailure('PROVIDER_BUSY'));
+    const res = await sample();
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatchObject({
+      code: 'AI_ACCESS_UNAVAILABLE',
+      details: { state: 'LIMITED', reason: 'PROVIDER_BUSY' },
+    });
+    expect(res.body.error.details.resumesAt).toEqual(expect.any(String));
+    expect((await config())!.accessIssue).toBe('PROVIDER_BUSY');
   });
 
   it('reports unusable output without holding anything', async () => {
