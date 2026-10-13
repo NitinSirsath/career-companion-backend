@@ -45,20 +45,26 @@ import { syncUser } from '../services/gmailSync';
 const OWNER = 'owner@mail-reply.test';
 const OTHER = 'other@mail-reply.test';
 const PRIYA = 'Priya Raman <priya.raman@northwind.example>';
+const DANIEL = 'Daniel Okafor <daniel.okafor@northwind.example>';
+const LENA = 'Lena Fischer <lena.fischer@northwind.example>';
 const TEXT = 'REPLYSENTINEL Thursday at 3 pm works for me.';
 let owner: string;
 let other: string;
 
 const as = (user = OWNER) => ({ 'X-Development-User': user });
 const connect = (user = OWNER) => request(app).get('/api/gmail/connect').set(as(user));
-const receive = async (user = OWNER) =>
-  (
-    await request(app).post('/api/sandbox/messages').set(as(user)).send({
+const compose = (more: object = {}, user = OWNER) =>
+  request(app)
+    .post('/api/sandbox/messages')
+    .set(as(user))
+    .send({
       from: PRIYA,
       subject: 'Opportunity at Northwind Robotics',
       body: 'Hi Alex,\n\nWould you have 20 minutes this week?',
-    })
-  ).body as { id: string; threadId: string };
+      ...more,
+    });
+const receive = async (user = OWNER, more: object = {}) =>
+  (await compose(more, user)).body as { id: string; threadId: string };
 const sendReply = (threadId: string, body: object, user = OWNER) =>
   request(app).post(`/api/mailbox/threads/${threadId}/replies`).set(as(user)).send(body);
 const reply = (threadId: string, text = TEXT, replyId = randomUUID()) =>
@@ -261,5 +267,83 @@ describe('replying from the mail details page in dev mode', () => {
     expect(
       await prisma.sandboxMessage.count({ where: { body: { contains: 'REPLYSENTINEL' } } }),
     ).toBe(1);
+  });
+});
+describe('a reply to all in dev mode', () => {
+  const copied = { cc: `${DANIEL},  ${LENA}` };
+
+  it('keeps the people in Cc of a sandbox mail, and says who a reply to all reaches', async () => {
+    // The user's own address in Cc is kept on the mail, and left out of a reply to all.
+    const mail = await receive(OWNER, { cc: `${DANIEL}, ${LENA}, owner@MAIL-reply.test` });
+    const stored = (await sandboxThread(mail.threadId)).messages[0];
+    expect(stored.cc).toBe(`${DANIEL}, ${LENA}, owner@MAIL-reply.test`);
+
+    const read = await mailThread(mail.threadId);
+    expect(read.messages[0].cc).toBe(stored.cc);
+    expect(read.replyTo).toBe(PRIYA);
+    expect(read.replyCc).toEqual([DANIEL, LENA]);
+  });
+
+  it('sends a reply to all with the same people in Cc, and a reply to the sender with nobody', async () => {
+    const mail = await receive(OWNER, copied);
+    expect(
+      (await sendReply(mail.threadId, { replyId: randomUUID(), text: TEXT, toAll: true })).status,
+    ).toBe(200);
+    expect((await reply(mail.threadId, 'Only for you.')).status).toBe(200);
+
+    const { messages } = await sandboxThread(mail.threadId);
+    expect(messages.map((message) => [message.sentByUser, message.to, message.cc])).toEqual([
+      [false, 'Alex Tester <owner@mail-reply.test>', `${DANIEL}, ${LENA}`],
+      [true, PRIYA, `${DANIEL}, ${LENA}`],
+      [true, PRIYA, null],
+    ]);
+    // The app reads the reply back with its Cc line, as it reads any sent mail.
+    expect((await mailThread(mail.threadId)).messages[1].cc).toBe(`${DANIEL}, ${LENA}`);
+    expect(google.built).not.toHaveBeenCalled();
+  });
+
+  it('has nobody else to reach on a mail to the user alone, also when asked to reply to all', async () => {
+    const mail = await receive();
+    expect((await mailThread(mail.threadId)).replyCc).toEqual([]);
+    expect(
+      (await sendReply(mail.threadId, { replyId: randomUUID(), text: TEXT, toAll: true })).status,
+    ).toBe(200);
+    expect((await sandboxThread(mail.threadId)).messages[1]).toMatchObject({ to: PRIYA, cc: null });
+  });
+
+  it('keeps the people on the conversation when the other person writes again', async () => {
+    const mail = await receive(OWNER, copied);
+    const write = (as_: 'me' | 'them') =>
+      request(app)
+        .post(`/api/sandbox/threads/${mail.threadId}/replies`)
+        .set(as())
+        .send({ as: as_, body: 'One more thing.' });
+    expect((await write('me')).status).toBe(201);
+    expect((await write('them')).status).toBe(201);
+    const { messages } = await sandboxThread(mail.threadId);
+    expect(messages.map((message) => message.cc)).toEqual([
+      `${DANIEL}, ${LENA}`,
+      null,
+      `${DANIEL}, ${LENA}`,
+    ]);
+    expect((await mailThread(mail.threadId)).replyCc).toEqual([DANIEL, LENA]);
+  });
+
+  it.each([
+    ['a word that is not an address', 'the hiring team'],
+    ['one part that is not an address', `${DANIEL}, lena`],
+    [
+      'more than ten addresses',
+      Array.from({ length: 11 }, (_, n) => `p${n}@northwind.example`).join(', '),
+    ],
+  ])('refuses a Cc line with %s', async (_label, cc) => {
+    expect((await compose({ cc })).status).toBe(400);
+    expect(await prisma.sandboxMessage.count({ where: { userId: owner } })).toBe(0);
+  });
+
+  it('takes an empty Cc line as nobody', async () => {
+    const res = await compose({ cc: '  ' });
+    expect(res.status).toBe(201);
+    expect((await sandboxThread(res.body.threadId)).messages[0].cc).toBeNull();
   });
 });
