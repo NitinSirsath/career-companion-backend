@@ -19,6 +19,7 @@ export const AIAccessReasonSchema = z.enum([
   'PROVIDER_UNSUPPORTED',
   'KEY_UNREADABLE',
   'RATE_LIMITED',
+  'PROVIDER_BUSY',
   'PROVIDER_UNAVAILABLE',
   'SAFETY_LIMIT',
   'PAUSED',
