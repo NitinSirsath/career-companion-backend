@@ -103,7 +103,7 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
         id: 'gemini-2.5-flash-lite',
         displayName: 'Gemini 2.5 Flash-Lite',
         roles: ['fast'],
-        recommendedFor: ['fast'],
+        recommendedFor: [],
         temperature: 0.1,
         reasoning: { thinkingBudget: 0 },
         structuredOutput: 'gemini_schema',
@@ -115,7 +115,7 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
         id: 'gemini-2.5-flash',
         displayName: 'Gemini 2.5 Flash',
         roles: ['fast', 'detailed'],
-        recommendedFor: ['detailed'],
+        recommendedFor: [],
         temperature: 0.1,
         reasoning: { thinkingBudget: 0 },
         structuredOutput: 'gemini_schema',
@@ -123,13 +123,14 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
         retiresOn: null,
         evaluation: null,
       },
-      // Google limits 2.5 models to projects that used them before; new keys need these.
+      // Google serves the 2.5 models only to keys that used them before: a new key gets "not
+      // found" for both, so the Gemini 3 models are the recommended ones.
       // Gemini 3 models keep their default temperature and cannot turn thinking off.
       {
         id: 'gemini-3.5-flash-lite',
         displayName: 'Gemini 3.5 Flash-Lite',
         roles: ['fast'],
-        recommendedFor: [],
+        recommendedFor: ['fast'],
         temperature: null,
         reasoning: { thinkingLevel: 'minimal' },
         structuredOutput: 'gemini_schema',
@@ -141,7 +142,7 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
         id: 'gemini-3.8-flash',
         displayName: 'Gemini 3.8 Flash',
         roles: ['fast', 'detailed'],
-        recommendedFor: [],
+        recommendedFor: ['detailed'],
         temperature: null,
         reasoning: { thinkingLevel: 'low' },
         structuredOutput: 'gemini_schema',
