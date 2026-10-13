@@ -60,13 +60,15 @@ export class AIOutcomeUnknownError extends TerminalAIError {
 
 /**
  * Career Companion's classification of any provider failure. Access kinds are refusals made
- * before any work was done; OUTCOME_UNKNOWN may have been processed and charged.
+ * before any work was done, and so are RATE_LIMITED and PROVIDER_BUSY (the provider answered that
+ * it is overloaded); OUTCOME_UNKNOWN may have been processed and charged.
  */
 export type FailureKind =
   | 'KEY_REJECTED'
   | 'ACCOUNT_OR_BILLING'
   | 'MODEL_UNAVAILABLE'
   | 'RATE_LIMITED'
+  | 'PROVIDER_BUSY'
   | 'OUTCOME_UNKNOWN'
   | 'INVALID_OUTPUT'
   | 'INVALID_REQUEST';
@@ -77,11 +79,22 @@ export const ACCESS_FAILURE_KINDS = [
   'MODEL_UNAVAILABLE',
 ] as const;
 
+/** Refusals that pass by themselves: the user's AI work pauses and is tried again later. */
+export const PAUSE_FAILURE_KINDS = ['RATE_LIMITED', 'PROVIDER_BUSY'] as const;
+
+/** Every refusal made before any work was done: the claim is released and no attempt is used. */
+export const REFUSAL_KINDS = [...ACCESS_FAILURE_KINDS, ...PAUSE_FAILURE_KINDS] as const;
+export type RefusalKind = (typeof REFUSAL_KINDS)[number];
+
+export const isRefusal = (kind: string | undefined): kind is RefusalKind =>
+  kind !== undefined && (REFUSAL_KINDS as readonly string[]).includes(kind);
+
 const FAILURE_MESSAGES: Record<FailureKind, string> = {
   KEY_REJECTED: 'AI provider rejected the API key',
   ACCOUNT_OR_BILLING: 'AI provider refused the request for this account',
   MODEL_UNAVAILABLE: 'AI model is not available to this key',
   RATE_LIMITED: 'AI provider rejected request; retry after cooldown',
+  PROVIDER_BUSY: 'AI provider is busy; retry after cooldown',
   OUTCOME_UNKNOWN: 'AI provider outcome unknown; reconciliation required',
   INVALID_OUTPUT: 'AI provider returned malformed structured data',
   INVALID_REQUEST: 'AI provider rejected request',
@@ -111,7 +124,10 @@ export class ProviderFailure extends AIProviderError {
       usage?: { inputTokens: number | null; outputTokens: number | null };
     } = {},
   ) {
-    super(details.message ?? FAILURE_MESSAGES[kind], kind === 'RATE_LIMITED');
+    super(
+      details.message ?? FAILURE_MESSAGES[kind],
+      (PAUSE_FAILURE_KINDS as readonly string[]).includes(kind),
+    );
     this.name = 'ProviderFailure';
     this.status = details.status;
     this.providerCode =
@@ -133,6 +149,7 @@ export type AccessReason =
   | 'PROVIDER_UNSUPPORTED'
   | 'KEY_UNREADABLE'
   | 'RATE_LIMITED'
+  | 'PROVIDER_BUSY'
   | 'PROVIDER_UNAVAILABLE'
   | 'SAFETY_LIMIT'
   | 'PAUSED';
