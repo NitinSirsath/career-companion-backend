@@ -269,6 +269,7 @@ describe('replying from the mail details page in dev mode', () => {
     ).toBe(1);
   });
 });
+
 describe('a reply to all in dev mode', () => {
   const copied = { cc: `${DANIEL},  ${LENA}` };
 
