@@ -14,7 +14,9 @@ const { spawnSync } = require('node:child_process');
 const { Client } = require('pg');
 const { assertTestDatabase } = require('../dist/utils/testDatabase');
 
-const NEW_MIGRATION = '20261002120000_user_provided_ai';
+// The migration under test, and every later migration that changes what it created. The legacy
+// lane holds none of them; the upgrade applies them together.
+const NEW_MIGRATIONS = ['20261002120000_user_provided_ai', '20261013100000_ai_provider_busy'];
 const NEW_UNIQUES = ['ai_configurations_pkey', 'ai_usage_days_pkey'];
 const backend = path.resolve(__dirname, '..');
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-ai-migrate-'));
@@ -162,7 +164,7 @@ async function upgradeLane(url) {
   fs.mkdirSync(path.join(legacy, 'migrations'), { recursive: true });
   fs.copyFileSync(path.join(backend, 'prisma/schema.prisma'), path.join(legacy, 'schema.prisma'));
   for (const entry of fs.readdirSync(path.join(backend, 'prisma/migrations')))
-    if (entry !== NEW_MIGRATION)
+    if (!NEW_MIGRATIONS.includes(entry))
       fs.cpSync(
         path.join(backend, 'prisma/migrations', entry),
         path.join(legacy, 'migrations', entry),
