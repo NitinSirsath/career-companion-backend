@@ -182,6 +182,7 @@ See [STABILIZATION.md](STABILIZATION.md) for rollout and support.
   - `operations.ts`: the ledger;
   - `usage.ts`: safety limit, counts, cooldown;
   - `offer.ts`: offers waiting mail to the worker, also by itself when a pause ends (`ai-resume-job`);
+  - `waiting.ts`: "Read waiting mails now";
   - `credentials.ts`: key sealing;
   - `settings.ts`: the settings API.
 - `src/eval/ai/`: the manual evaluation runner (`npm run ai:eval`). See its README.
