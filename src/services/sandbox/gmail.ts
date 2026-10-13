@@ -6,7 +6,9 @@
  */
 import { gmail_v1 } from 'googleapis';
 import { prisma } from '../../db/prisma';
-import { snippetOf, toGmailMessage } from './message';
+import { AppError } from '../../errors';
+import { deliverSentMail } from './mailbox';
+import { SENT_LABELS, fromRawMail, snippetOf, toGmailMessage } from './message';
 
 const DAY_MS = 86_400_000;
 const DEFAULT_PAGE = 100;
@@ -90,6 +92,26 @@ async function getMessage(
   if (!message) throw gmailError(404, 'Requested entity was not found.');
   return toGmailMessage(message, params.format, params.metadataHeaders);
 }
+
+/**
+ * A mail the app sends for the user: it lands in the sandbox Sent folder, in its conversation.
+ * Nothing leaves the app. Gmail refuses a mail it cannot read, and so does the sandbox.
+ */
+async function sendMessage(
+  userId: string,
+  params: gmail_v1.Params$Resource$Users$Messages$Send,
+): Promise<gmail_v1.Schema$Message> {
+  const { raw, threadId } = params.requestBody ?? {};
+  const mail = raw ? fromRawMail(raw) : null;
+  if (!mail || !threadId) throw gmailError(400, 'Invalid message');
+  try {
+    const sent = await deliverSentMail(userId, threadId, mail);
+    return { id: sent.id, threadId: sent.threadId, labelIds: SENT_LABELS };
+  } catch (err) {
+    if (err instanceof AppError && err.status === 404)
+      throw gmailError(404, 'Requested entity was not found.');
+    throw err;
+  }
 
 /** Every sandbox mail is one history record: it was added. Labels never change afterwards. */
 async function listHistory(
@@ -198,6 +220,9 @@ export function sandboxGmail(userId: string): gmail_v1.Gmail {
         }),
         get: async (params: gmail_v1.Params$Resource$Users$Messages$Get) => ({
           data: await getMessage(userId, params),
+        }),
+        send: async (params: gmail_v1.Params$Resource$Users$Messages$Send) => ({
+          data: await sendMessage(userId, params),
         }),
         attachments: {
           // Sandbox mail has no attached files yet.
