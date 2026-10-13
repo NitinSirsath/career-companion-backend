@@ -52,7 +52,10 @@ If a migration fails, keep workers stopped. Reconcile the identified records wit
 | --- | --- |
 | `job_waiting_for_ai` (reason) | Email waits for AI access |
 | `ai_call_deferred` | Cooldown, safety limit or pause hit at claim time |
-| `ai_call_failed` (kind, status, providerCode) | Provider refusal or failure |
+| `ai_call_failed` (kind, status, providerCode) | Provider refusal or failure. `PROVIDER_BUSY` = the provider answered 503 or 504: the mail waits, nothing is held |
+| `ai_resumed_after_pause` (offered) | A pause ended and the waiting mail was offered again by itself |
+| `ai_read_waiting_requested` (endedPause, offered) | The user chose "Read waiting mails now" |
+| `ai_resume_not_queued` | The automatic read could not be queued; the next sync offers the mail |
 | `ai_access_checked` (result, kind) | Verification on save or "Check again" |
 | `ai_settings_saved` / `ai_settings_removed` | Configuration changes |
 | `ai_sample_test` | Sample test outcome and tokens |
