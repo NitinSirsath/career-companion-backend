@@ -347,6 +347,7 @@ describe('COM-125 relevance batch pure behavior', () => {
               emailId: email.id,
               operation: 'classification',
               version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH,
+            },
           },
         }),
       ).toMatchObject({ status: 'PENDING', attempts: 0 });
