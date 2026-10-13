@@ -4,8 +4,16 @@
  */
 import { prisma } from '../db/prisma';
 import { AppError } from '../errors';
+import { devMode } from '../utils/config';
 import { encryptToken } from '../utils/gmailTokenEncryption';
 import { nextScheduledSyncAt } from './gmailSchedule';
+
+/**
+ * True when replies can be sent from this connection: the Google grant covers sending. The
+ * dev-mode sandbox mailbox can always send; nothing leaves the app there.
+ */
+export const maySend = (connection: { status: string; canSend: boolean }): boolean =>
+  connection.status === 'CONNECTED' && (devMode() || connection.canSend);
 
 /** Connection and sync state for the Gmail page. */
 export async function readGmailStatus(userId: string) {
@@ -21,6 +29,7 @@ export async function readGmailStatus(userId: string) {
       syncLeaseUntil: true,
       syncError: true,
       syncLookbackDays: true,
+      canSend: true,
       // accessToken and refreshToken are deliberately NOT selected.
     },
   });
@@ -35,6 +44,7 @@ export async function readGmailStatus(userId: string) {
       unscannedGap: null,
       nextScheduledSyncAt: null,
       syncLookbackDays: 1,
+      canSend: false,
     };
   }
 
@@ -58,6 +68,7 @@ export async function readGmailStatus(userId: string) {
           }
         : null,
     syncLookbackDays: connection.syncLookbackDays,
+    canSend: maySend(connection),
   };
 }
 
@@ -68,7 +79,12 @@ export async function readGmailStatus(userId: string) {
 export async function saveGmailGrant(
   userId: string,
   gmailEmail: string,
-  grant: { accessToken: string; refreshToken?: string | null; expiryDate?: number | null },
+  grant: {
+    accessToken: string;
+    refreshToken?: string | null;
+    expiryDate?: number | null;
+    canSend?: boolean;
+  },
 ): Promise<boolean> {
   const previous = await prisma.gmailConnection.findUnique({ where: { userId } });
   if (previous && previous.gmailEmail.toLowerCase() !== gmailEmail.toLowerCase()) return false;
@@ -79,6 +95,8 @@ export async function saveGmailGrant(
     syncStatus: 'IDLE',
     accessToken: encryptToken(grant.accessToken),
     accessTokenExpiresAt: grant.expiryDate ? new Date(grant.expiryDate) : null,
+    // The new grant replaces the old one, so what it allows replaces what the old one allowed.
+    canSend: grant.canSend ?? false,
   } as const;
   const refreshToken = grant.refreshToken ? encryptToken(grant.refreshToken) : null;
 
@@ -126,6 +144,7 @@ export async function clearGmailConnection(userId: string): Promise<void> {
       accessToken: '', // The column is NOT NULL; an empty value is not a valid encrypted token.
       accessTokenExpiresAt: null,
       refreshToken: null,
+      canSend: false,
       lastHistoryId: null,
       syncClaim: null,
       syncLeaseUntil: null,
