@@ -112,6 +112,7 @@ async function sendMessage(
       throw gmailError(404, 'Requested entity was not found.');
     throw err;
   }
+}
 
 /** Every sandbox mail is one history record: it was added. Labels never change afterwards. */
 async function listHistory(
