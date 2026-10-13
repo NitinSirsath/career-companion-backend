@@ -113,8 +113,9 @@ afterAll(async () => {
 
 describe('no key or email content leaks anywhere', () => {
   it('stays out of logs, responses and storage on every path', async () => {
-    // Save: rejected (leaky SDK error), malformed key, then verified.
-    get.mockRejectedValueOnce(
+    // Save: rejected (leaky SDK error), malformed key, then verified. The key check is a tiny
+    // real request, so its errors and answers come from the same call as real work.
+    generateContent.mockRejectedValueOnce(
       leakyError(400, { status: 'INVALID_ARGUMENT', details: [{ reason: 'API_KEY_INVALID' }] }),
     );
     expect(
@@ -143,7 +144,10 @@ describe('no key or email content leaks anywhere', () => {
         })
       ).status,
     ).toBe(400);
-    get.mockResolvedValue({ name: 'models/x' });
+    // The answer of a key check is never read, so an answer that echoes both leaks nothing.
+    generateContent
+      .mockResolvedValueOnce({ text: `OK ${KEY} ${CONTENT}` })
+      .mockResolvedValueOnce({ text: `OK ${KEY} ${CONTENT}` });
     expect(
       (
         await call('put', '/api/ai/settings', {
@@ -155,12 +159,16 @@ describe('no key or email content leaks anywhere', () => {
     ).toBe(200);
 
     // Check again: inconclusive and rejected, both with leaky errors.
-    get.mockRejectedValueOnce(leakyError(503));
+    generateContent.mockRejectedValueOnce(leakyError(503));
     await call('post', '/api/ai/settings/check');
-    get.mockRejectedValueOnce(leakyError(403, { status: 'PERMISSION_DENIED' }));
+    generateContent.mockRejectedValueOnce(leakyError(403, { status: 'PERMISSION_DENIED' }));
     await call('post', '/api/ai/settings/check');
-    get.mockResolvedValue({ name: 'models/x' });
+    generateContent
+      .mockResolvedValueOnce({ text: `OK ${KEY} ${CONTENT}` })
+      .mockResolvedValueOnce({ text: `OK ${KEY} ${CONTENT}` });
     await call('post', '/api/ai/settings/check');
+    // Google is never asked to describe a model: a description proves nothing about the key.
+    expect(get).not.toHaveBeenCalled();
 
     // Sample test: provider error, then output that echoes the email text but is not usable.
     generateContent.mockRejectedValueOnce(leakyError(500));
@@ -174,7 +182,8 @@ describe('no key or email content leaks anywhere', () => {
       [403, { status: 'PERMISSION_DENIED' }],
       [404, {}],
       [429, { status: 'RESOURCE_EXHAUSTED' }],
-      [503, {}],
+      [503, { status: 'UNAVAILABLE' }],
+      [504, { status: 'DEADLINE_EXCEEDED' }],
       [500, {}],
       [400, { status: 'INVALID_ARGUMENT' }],
     ] as const) {
