@@ -36,9 +36,9 @@ vi.mock('googleapis', () => ({
 }));
 
 import { app } from '../index';
-import { MailThreadSchema } from '../contracts';
+import { MailThreadSchema, mailboxKey } from '../contracts';
 import { prisma } from '../db/prisma';
-import { buildReplyMail, recipientHeader, replySubject } from '../services/mailReply';
+import { buildReplyMail, copyHeader, recipientHeader, replySubject } from '../services/mailReply';
 import { replyTarget } from '../services/mailbox';
 import { fromRawMail } from '../services/sandbox/message';
 import { encryptToken } from '../utils/gmailTokenEncryption';
@@ -76,6 +76,14 @@ const FROM_RECRUITER = {
   'Message-ID': '<m1@northwind.example>',
 };
 const recruiterMail = message('m1', ['INBOX'], FROM_RECRUITER);
+const DANIEL = 'Daniel Okafor <daniel@northwind.example>';
+const LENA = '"Fischer, Lena" <lena@northwind.example>';
+/** The recruiter's mail with two more people on it: one beside the user in To, one in Cc. */
+const mailToSeveral = message('m1', ['INBOX'], {
+  ...FROM_RECRUITER,
+  To: `${OWNER}, ${DANIEL}`,
+  Cc: LENA,
+});
 const thread = (...messages: object[]) => ({ id: THREAD, messages });
 /** A failure shaped like Google's own client's. */
 const googleError = (status: number, reason?: string) =>
@@ -94,8 +102,11 @@ const connect = (canSend: boolean) =>
       refreshToken: encryptToken('refresh'),
     },
   });
-const reply = (replyId = randomUUID(), text = TEXT) =>
-  request(app).post(`/api/mailbox/threads/${THREAD}/replies`).set(as).send({ replyId, text });
+const reply = (replyId = randomUUID(), text = TEXT, more: object = {}) =>
+  request(app)
+    .post(`/api/mailbox/threads/${THREAD}/replies`)
+    .set(as)
+    .send({ replyId, text, ...more });
 const connection = () => prisma.gmailConnection.findUniqueOrThrow({ where: { userId: owner } });
 const claims = () => prisma.mailReply.findMany({ where: { userId: owner } });
 /** The mail handed to Gmail's send call, read back. */
@@ -144,6 +155,7 @@ describe('who a reply goes to', () => {
         message('m4', ['SENT'], { From: OWNER }),
         message('m5', ['DRAFT'], { From: 'draft@nowhere.example' }),
       ),
+      OWNER,
     );
     expect(target).toMatchObject({
       to: 'Dana Lee <dana@northwind.example>',
@@ -161,19 +173,52 @@ describe('who a reply goes to', () => {
           'Reply-To': 'priya@northwind.example',
         }),
       ),
+      OWNER,
     );
     expect(target?.to).toBe('priya@northwind.example');
   });
 
+  it('names everyone else on the answered mail, once each, without the user and the sender', () => {
+    const target = replyTarget(
+      thread(
+        message('m1', ['INBOX'], {
+          ...FROM_RECRUITER,
+          To: `Alex Example <${OWNER.toUpperCase()}>, ${DANIEL}`,
+          Cc: `${LENA}, DANIEL@northwind.example, priya@northwind.example, undisclosed-recipients:;`,
+        }),
+      ),
+      OWNER,
+    );
+    expect(target?.to).toBe('Priya Raman <priya@northwind.example>');
+    expect(target?.cc).toEqual([DANIEL, LENA]);
+  });
+
+  it('knows the user’s own mailbox under a +tag, and a Gmail mailbox with other dots', () => {
+    expect(mailboxKey('Alex <A.Lex+Jobs@Gmail.com>')).toBe(mailboxKey('alex@gmail.com'));
+    expect(mailboxKey('a.lex@northwind.example')).not.toBe(mailboxKey('alex@northwind.example'));
+    const to = (line: string, own: string) =>
+      replyTarget(thread(message('m1', ['INBOX'], { ...FROM_RECRUITER, To: line })), own)?.cc;
+    expect(to(`owner+jobs@mail-reply-gmail.test, ${DANIEL}`, OWNER)).toEqual([DANIEL]);
+    expect(to(`al.ex+x@gmail.com, ${DANIEL}`, 'alex@gmail.com')).toEqual([DANIEL]);
+  });
+
+  it('has nobody else when the mail went to the user alone, and looks only at the answered mail', () => {
+    expect(replyTarget(thread(recruiterMail), OWNER)?.cc).toEqual([]);
+    const later = message('m2', ['INBOX'], { ...FROM_RECRUITER, 'Message-ID': '<m2@n.example>' });
+    expect(replyTarget(thread(mailToSeveral, later), OWNER)?.cc).toEqual([]);
+  });
+
   it('has nobody to reply to when only the user wrote, or the sender has no address', () => {
-    expect(replyTarget(thread(message('m1', ['SENT'], { From: OWNER })))).toBeNull();
-    expect(replyTarget(thread(message('m1', ['INBOX'], { From: 'undisclosed' })))).toBeNull();
-    expect(replyTarget(thread())).toBeNull();
+    expect(replyTarget(thread(message('m1', ['SENT'], { From: OWNER })), OWNER)).toBeNull();
+    expect(
+      replyTarget(thread(message('m1', ['INBOX'], { From: 'undisclosed' })), OWNER),
+    ).toBeNull();
+    expect(replyTarget(thread(), OWNER)).toBeNull();
   });
 });
 
 describe('the mail the app builds', () => {
-  const target = replyTarget(thread(recruiterMail))!;
+  const target = replyTarget(thread(recruiterMail), OWNER)!;
 
   it('is a plain-text mail in the same thread, with the answered mail quoted', () => {
     const mail = buildReplyMail('Thursday works.\nAlex', target)!;
@@ -191,6 +236,34 @@ describe('the mail the app builds', () => {
     expect(Buffer.from(body, 'base64').toString('utf8')).toBe(
       'Thursday works.\nAlex\n\nOn Mon, 12 Oct 2026 10:02:00 GMT, Priya Raman <priya@northwind.example> wrote:\n> Please send dates.',
     );
+  });
+
+  it('puts the other people in Cc for a reply to all, and nobody for a reply to the sender', () => {
+    const several = replyTarget(thread(mailToSeveral), OWNER)!;
+    const head = (mail: string | null) => mail!.split('\r\n\r\n')[0].split('\r\n');
+    expect(head(buildReplyMail('Ok', several, true)).slice(0, 4)).toEqual([
+      'To: Priya Raman <priya@northwind.example>',
+      'Cc: Daniel Okafor <daniel@northwind.example>,',
+      ' "Fischer, Lena" <lena@northwind.example>',
+      'Subject: Re: Interview: first round',
+    ]);
+    expect(fromRawMail(b64(buildReplyMail('Ok', several, true)!))?.cc).toBe(`${DANIEL}, ${LENA}`);
+    expect(head(buildReplyMail('Ok', several, false)).filter((line) => /^cc:/i.test(line))).toEqual(
+      [],
+    );
+    // Nobody else on the mail: a reply to all is the same mail as a reply to the sender.
+    expect(buildReplyMail('Ok', target, true)).toBe(buildReplyMail('Ok', target, false));
+  });
+
+  it('keeps a name outside ASCII and a line break out of the Cc line', () => {
+    expect(
+      copyHeader([
+        'Søren Ærø <soren@blabar.example>',
+        'Dana <dana@northwind.example>\r\nBcc: attacker@evil.example',
+        'søren@blåbær.example',
+      ]),
+    ).toBe('soren@blabar.example,\r\n Dana <dana@northwind.example> Bcc: attacker@evil.example');
+    expect(copyHeader([])).toBeNull();
   });
 
   it('does not stack "Re:" and keeps earlier references', () => {
@@ -234,7 +307,7 @@ describe('the mail the app builds', () => {
   });
 
   it('sends without a quote when the answered mail has no plain text, and not at all without an address', () => {
-    const noText = replyTarget(thread(message('m1', ['INBOX'], FROM_RECRUITER, null)))!;
+    const noText = replyTarget(thread(message('m1', ['INBOX'], FROM_RECRUITER, null)), OWNER)!;
     expect(fromRawMail(b64(buildReplyMail('Ok', noText)!))?.body).toBe('Ok');
     expect(recipientHeader('Søren <søren@blåbær.example>')).toBeNull();
     expect(buildReplyMail('Ok', { ...target, to: 'Søren <søren@blåbær.example>' })).toBeNull();
@@ -287,6 +360,37 @@ describe('sending through Gmail', () => {
       (await request(app).get(`/api/mailbox/threads/${THREAD}`).set(as)).body,
     );
     expect(read.replyTo).toBe('Priya Raman <priya@northwind.example>');
+    expect(read.replyCc).toEqual([]);
+  });
+
+  it('says who else a reply to all reaches, and sends to them only when asked to', async () => {
+    mocks.threadsGet.mockResolvedValue({ data: thread(mailToSeveral) });
+    const read = MailThreadSchema.parse(
+      (await request(app).get(`/api/mailbox/threads/${THREAD}`).set(as)).body,
+    );
+    expect(read.replyCc).toEqual([DANIEL, LENA]);
+
+    expect((await reply(randomUUID(), TEXT, { toAll: true })).status).toBe(200);
+    expect(handedToGmail().mail).toMatchObject({
+      to: 'Priya Raman <priya@northwind.example>',
+      cc: `${DANIEL}, ${LENA}`,
+    });
+
+    for (const more of [{}, { toAll: false }]) {
+      mocks.send.mockClear();
+      expect((await reply(randomUUID(), TEXT, more)).status).toBe(200);
+      expect(handedToGmail().mail?.cc).toBeUndefined();
+      expect(handedToGmail().text).not.toMatch(/^cc:/im);
+    }
+  });
+
+  it('refuses a request that names the receivers itself', async () => {
+    mocks.threadsGet.mockResolvedValue({ data: thread(mailToSeveral) });
+    for (const more of [{ toAll: 'yes' }, { cc: 'attacker@evil.example' }, { to: [DANIEL] }]) {
+      expect((await reply(randomUUID(), TEXT, more)).status).toBe(400);
+    }
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(await claims()).toEqual([]);
   });
 
   it('hands Gmail one mail for the thread, to the sender, and answers with its ID', async () => {
