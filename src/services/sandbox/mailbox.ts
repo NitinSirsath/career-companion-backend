@@ -25,7 +25,7 @@ import { AppError } from '../../errors';
 import { PAUSE_ISSUES } from '../ai/usage';
 import { lockUser, LOCK_NAMESPACE } from '../../utils/advisoryLock';
 import { sandboxMailResults, sentByUser } from './appResult';
-import { RECEIVED_LABELS, SENT_LABELS, snippetOf } from './message';
+import { RECEIVED_LABELS, SENT_LABELS, snippetOf, type RawMail } from './message';
 
 const PAGE_SIZE = 25;
 const SENDER_LIST_SIZE = 50;
@@ -122,6 +122,29 @@ export async function replyInSandbox(
     inReplyTo: answered.messageId,
     referenceIds: [answered.referenceIds, answered.messageId].filter(Boolean).join(' '),
     body: replyBody(input.body, answered),
+  });
+}
+
+/**
+ * A mail the app sent for the user through Gmail's send call (a reply written on the mail details
+ * page). It is stored as the user's own sent mail of that conversation. The text is what the app
+ * built, quote included, so nothing is added here.
+ */
+export async function deliverSentMail(
+  userId: string,
+  threadId: string,
+  mail: RawMail,
+): Promise<SandboxSentResponse> {
+  await threadMessages(userId, threadId);
+  return deliver(userId, {
+    threadId,
+    labelIds: SENT_LABELS,
+    sender: await userAddress(userId),
+    recipient: mail.to,
+    subject: mail.subject,
+    inReplyTo: mail.inReplyTo,
+    referenceIds: mail.references,
+    body: mail.body.slice(0, BODY_LIMIT),
   });
 }
 

@@ -22,6 +22,7 @@ model User {
   gmailConnection     GmailConnection?
   emails              Email[]
   outgoingEmails      OutgoingEmail[]
+  mailReplies         MailReply[]
   aiConfiguration     AIConfiguration?
   aiBatches           AIBatch[]
   aiUsageDays         AIUsageDay[]
@@ -165,6 +166,24 @@ model OutgoingEmail {
   @@unique([userId, gmailMessageId])
   @@index([userId, threadId])
   @@map("outgoing_emails")
+}
+
+/// One reply the user sent from the app, kept so that the same reply is never sent twice. The row
+/// is written before the send call; `gmailMessageId` and `sentAt` are set once Gmail confirmed the
+/// mail. A row without them is a send whose outcome is not known. No text is ever stored here.
+model MailReply {
+  userId         String    @db.Uuid
+  /// Made by the page for this one reply.
+  id             String    @db.Uuid
+  threadId       String
+  gmailMessageId String?
+  sentAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, id])
+  @@map("mail_replies")
 }
 
 /// One message in a dev-mode user's sandbox mailbox, which stands in for their Gmail account

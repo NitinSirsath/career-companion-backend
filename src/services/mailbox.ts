@@ -46,7 +46,7 @@ async function gmailConnected(userId: string) {
 }
 
 /** Runs one bounded read against Gmail and turns its failures into answers the user can act on. */
-async function readGmail<T>(
+export async function readGmail<T>(
   userId: string,
   budgetMs: number,
   work: (gmail: gmail_v1.Gmail, signal: AbortSignal) => Promise<T>,
@@ -66,7 +66,7 @@ async function readGmail<T>(
   }
 }
 
-const header = (message: gmail_v1.Schema$Message, name: string) =>
+export const header = (message: gmail_v1.Schema$Message, name: string) =>
   message.payload?.headers?.find((h) => h.name?.toLowerCase() === name)?.value ?? null;
 
 function messageDate(message: gmail_v1.Schema$Message) {
@@ -154,7 +154,48 @@ export async function readMailThread(userId: string, threadId: string): Promise<
   const messages = (thread.messages ?? [])
     .filter((message) => !message.labelIds?.includes('DRAFT'))
     .map((message) => toMailMessage(message, names));
-  return { threadId, subject: messages[0]?.subject ?? null, messages };
+  return {
+    threadId,
+    subject: messages[0]?.subject ?? null,
+    messages,
+    replyTo: replyTarget(thread)?.to ?? null,
+  };
+}
+
+/** The mail a reply from the app answers, and where that reply goes. */
+export interface ReplyTarget {
+  /** The answered mail's Reply-To when it has one, else its sender, as Gmail holds it. */
+  to: string;
+  subject: string | null;
+  /** The answered mail's Message-ID and References headers, which keep the reply in the thread. */
+  messageId: string | null;
+  references: string | null;
+  from: string | null;
+  sentAt: Date | null;
+  /** The answered mail's plain text, quoted below the reply. */
+  text: string | null;
+}
+
+/**
+ * The newest mail of the thread that someone else wrote: a reply from the app answers that one.
+ * Null when nobody else wrote, so the app never writes to an address the user did not hear from.
+ */
+export function replyTarget(thread: gmail_v1.Schema$Thread): ReplyTarget | null {
+  const answered = (thread.messages ?? [])
+    .filter((message) => !message.labelIds?.some((label) => label === 'DRAFT' || label === 'SENT'))
+    .pop();
+  const to = answered && (header(answered, 'reply-to') || header(answered, 'from'));
+  if (!answered || !to || !to.includes('@')) return null;
+  const date = answered.internalDate ? new Date(Number(answered.internalDate)) : null;
+  return {
+    to,
+    subject: header(answered, 'subject'),
+    messageId: header(answered, 'message-id'),
+    references: header(answered, 'references'),
+    from: header(answered, 'from'),
+    sentAt: date && !isNaN(date.getTime()) ? date : null,
+    text: readParts(answered.payload).text,
+  };
 }
 
 /** Label ID to the name to show: the user's own labels, and the system labels worth showing. */

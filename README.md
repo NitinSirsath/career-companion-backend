@@ -248,6 +248,18 @@ AI_TRIAGE_BATCH_ENABLED is **off by default**. Unset, empty, or false means off;
 
 When enabled, new unclassified emails are grouped into per-user triage jobs. The batch contract only sends bounded sender, subject, labels and preview metadata plus per-batch keys; no Gmail or database IDs are sent to the provider. The existing per-email extraction and matching path remains unchanged.
 
+### Sending a reply from the mail details page
+
+`POST /api/mailbox/threads/:threadId/replies` with `{ "replyId": "<uuid>", "text": "…" }` sends a plain-text reply into that Gmail thread, from the user's own Gmail (`services/mailReply.ts`).
+
+- **Permission:** connecting Gmail asks Google for `gmail.readonly` and `gmail.send`. `gmail_connections.canSend` holds what Google really granted, and `GET /api/gmail/status` reports it as `canSend`. A connection made before this change may only read: the send call answers 403 `GMAIL_SEND_NOT_ALLOWED` until the user connects again. `GET /api/gmail/connect?returnTo=/mails/<key>` returns to that mail afterwards. **Add the scope `gmail.send` on the OAuth consent screen of the Google Cloud project.**
+- **Who it goes to:** worked out from the thread (`replyTarget` in `services/mailbox.ts`): the newest mail from someone else, its `Reply-To` when it has one. The request carries no address. `GET /api/mailbox/threads/:threadId` reports it as `replyTo`.
+- **Sent once:** the page makes one `replyId` for each reply. It is written to `mail_replies` before the send call, and the same ID is answered from that row without sending. A clear "no" from Gmail (4xx) frees the ID. No answer (5xx, timeout, lost connection) is 502 `MAIL_REPLY_UNCONFIRMED`: the ID stays taken, and the app never sends again by itself.
+- **Replied at once:** in a conversation the app holds, the sent message is noted in `outgoing_emails` right away, as the sync does for a reply written in Gmail.
+- **Privacy:** the text goes to Gmail and is not stored or logged. `mail_replies` holds IDs and times only.
+- **Dev mode:** the same code runs. The sandbox mailbox answers Gmail's send call and keeps the mail in its Sent folder; no real mail is sent.
+- **Logs:** `mail_reply_sent`, `mail_reply_not_sent` (`outcome` = the error code), `mail_reply_not_recorded` (the mail went out but its note could not be written; the next sync notes it).
+
 ### Dev mode (`APP_MODE=dev`)
 
 One setting switches the app: `APP_MODE=prod` (the default, also when empty) or `APP_MODE=dev`. Dev mode is for manual testing with made-up mail, without a second account or live data. Only the emails are made up: they are read by the AI provider the test user connects, with a real key.
@@ -264,7 +276,7 @@ One setting switches the app: `APP_MODE=prod` (the default, also when empty) or 
 In dev mode every user has a **sandbox mailbox** that stands in for their Gmail account. No Google account or key is used, and nothing ever leaves the app.
 
 - **Send, then sync.** `POST /api/sandbox/messages` puts a mail from any typed address in the user's sandbox inbox. It writes only to `sandbox_messages`. The mail reaches the app when a sync pulls it, with the same code as real Gmail mail: manual sync, scheduled sync, the look-back window, the history checkpoint, "new mails only" and the noting of the user's replies all run unchanged (`services/gmailSync.ts` is not touched).
-- **How:** every Gmail call goes through `withGmail` (`services/gmailClient.ts`). In dev mode it hands the caller `services/sandbox/gmail.ts`, which answers the calls the app makes (`getProfile`, `messages.list|get`, `history.list`, `threads.list|get`, `labels.list`, `attachments.get`) from the sandbox tables in Gmail's own response shapes. No Google client is built in dev mode. A test fails when the app starts to make a Gmail call the sandbox does not answer.
+- **How:** every Gmail call goes through `withGmail` (`services/gmailClient.ts`). In dev mode it hands the caller `services/sandbox/gmail.ts`, which answers the calls the app makes (`getProfile`, `messages.list|get|send`, `history.list`, `threads.list|get`, `labels.list`, `attachments.get`) from the sandbox tables in Gmail's own response shapes. No Google client is built in dev mode. A test fails when the app starts to make a Gmail call the sandbox does not answer.
 - **Same shape as Gmail:** a sandbox message has Gmail-style IDs, a history number, labels (`INBOX` + `CATEGORY_PERSONAL`, or `SENT`), the usual headers, and its text as a plain part and an HTML part (`services/sandbox/message.ts`). A reply quotes the mail it answers.
 - **Connect:** in dev mode `GET /api/gmail/connect` connects the sandbox mailbox at once and returns to the Gmail page. `/api/gmail/callback` answers 404. Disconnect calls nothing at Google.
 - **API** (`/api/sandbox`, 404 before login in prod mode): `GET /threads?folder=inbox|sent`, `GET /threads/:id` (both sides with text and what the app did with each mail), `POST /messages` (new mail to the user), `POST /threads/:id/replies` (`as: "me" | "them"`), `GET /senders` (addresses used before), `POST /reset` (`{ "confirm": "RESET" }`: empties the mailbox and what the app made from it, keeps the user, the AI settings and the connection).

@@ -91,3 +91,48 @@ export function toGmailMessage(
     },
   };
 }
+
+/** What the sandbox keeps of a mail handed to Gmail's send call. */
+export interface RawMail {
+  to: string;
+  subject: string;
+  inReplyTo?: string;
+  references?: string;
+  body: string;
+}
+
+/** "=?UTF-8?B?…?=" words in a header, as a mail program writes text outside ASCII. */
+const decodeWords = (value: string) =>
+  value
+    .replace(/\?=\s+=\?/g, '?==?')
+    .replace(/=\?UTF-8\?B\?([A-Za-z0-9+/=]*)\?=/gi, (_word, data: string) =>
+      Buffer.from(data, 'base64').toString('utf8'),
+    );
+
+/**
+ * Reads the mail the app hands to Gmail's send call (`raw`: a whole plain-text mail, base64url),
+ * the way Gmail would. Null when it is not a mail the app writes: the caller refuses it.
+ */
+export function fromRawMail(raw: string): RawMail | null {
+  const mail = Buffer.from(raw, 'base64url').toString('utf8');
+  const split = mail.indexOf('\r\n\r\n');
+  if (split < 0) return null;
+  const headers = new Map<string, string>();
+  // A header line that starts with a space continues the line before it.
+  for (const line of mail
+    .slice(0, split)
+    .replace(/\r\n[ \t]+/g, ' ')
+    .split('\r\n')) {
+    const colon = line.indexOf(':');
+    if (colon > 0) headers.set(line.slice(0, colon).toLowerCase(), line.slice(colon + 1).trim());
+  }
+  const to = headers.get('to');
+  if (!to || headers.get('content-transfer-encoding') !== 'base64') return null;
+  return {
+    to: decodeWords(to),
+    subject: decodeWords(headers.get('subject') ?? ''),
+    inReplyTo: headers.get('in-reply-to'),
+    references: headers.get('references'),
+    body: Buffer.from(mail.slice(split + 4), 'base64').toString('utf8'),
+  };
+}
