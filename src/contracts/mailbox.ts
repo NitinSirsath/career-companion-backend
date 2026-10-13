@@ -1,6 +1,7 @@
 /**
  * The user's Gmail read live: nothing in these shapes is stored by Career Companion. Message
- * text is fetched from Gmail when the user opens a thread and is never kept or logged.
+ * text is fetched from Gmail when the user opens a thread and is never kept or logged. The text
+ * of a reply the user sends from here goes to Gmail and is not kept or logged either.
  */
 import { z } from 'zod';
 
@@ -62,8 +63,33 @@ export const MailThreadSchema = z.object({
   subject: z.string().nullable(),
   /** Oldest first, the user's own messages included. */
   messages: z.array(MailMessageSchema),
+  /**
+   * Who a reply sent from the app goes to: the newest mail from someone else, its Reply-To when
+   * it has one. Null when nobody else wrote in this thread, so there is nothing to reply to.
+   */
+  replyTo: z.string().nullable(),
 });
 export type MailThread = z.infer<typeof MailThreadSchema>;
+
+// ─── POST /api/mailbox/threads/:threadId/replies ────────────────────────────
+
+/** A reply is plain text. Far above any written reply; a longer text is refused, not cut. */
+export const MAIL_REPLY_TEXT_LIMIT = 20_000;
+
+export const SendMailReplyRequestSchema = z.strictObject({
+  /** Made by the page for this one reply. The same ID never sends a second mail. */
+  replyId: z.uuid(),
+  text: z.string().trim().min(1).max(MAIL_REPLY_TEXT_LIMIT),
+});
+export type SendMailReplyRequest = z.infer<typeof SendMailReplyRequestSchema>;
+
+export const SendMailReplyResponseSchema = z.object({
+  /** Gmail's ID of the sent message. */
+  id: z.string(),
+  threadId: z.string(),
+  sentAt: IsoDateTime,
+});
+export type SendMailReplyResponse = z.infer<typeof SendMailReplyResponseSchema>;
 
 /** Gmail IDs are short URL-safe tokens. */
 export const MailIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
