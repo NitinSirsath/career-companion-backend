@@ -200,6 +200,8 @@ model SandboxMessage {
   /// From and To headers.
   sender       String
   recipient    String
+  /// Cc header: the other people on the mail, as typed. Null when there are none.
+  cc           String?
   subject      String
   /// Message-ID header, and those of the earlier mails this one answers.
   messageId    String

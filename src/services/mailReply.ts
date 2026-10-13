@@ -2,8 +2,9 @@
  * A reply the user sends from the mail details page. It goes out through `withGmail`, the same
  * door as every Gmail read: the user's own Gmail in prod, the sandbox mailbox in dev mode.
  *
- * - The reply answers the newest mail from someone else and goes to that mail's sender. The
- *   request carries no address, so the app cannot write to anyone the user did not hear from.
+ * - The reply answers the newest mail from someone else and goes to that mail's sender. A reply
+ *   to all also goes to the other people on that mail. The request carries no address, so the app
+ *   cannot write to anyone who was not on the mail.
  * - A reply is sent once. Its own ID is written down before the send call; the same ID never
  *   sends a second mail, and nothing is ever sent again by the app itself.
  * - The text goes to Gmail and is not stored or logged. Only the IDs and the time are kept.
@@ -16,7 +17,7 @@ import { logError, logEvent, logWarn } from '../utils/log';
 import { googleStatus, withGmail } from './gmailClient';
 import { maySend } from './gmailConnection';
 import { gmailCallOptions } from './googleTransport';
-import { ReplyTarget, readGmail, replyTarget } from './mailbox';
+import { ReplyTarget, mailboxAddress, readGmail, replyTarget } from './mailbox';
 
 const READ_BUDGET_MS = 20_000;
 const SEND_BUDGET_MS = 30_000;
@@ -68,6 +69,15 @@ export function recipientHeader(to: string): string | null {
   return addresses.length ? addresses.join(', ') : null;
 }
 
+/**
+ * The Cc line of a reply to all, one address on each line so no line grows too long. Null when
+ * nobody else is on the mail.
+ */
+export function copyHeader(others: string[]): string | null {
+  const addresses = others.flatMap((entry) => recipientHeader(entry) ?? []);
+  return addresses.length ? addresses.join(`,${LINE} `) : null;
+}
+
 export const replySubject = (subject: string | null): string => {
   const value = oneLine(subject ?? '');
   return /^re:/i.test(value) ? value : `Re: ${value}`.trim();
@@ -85,10 +95,14 @@ export function replyBody(text: string, answered: ReplyTarget): string {
   return `${text}\n\n${when}${oneLine(answered.from ?? answered.to)} wrote:\n${quoted}`;
 }
 
-/** The reply as one plain-text mail (RFC 5322), the form Gmail's send call takes. */
-export function buildReplyMail(text: string, answered: ReplyTarget): string | null {
+/**
+ * The reply as one plain-text mail (RFC 5322), the form Gmail's send call takes. `toAll` puts the
+ * other people of the answered mail in Cc.
+ */
+export function buildReplyMail(text: string, answered: ReplyTarget, toAll = false): string | null {
   const to = recipientHeader(answered.to);
   if (!to) return null;
+  const cc = toAll ? copyHeader(answered.cc) : null;
   const messageId = answered.messageId && oneLine(answered.messageId);
   const references = [answered.references && oneLine(answered.references), messageId]
     .filter(Boolean)
@@ -96,6 +110,7 @@ export function buildReplyMail(text: string, answered: ReplyTarget): string | nu
   const body = Buffer.from(replyBody(text, answered), 'utf8').toString('base64');
   return [
     `To: ${to}`,
+    ...(cc ? [`Cc: ${cc}`] : []),
     `Subject: ${encodeHeaderText(replySubject(answered.subject))}`,
     ...(messageId ? [`In-Reply-To: ${messageId}`, `References: ${references}`] : []),
     'MIME-Version: 1.0',
@@ -256,8 +271,8 @@ export async function sendMailReply(
       );
       return found.data;
     });
-    const answered = replyTarget(thread);
-    const mail = answered && buildReplyMail(request.text, answered);
+    const answered = replyTarget(thread, await mailboxAddress(userId));
+    const mail = answered && buildReplyMail(request.text, answered, request.toAll === true);
     if (!mail)
       throw new AppError(
         409,

@@ -7,6 +7,30 @@ import { z } from 'zod';
 
 const IsoDateTime = z.iso.datetime({ offset: true });
 
+/**
+ * The addresses of a To or Cc header, each as written. Cut at the commas between addresses, not
+ * at a comma inside a quoted name.
+ */
+export const splitMailAddresses = (header: string): string[] =>
+  header
+    .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
+    .map((address) => address.trim())
+    .filter(Boolean);
+
+/** The mail address of `Name <address>` or of a bare address, in lower case. */
+export const mailAddressOf = (entry: string): string =>
+  (/<([^<>]+)>\s*$/.exec(entry)?.[1] ?? entry).trim().toLowerCase();
+
+/**
+ * What every address of one mailbox has in common. A `+tag` never names another mailbox, and
+ * Gmail also ignores dots before the @: `a.lex+jobs@gmail.com` is the mailbox `alex@gmail.com`.
+ */
+export function mailboxKey(entry: string): string {
+  const [local = '', domain = ''] = mailAddressOf(entry).split('@');
+  const name = local.split('+')[0];
+  return `${domain === 'gmail.com' ? name.replace(/\./g, '') : name}@${domain}`;
+}
+
 export const MailboxThreadSchema = z.object({
   threadId: z.string(),
   subject: z.string().nullable(),
@@ -68,6 +92,11 @@ export const MailThreadSchema = z.object({
    * it has one. Null when nobody else wrote in this thread, so there is nothing to reply to.
    */
   replyTo: z.string().nullable(),
+  /**
+   * The other people on that mail: its To and Cc addresses, without the user and without
+   * `replyTo`. A reply to all also goes to them. Empty when nobody else is on the mail.
+   */
+  replyCc: z.array(z.string()).default([]),
 });
 export type MailThread = z.infer<typeof MailThreadSchema>;
 
@@ -80,6 +109,11 @@ export const SendMailReplyRequestSchema = z.strictObject({
   /** Made by the page for this one reply. The same ID never sends a second mail. */
   replyId: z.uuid(),
   text: z.string().trim().min(1).max(MAIL_REPLY_TEXT_LIMIT),
+  /**
+   * True: the reply also goes to the other people on the answered mail (`replyCc`). Left out or
+   * false: only to the person who wrote. The request never names an address.
+   */
+  toAll: z.boolean().optional(),
 });
 export type SendMailReplyRequest = z.infer<typeof SendMailReplyRequestSchema>;
 
