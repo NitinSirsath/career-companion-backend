@@ -461,4 +461,11 @@ describe('AI and manual state stay separate', () => {
       userStatus: 'OFFER',
       expectedUserStatusRevision: 1,
     });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      aiStatus: 'INTERVIEW',
+      userStatus: 'OFFER',
+      userStatusRevision: 1,
+    });
+  });
 });
