@@ -49,7 +49,7 @@ async function sideEffectCounts() {
   return {
     queued,
     operations: await prisma.aIOperation.count(),
-    budgets: await prisma.aICallBudget.findMany(),
+    usageDays: await prisma.aIUsageDay.findMany({ orderBy: [{ userId: 'asc' }, { day: 'asc' }] }),
     events: await prisma.applicationEvent.count(),
     actions: await prisma.action.findMany({ select: { id: true, status: true } }),
     deliveries: await prisma.notificationDelivery.count(),
@@ -388,29 +388,54 @@ describe('AI and manual state stay separate', () => {
     expect(clear.body).toMatchObject({ effectiveStatus: 'OFFER', statusSource: 'AI' });
   });
 
+  // Waits until a database session is blocked by the session `pid`, so the test knows the
+  // PATCH is waiting for the lock instead of guessing with a fixed sleep.
+  async function waitUntilBlockedBy(pid: number) {
+    for (let tries = 0; tries < 60; tries++) {
+      const blocked = await prisma.$queryRaw<{ pid: number }[]>`
+        SELECT pid FROM pg_stat_activity
+        WHERE wait_event_type = 'Lock' AND ${pid}::int = ANY(pg_blocking_pids(pid))`;
+      if (blocked.length) return;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error('The PATCH never waited for the lock held by the AI write');
+  }
+
+  // Holds the application row the way an AI write does, sends the PATCH while it is held,
+  // and lets the AI write commit only once the PATCH is seen waiting.
+  async function patchWhileAiHoldsLock(id: string, body: object) {
+    let release!: () => void;
+    let locked!: (pid: number) => void;
+    const held = new Promise<number>((r) => (locked = r));
+    const gate = new Promise<void>((r) => (release = r));
+    const ai = prisma.$transaction(async (tx) => {
+      const [{ pid }] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+      await tx.$queryRaw`SELECT id FROM applications WHERE id = ${id}::uuid FOR UPDATE`;
+      locked(pid);
+      await gate;
+      await tx.application.update({ where: { id }, data: { aiStatus: 'INTERVIEW' } });
+    });
+    try {
+      const aiPid = await held;
+      const manual = patch(id, body).then((res) => res); // sent now, not when awaited
+      await waitUntilBlockedBy(aiPid);
+      release();
+      await ai;
+      return await manual;
+    } finally {
+      release(); // a failed wait must never leave the AI transaction open
+      await ai;
+    }
+  }
+
   it('serializes a manual write against an AI write holding the application lock', async () => {
     const application = await prisma.application.create({
       data: { userId: ownerId, companyName: 'Lock Co', aiStatus: 'APPLIED' },
     });
-    let release!: () => void;
-    let locked!: () => void;
-    const held = new Promise<void>((r) => (locked = r));
-    const gate = new Promise<void>((r) => (release = r));
-    const ai = prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM applications WHERE id = ${application.id}::uuid FOR UPDATE`;
-      locked();
-      await gate;
-      await tx.application.update({
-        where: { id: application.id },
-        data: { aiStatus: 'INTERVIEW' },
-      });
+    const res = await patchWhileAiHoldsLock(application.id, {
+      userStatus: 'OFFER',
+      expectedUserStatusRevision: 0,
     });
-    await held;
-    const manual = patch(application.id, { userStatus: 'OFFER', expectedUserStatusRevision: 0 });
-    await new Promise((r) => setTimeout(r, 150));
-    release();
-    await ai;
-    const res = await manual;
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
       aiStatus: 'INTERVIEW',
@@ -418,4 +443,22 @@ describe('AI and manual state stay separate', () => {
       userStatusRevision: 1,
     });
   });
+
+  // A same-value PATCH writes nothing, so only the read lock makes it wait. Without the lock it
+  // would answer at once with the AI status from before the AI write.
+  it('makes a same-value manual write wait for the AI write too', async () => {
+    const application = await prisma.application.create({
+      data: {
+        userId: ownerId,
+        companyName: 'Same Lock Co',
+        aiStatus: 'APPLIED',
+        userStatus: 'OFFER',
+        userStatusRevision: 1,
+        userStatusSetAt: new Date(),
+      },
+    });
+    const res = await patchWhileAiHoldsLock(application.id, {
+      userStatus: 'OFFER',
+      expectedUserStatusRevision: 1,
+    });
 });
