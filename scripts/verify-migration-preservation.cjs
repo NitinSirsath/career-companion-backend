@@ -4,7 +4,7 @@
 // career_companion_*test databases created for this check. Every migration goes through
 // scripts/guarded-migrate.cjs. Synthetic data only; this is not the preserved user dataset.
 //
-//   FRESH_DATABASE_URL=... UPGRADE_DATABASE_URL=... node scripts/verify-migration-preservation.cjs
+//   npm run build && FRESH_DATABASE_URL=... UPGRADE_DATABASE_URL=... node scripts/verify-migration-preservation.cjs
 const assert = require('node:assert/strict');
 const nodeCrypto = require('node:crypto');
 const fs = require('node:fs');
