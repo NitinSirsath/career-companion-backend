@@ -500,7 +500,9 @@ async function failBatch(
         retryAfterMs: failure?.retryAfterMs,
       });
     if (kind === 'OUTCOME_UNKNOWN')
-      return noteProviderFailure(tx, ctx.access, 'OUTCOME_UNKNOWN', ctx.now);
+      return noteProviderFailure(tx, ctx.access, 'OUTCOME_UNKNOWN', ctx.now, {
+        modelId: ctx.modelId,
+      });
     return null;
   });
   await resumeAfterPause(ctx.userId, resumesAt);
@@ -522,7 +524,10 @@ export async function classifyOne(
   const rows = await prisma.aIOperation.findMany({
     where: { emailId, operation: 'classification', version: { in: [...RELEVANCE_BATCH_VERSIONS] } },
   });
-  if (rows.length > 1) throw new TerminalAIError('Relevance version requires reconciliation');
+  if (rows.length > 1)
+    throw new TerminalAIError(
+      'The AI sorting of this email has conflicting versions; Career Companion must check it',
+    );
   const row = rows[0] ?? null;
   // New mails only: an email that started on an older version stays on it.
   const version = row?.version ?? AI_CONTRACT_VERSIONS.RELEVANCE_BATCH;
