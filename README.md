@@ -13,7 +13,7 @@ This is the backend repository for Career Companion.
 
 ## Setup
 
-1. Make sure Node.js and Docker are installed.
+1. Make sure Node.js and Docker are installed. A native PostgreSQL 15 also works instead of Docker.
 2. Run `npm install` to install dependencies.
 3. Ensure `.env` is created based on `.env.example`.
 
@@ -86,7 +86,7 @@ TEST_DATABASE_URL="postgresql://…/career_companion_x_test" node scripts/guarde
 npm test
 ```
 
-`scripts/guarded-migrate.cjs` runs `migrate deploy`, `migrate status` and `validate` by default, or the Prisma arguments you pass. `TEST_ENV_FILE` selects another ignored env file (for example a separate smoke lane). Fresh/upgrade preservation lanes: `FRESH_DATABASE_URL=… UPGRADE_DATABASE_URL=… node scripts/verify-migration-preservation.cjs` (two separate, empty, local `career_companion_*test` databases; synthetic data only).
+`scripts/guarded-migrate.cjs` runs `migrate deploy`, `migrate status` and `validate` by default, or the Prisma arguments you pass. `TEST_ENV_FILE` selects another ignored env file (for example a separate smoke lane). Fresh/upgrade preservation lanes: `npm run build`, then `FRESH_DATABASE_URL=… UPGRADE_DATABASE_URL=… node scripts/verify-migration-preservation.cjs`, and the same for `scripts/verify-ai-migration.cjs` and `scripts/verify-mcp-migration.cjs` (each run on two separate, empty, local `career_companion_*test` databases; synthetic data only).
 
 Vitest loads `.env.test` with override enabled; confirm it contains that same test URL. Do not use `db:reset` for verification. The frontend smoke script also enforces this database guard and requires both repositories to be built.
 

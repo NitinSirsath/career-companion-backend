@@ -4,7 +4,7 @@
 // career_companion_*test databases created for this check. Every migration goes through
 // scripts/guarded-migrate.cjs. Synthetic data only; this is not the preserved user dataset.
 //
-//   FRESH_DATABASE_URL=... UPGRADE_DATABASE_URL=... node scripts/verify-migration-preservation.cjs
+//   npm run build && FRESH_DATABASE_URL=... UPGRADE_DATABASE_URL=... node scripts/verify-migration-preservation.cjs
 const assert = require('node:assert/strict');
 const nodeCrypto = require('node:crypto');
 const fs = require('node:fs');
@@ -207,7 +207,8 @@ async function snapshot(db) {
 
 async function upgradeLane(url) {
   const db = await connectEmpty(url);
-  // Pre-Sprint-6 schema: every existing migration except the new additive one.
+  // Legacy schema: every migration except the Sprint 6 one. It includes the later BYO AI and
+  // MCP migrations, so the Sprint 6 migration is applied last, out of order.
   const legacy = path.join(work, 'prisma-legacy');
   fs.mkdirSync(path.join(legacy, 'migrations'), { recursive: true });
   fs.copyFileSync(path.join(backend, 'prisma/schema.prisma'), path.join(legacy, 'schema.prisma'));
@@ -295,4 +296,7 @@ async function upgradeLane(url) {
     console.error('FAIL:', err.message);
     process.exitCode = 1;
   })
-  .finally(() => fs.rmSync(work, { recursive: true, force: true }));
+  .finally(() => {
+    fs.rmSync(work, { recursive: true, force: true });
+    process.exit(); // a failed assertion can leave a lane connection open
+  });

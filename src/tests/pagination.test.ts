@@ -3,6 +3,8 @@ import request from 'supertest';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
 import { EmailRelevanceState, EmailMatchState } from '@prisma/client';
+import { ZodError } from 'zod';
+import { createPaginatedResponse, getPaginationParams, PAGE_SIZE } from '../utils/pagination';
 
 describe('System-Wide Pagination (COM-48)', () => {
   const userEmail = 'pagination-user@test.local';
@@ -141,6 +143,81 @@ describe('System-Wide Pagination (COM-48)', () => {
       expect(res.body.metadata).toBeDefined();
       expect(res.body.metadata.limit).toBe(20);
       expect(res.body.items[0]).toHaveProperty('id');
+    });
+  });
+});
+
+// The helpers on their own, without HTTP or a database. A service reads one row more than the
+// limit (`take: limit + 1`), so a list longer than the limit means there is a next page.
+describe('pagination helpers', () => {
+  describe('getPaginationParams', () => {
+    it('uses the page size and offset 0 when nothing is given', () => {
+      expect(getPaginationParams({})).toEqual({ limit: PAGE_SIZE, offset: 0 });
+      expect(PAGE_SIZE).toBe(20);
+    });
+
+    it('reads limit and offset from query text', () => {
+      expect(getPaginationParams({ limit: '5', offset: '40' })).toEqual({ limit: 5, offset: 40 });
+      expect(getPaginationParams({ limit: '007', offset: '0' })).toEqual({ limit: 7, offset: 0 });
+    });
+
+    it('caps the limit at 20', () => {
+      expect(getPaginationParams({ limit: '20' }).limit).toBe(20);
+      expect(getPaginationParams({ limit: '21' }).limit).toBe(20);
+      expect(getPaginationParams({ limit: '9999999999999' }).limit).toBe(20);
+    });
+
+    it('accepts the largest offset and ignores other query keys', () => {
+      expect(getPaginationParams({ offset: '2147483627', q: 'acme' })).toEqual({
+        limit: 20,
+        offset: 2_147_483_627,
+      });
+    });
+
+    it.each([
+      ['limit 0', { limit: '0' }],
+      ['a negative limit', { limit: '-1' }],
+      ['a decimal limit', { limit: '1.5' }],
+      ['a limit that is not a number', { limit: 'abc' }],
+      ['an empty limit', { limit: '' }],
+      ['a limit too big to count exactly', { limit: '99999999999999999999' }],
+      ['a repeated limit', { limit: ['1', '2'] }],
+      ['a limit sent as a number', { limit: 5 }],
+      ['a negative offset', { offset: '-1' }],
+      ['an offset that is not a number', { offset: 'invalid' }],
+      ['an offset above the largest', { offset: '2147483628' }],
+    ])('rejects %s', (_label, query) => {
+      expect(() => getPaginationParams(query)).toThrow(ZodError);
+    });
+  });
+
+  describe('createPaginatedResponse', () => {
+    const rows = (count: number) => Array.from({ length: count }, (_, i) => ({ id: i }));
+
+    it('gives the next offset when there is one row more than the limit', () => {
+      expect(createPaginatedResponse(rows(6), 5, 10)).toEqual({
+        items: rows(5),
+        metadata: { nextOffset: 15, limit: 5, offset: 10 },
+      });
+    });
+
+    it('has no next page when the rows fit the limit', () => {
+      expect(createPaginatedResponse(rows(5), 5, 10).metadata.nextOffset).toBeNull();
+      expect(createPaginatedResponse(rows(5), 5, 10).items).toHaveLength(5);
+      expect(createPaginatedResponse(rows(2), 5, 0).metadata.nextOffset).toBeNull();
+    });
+
+    it('returns an empty page with its limit and offset', () => {
+      expect(createPaginatedResponse([], 20, 40)).toEqual({
+        items: [],
+        metadata: { nextOffset: null, limit: 20, offset: 40 },
+      });
+    });
+
+    it('does not change the list it is given', () => {
+      const list = rows(21);
+      createPaginatedResponse(list, 20, 0);
+      expect(list).toHaveLength(21);
     });
   });
 });
