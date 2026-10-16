@@ -14,7 +14,13 @@ export const REOFFER_LIMIT = 100;
 /** Queues a newly synced email: the user's batched relevance check when batching is on, else its own job. */
 export async function enqueueForProcessing(userId: string, emailId: string): Promise<void> {
   if (triageBatchEnabled()) await enqueueRelevanceTriage(userId);
-  else await enqueueEmailProcessingJob(userId, emailId);
+  else await offerEmail(userId, emailId);
+}
+
+/** Queues the email's own job. While a job for it waits or runs, the queue drops this one. */
+async function offerEmail(userId: string, emailId: string) {
+  if (!(await enqueueEmailProcessingJob(userId, emailId)))
+    logEvent('email_offer_suppressed', { userId, emailId });
 }
 
 /**
@@ -51,7 +57,7 @@ export async function reofferPendingEmails(
       }
       continue;
     }
-    await enqueueEmailProcessingJob(userId, email.id);
+    await offerEmail(userId, email.id);
   }
   return pending.length;
 }
@@ -65,6 +71,8 @@ export async function reofferPendingEmails(
 export async function resumeWaitingEmails(userId: string): Promise<void> {
   const access = await getAccessState(userId);
   if (isProviderPause(access)) {
+    // A failure after this read was queued made the pause longer.
+    logEvent('ai_pause_extended', { userId, reason: access.reason, resumesAt: access.resumesAt });
     await resumeAfterPause(userId, access.resumesAt);
     return;
   }

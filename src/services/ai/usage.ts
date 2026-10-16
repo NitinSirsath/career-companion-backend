@@ -12,7 +12,7 @@ import { enqueueAiResume } from '../enqueue';
 import type { AIUsage } from './contracts';
 import { AIAccessError, FailureKind, PAUSE_FAILURE_KINDS, aiSetting } from './errors';
 import * as config from '../../utils/config';
-import { logWarn } from '../../utils/log';
+import { logEvent, logWarn } from '../../utils/log';
 
 export const MAX_DAILY_VERIFICATIONS = 20;
 
@@ -134,18 +134,28 @@ export async function noteProviderFailure(
     where,
     select: { consecutiveFailures: true },
   });
-  const resumesAt = new Date(
-    now.getTime() + cooldownMs(kind, current?.consecutiveFailures ?? 0, details.retryAfterMs),
-  );
-  await tx.aIConfiguration.updateMany({
+  const failures = current?.consecutiveFailures ?? 0;
+  const pauseMs = cooldownMs(kind, failures, details.retryAfterMs);
+  const resumesAt = new Date(now.getTime() + pauseMs);
+  const reason = kind === 'OUTCOME_UNKNOWN' ? 'PROVIDER_UNAVAILABLE' : kind;
+  const paused = await tx.aIConfiguration.updateMany({
     where,
     data: {
-      accessIssue: kind === 'OUTCOME_UNKNOWN' ? 'PROVIDER_UNAVAILABLE' : kind,
+      accessIssue: reason,
       accessIssueModel: null,
       cooldownUntil: resumesAt,
       consecutiveFailures: { increment: 1 },
     },
   });
+  if (paused.count)
+    logEvent('ai_paused', {
+      userId: access.userId,
+      model: details.modelId,
+      reason,
+      pauseMs,
+      resumesAt,
+      consecutiveFailures: failures + 1,
+    });
   return resumesAt;
 }
 

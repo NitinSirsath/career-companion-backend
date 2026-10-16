@@ -18,6 +18,7 @@ afterEach(() => {
 const capture = (method: 'log' | 'warn' | 'error' | 'debug') =>
   vi.spyOn(console, method).mockImplementation(() => {});
 const firstLine = (spy: ReturnType<typeof capture>) => String(spy.mock.calls[0]?.[0]);
+const ISO_UTC = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/;
 
 describe('logger', () => {
   it('writes each level to its console method and skips levels below LOG_LEVEL', () => {
@@ -40,11 +41,24 @@ describe('logger', () => {
     process.env.LOG_LEVEL = 'debug';
     const debug = capture('debug');
     logDebug('debug_event', { count: 1 });
-    expect(JSON.parse(firstLine(debug))).toEqual({
-      event: 'debug_event',
-      level: 'debug',
-      count: 1,
-    });
+    const line = JSON.parse(firstLine(debug));
+    expect(line).toMatchObject({ event: 'debug_event', level: 'debug', count: 1 });
+    expect(line.time).toMatch(ISO_UTC);
+  });
+
+  it('stamps every JSON line with the ISO UTC time it was written', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-10-14T06:06:31.250+05:30'));
+      const spy = capture('warn');
+      logWarn('timed_event');
+      expect(JSON.parse(firstLine(spy))).toMatchObject({
+        time: '2026-10-14T00:36:31.250Z',
+        event: 'timed_event',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects an unknown LOG_LEVEL', () => {
@@ -59,17 +73,38 @@ describe('logger', () => {
       token: 'secret-token',
       body: 'email body',
       subject: 'email subject',
+      sender: 'Recruiter <recruiter@example.com>',
+      from: 'recruiter@example.com',
+      to: 'owner@example.com',
+      cc: 'manager@example.com',
+      address: 'owner@example.com',
+      input: 'email text sent to the AI provider',
+      prompt: 'instructions with email text',
+      response: 'the AI provider answer',
+      raw: 'raw provider payload',
       userId: 'safe-user-id',
     });
-    expect(JSON.parse(firstLine(spy))).toEqual({
+    const line = JSON.parse(firstLine(spy));
+    expect(line).toMatchObject({
       event: 'redaction_test',
       level: 'info',
       apiKey: '[redacted]',
       token: '[redacted]',
       body: '[redacted]',
       subject: '[redacted]',
+      sender: '[redacted]',
+      from: '[redacted]',
+      to: '[redacted]',
+      cc: '[redacted]',
+      address: '[redacted]',
+      input: '[redacted]',
+      prompt: '[redacted]',
+      response: '[redacted]',
+      raw: '[redacted]',
       userId: 'safe-user-id',
     });
+    expect(line.time).toMatch(ISO_UTC);
+    expect(firstLine(spy)).not.toMatch(/example\.com|email text|answer|payload/);
   });
 
   it('adds the active request ID', () => {

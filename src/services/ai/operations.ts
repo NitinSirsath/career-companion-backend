@@ -1,4 +1,4 @@
-import { AIOperation, AIOperationStatus, Prisma } from '@prisma/client';
+import { AIOperation, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import type { AIAccess } from './access';
 import type { AIContract, AIResult } from './contracts';
@@ -6,6 +6,7 @@ import {
   AIAccessError,
   AIOutcomeUnknownError,
   AIProviderError,
+  FailureCause,
   ProviderFailure,
   RetryableAIError,
   SchemaValidationFailure,
@@ -19,7 +20,7 @@ import {
   reserveUserCall,
   resumeAfterPause,
 } from './usage';
-import { logDebug, logEvent, logWarn } from '../../utils/log';
+import { logDebug, logError, logEvent, logWarn } from '../../utils/log';
 
 export const MAX_ATTEMPTS = 3;
 
@@ -87,7 +88,14 @@ export async function runOperation<T>(request: OperationRequest<T>): Promise<Ope
     await recordTokens(userId, now, result.usage);
     data = contract.schema.parse(result.data);
   } catch (err) {
-    throw await recordFailure(err, { access, existing, operation, now, modelId: model.id });
+    throw await recordFailure(err, {
+      access,
+      existing,
+      operation,
+      now,
+      modelId: model.id,
+      timeoutMs: model.timeoutMs,
+    });
   }
   // Deliberately outside the catch: persistence failure leaves PROCESSING.
   // Retrying the job cannot submit again when the provider succeeded but this write failed.
@@ -192,25 +200,70 @@ export function failureError(kind: ProviderFailure['kind'], message: string): AI
 }
 
 /**
- * Records a failed call on the ledger and the user's access state, and returns the error the
- * caller sees. Refusals restore the claim; uncertain and unusable outcomes are held.
+ * Where a call failed, from what the failure carries. A timeout and a lost connection both arrive
+ * without a status, so they are not told apart here (no cause is logged for them).
  */
-async function recordFailure(
+function failureCause(failure: ProviderFailure | null, provider: string): FailureCause | undefined {
+  if (!failure) return 'UNCLASSIFIED';
+  if (provider === 'gemini' && failure.status === 504) return 'PROVIDER_DEADLINE';
+  if (failure.status !== undefined || failure.kind === 'INVALID_OUTPUT') return 'PROVIDER_ANSWER';
+  return undefined;
+}
+
+/** What happens after a failed call: a pause, waiting for the user to fix access, or held. */
+type NextStep = 'paused' | 'waiting_for_user' | 'held';
+
+interface FailedCall {
+  access: AIAccess;
+  existing: Pick<AIOperation, 'id' | 'status' | 'emailId' | 'version' | 'attempts'>;
+  operation: string;
+  now: Date;
+  modelId: string;
+  timeoutMs: number;
+}
+
+/** A provider failure is an expected outcome, logged as a warning; anything else is our own bug. */
+function logFailure(
   err: unknown,
-  context: {
-    access: AIAccess;
-    existing: { id: string; status: AIOperationStatus };
-    operation: string;
-    now: Date;
-    modelId: string;
-  },
-): Promise<unknown> {
-  const { access, existing, operation, now, modelId } = context;
+  call: FailedCall,
+  outcome: { durationMs: number; result: NextStep; resumesAt: Date | null },
+) {
+  const { access, existing } = call;
+  const failure = err instanceof ProviderFailure ? err : null;
+  const fields = {
+    userId: access.userId,
+    emailId: existing.emailId,
+    operation: call.operation,
+    version: existing.version,
+    attempt: existing.attempts + 1,
+    provider: access.provider,
+    model: call.modelId,
+    kind: failure?.kind ?? 'UNCLASSIFIED',
+    failureCause: failureCause(failure, access.provider),
+    status: failure?.status,
+    providerCode: failure?.providerCode,
+    durationMs: outcome.durationMs,
+    timeoutMs: call.timeoutMs,
+    result: outcome.result,
+    resumesAt: outcome.resumesAt ?? undefined,
+  };
+  if (failure) logWarn('ai_call_failed', fields);
+  else logError('ai_call_failed', fields, err);
+}
+
+/**
+ * Records a failed call on the ledger and the user's access state, logs it, and returns the error
+ * the caller sees. Refusals restore the claim; uncertain and unusable outcomes are held.
+ */
+async function recordFailure(err: unknown, call: FailedCall): Promise<unknown> {
+  const { access, existing, operation, now, modelId } = call;
+  const durationMs = Date.now() - now.getTime();
   const failure = err instanceof ProviderFailure ? err : null;
   const kind = failure?.kind;
   if (failure?.usage) await recordTokens(access.userId, now, failure.usage);
   let thrown: unknown;
   let resumesAt: Date | null = null;
+  let next: NextStep = 'held';
   await prisma.$transaction(async (tx) => {
     if (isRefusal(kind)) {
       // Refused before any work was done: the claim is released and the attempt is not charged.
@@ -227,6 +280,7 @@ async function recordFailure(
         modelId,
         retryAfterMs: failure!.retryAfterMs,
       });
+      next = resumesAt ? 'paused' : 'waiting_for_user';
       thrown = new AIAccessError(kind, resumesAt);
       return;
     }
@@ -249,7 +303,7 @@ async function recordFailure(
     });
     if (kind === 'OUTCOME_UNKNOWN') {
       // A short per-user pause keeps an outage from holding one uncertain call per email.
-      resumesAt = await noteProviderFailure(tx, access, 'OUTCOME_UNKNOWN', now);
+      resumesAt = await noteProviderFailure(tx, access, 'OUTCOME_UNKNOWN', now, { modelId });
       thrown = new AIOutcomeUnknownError();
     } else {
       thrown = err;
@@ -257,14 +311,6 @@ async function recordFailure(
   });
   await resumeAfterPause(access.userId, resumesAt);
   if (thrown instanceof AIProviderError) thrown.operationStage = operation;
-  logWarn('ai_call_failed', {
-    userId: access.userId,
-    operation,
-    provider: access.provider,
-    model: modelId,
-    kind: kind ?? 'UNCLASSIFIED',
-    status: failure?.status,
-    providerCode: failure?.providerCode,
-  });
+  logFailure(err, call, { durationMs, result: next, resumesAt });
   return thrown;
 }

@@ -12,7 +12,7 @@ import { ProviderFailure } from '../services/ai/errors';
 import { fakeProviderClient } from './helpers/fakeProviderClient';
 
 vi.mock('../services/ai/providers', () => ({ createProviderClient: vi.fn() }));
-const send = vi.fn(async () => 'job-id');
+const send = vi.fn(async (): Promise<string | null> => 'job-id');
 vi.mock('../services/queue', () => ({
   getQueue: vi.fn(async () => ({ send })),
   stopQueue: vi.fn(),
@@ -377,6 +377,18 @@ describe('re-offering waiting emails', () => {
     expect(offered.map((e) => e.gmailMessageId)).not.toContain('bulk-0'); // the oldest waits for the next sync
     expect(offered.map((e) => e.gmailMessageId)).not.toContain('done');
   });
+
+  it('logs a re-offer the queue drops because a job for that mail already exists', async () => {
+    await configureAI(userId);
+    const waiting = await prisma.email.create({ data: { userId, gmailMessageId: 'queued-1' } });
+    send.mockResolvedValueOnce(null);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    expect(await reofferPendingEmails(userId)).toBe(1);
+    expect(log.mock.calls.map(([line]) => JSON.parse(String(line)))).toContainEqual(
+      expect.objectContaining({ event: 'email_offer_suppressed', userId, emailId: waiting.id }),
+    );
+    log.mockRestore();
+  });
 });
 
 const jobs = () => send.mock.calls.map((call) => (call as unknown[]).slice(0, 2));
@@ -397,11 +409,21 @@ describe('reading waiting mail by itself when a pause ends', () => {
     const until = new Date(Date.now() + 90_000);
     await configureAI(userId, { accessIssue: 'PROVIDER_BUSY', cooldownUntil: until });
     await prisma.email.create({ data: { userId, gmailMessageId: 'resume-2' } });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     await resumeWaitingEmails(userId);
     expect(jobs()).toEqual([['ai-resume-job', { userId }]]);
     expect((send.mock.calls[0] as unknown[])[2]).toMatchObject({
       startAfter: new Date(until.getTime() + 2000),
     });
+    expect(log.mock.calls.map(([line]) => JSON.parse(String(line)))).toContainEqual(
+      expect.objectContaining({
+        event: 'ai_pause_extended',
+        userId,
+        reason: 'PROVIDER_BUSY',
+        resumesAt: until.toISOString(),
+      }),
+    );
+    log.mockRestore();
   });
 
   it.each([
