@@ -23,7 +23,6 @@ import {
 } from '../../contracts/sandbox';
 import { prisma } from '../../db/prisma';
 import { AppError } from '../../errors';
-import { PAUSE_ISSUES } from '../ai/usage';
 import { lockUser, LOCK_NAMESPACE } from '../../utils/advisoryLock';
 import { sandboxMailResults, sentByUser } from './appResult';
 import { RECEIVED_LABELS, SENT_LABELS, snippetOf, type RawMail } from './message';
@@ -270,7 +269,7 @@ export async function listSandboxSenders(userId: string): Promise<SandboxSenders
 /**
  * Empties the user's sandbox mailbox and deletes what the app made from it: emails (with their
  * AI rows), recorded replies, applications (with events, actions and agenda), automation
- * submissions, AI batches and AI day counts. Clears an AI rate-limit pause and the sync
+ * submissions, AI batches and AI day counts. Clears every AI model's pause and the sync
  * checkpoint. Keeps the user, the AI settings and the sandbox connection.
  */
 export async function resetSandbox(userId: string): Promise<ResetSandboxResponse> {
@@ -284,14 +283,7 @@ export async function resetSandbox(userId: string): Promise<ResetSandboxResponse
     await tx.externalSubmission.deleteMany({ where: { userId } });
     await tx.aIBatch.deleteMany({ where: { userId } });
     await tx.aIUsageDay.deleteMany({ where: { userId } });
-    await tx.aIConfiguration.updateMany({
-      where: { userId },
-      data: { cooldownUntil: null, consecutiveFailures: 0 },
-    });
-    await tx.aIConfiguration.updateMany({
-      where: { userId, accessIssue: { in: PAUSE_ISSUES } },
-      data: { accessIssue: null, accessIssueModel: null },
-    });
+    await tx.aIModelPause.deleteMany({ where: { userId } });
     // The mailbox starts again at history 0, so the next sync must start again too.
     await tx.gmailConnection.updateMany({
       where: { userId },

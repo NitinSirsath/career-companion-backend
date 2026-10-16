@@ -15,7 +15,7 @@ import { holdOf } from '../services/ai/heldOperations';
 import { classifyGeminiError } from '../services/ai/providers/gemini';
 import { nextUtcMidnight, utcDay } from '../services/ai/usage';
 import { enqueueAiResume } from '../services/enqueue';
-import { configureAI, fakeAccess } from './helpers/aiAccess';
+import { configureAI, fakeAccess, pauseOf, setPause } from './helpers/aiAccess';
 
 vi.mock('../services/enqueue', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/enqueue')>()),
@@ -23,8 +23,8 @@ vi.mock('../services/enqueue', async (importOriginal) => ({
 }));
 
 const schema = z.object({ decision: z.string() });
-const contract = { version: 'v1', schema, role: 'fast' as const };
 const FAST_MODEL = 'gemini-3.5-flash-lite';
+const DETAILED_MODEL = 'gemini-3.8-flash';
 
 let a: string;
 let b: string;
@@ -36,18 +36,24 @@ function run(
   userId: string,
   emailId: string,
   call: () => Promise<unknown>,
-  options: { revision?: number; access?: () => Promise<ReturnType<typeof fakeAccess>> } = {},
+  options: {
+    revision?: number;
+    access?: () => Promise<ReturnType<typeof fakeAccess>>;
+    /** The detailed model's step instead of the fast model's. */
+    detailed?: boolean;
+  } = {},
 ) {
+  const role = options.detailed ? ('detailed' as const) : ('fast' as const);
   return runOperation({
     userId,
     emailId,
-    operation: 'classification',
-    contract,
+    operation: options.detailed ? 'extraction' : 'classification',
+    contract: { version: 'v1', schema, role },
     access: options.access ?? (async () => fakeAccess(userId, options.revision ?? 0)),
     call: async () => ({
       version: 'v1',
       data: (await call()) as { decision: string },
-      model: FAST_MODEL,
+      model: options.detailed ? DETAILED_MODEL : FAST_MODEL,
       usage: { inputTokens: 10, outputTokens: 5 },
     }),
   });
@@ -67,8 +73,12 @@ const failure = (pending: Promise<unknown>) =>
     },
     (e) => e,
   );
-const secondsFromNow = (date: Date | null) =>
+const secondsFromNow = (date: Date | null | undefined) =>
   Math.round(((date?.getTime() ?? 0) - Date.now()) / 1000);
+const fastPause = (userId: string) => pauseOf(userId, FAST_MODEL);
+/** The fast model's pause has ended; its failures in a row still count. */
+const endFastPause = (userId: string) =>
+  setPause(userId, FAST_MODEL, { resumesAt: new Date(Date.now() - 1000) });
 /** Google's 429 for one quota, read by the real Gemini error mapping. */
 const googleQuota = (quotaId: string) =>
   vi.fn().mockRejectedValue(
@@ -99,14 +109,9 @@ beforeEach(async () => {
   process.env.AI_USER_DAILY_CALL_LIMIT = '100';
   await prisma.email.deleteMany({ where: { userId: { in: [a, b] } } });
   await prisma.aIUsageDay.deleteMany({ where: { userId: { in: [a, b] } } });
+  await prisma.aIModelPause.deleteMany({ where: { userId: { in: [a, b] } } });
   for (const user of [a, b])
-    await configureAI(user, {
-      cooldownUntil: null,
-      accessIssue: null,
-      accessIssueModel: null,
-      consecutiveFailures: 0,
-      revision: 0,
-    });
+    await configureAI(user, { accessIssue: null, accessIssueModel: null, revision: 0 });
 });
 afterAll(async () => {
   await prisma.user.deleteMany({ where: { email: { endsWith: '@limits.test' } } });
@@ -158,7 +163,7 @@ describe('per-user safety limit and counts', () => {
   });
 });
 
-describe('per-user provider cooldown', () => {
+describe("each model's own pause", () => {
   it('pauses only the rate-limited user, honoring a bounded retry-after', async () => {
     const emailId = await newEmail(a);
     const error = await failure(run(a, emailId, refuse('RATE_LIMITED', { retryAfterMs: 5_000 })));
@@ -169,7 +174,8 @@ describe('per-user provider cooldown', () => {
       attempts: 0,
       errorCode: 'RATE_LIMITED',
     });
-    expect(await config(a)).toMatchObject({ accessIssue: 'RATE_LIMITED', consecutiveFailures: 1 });
+    expect(await fastPause(a)).toMatchObject({ reason: 'RATE_LIMITED', consecutiveFailures: 1 });
+    expect((await config(a)).accessIssue).toBeNull();
 
     const next = ok();
     expect(await failure(run(a, await newEmail(a), next))).toMatchObject({
@@ -177,7 +183,7 @@ describe('per-user provider cooldown', () => {
     });
     expect(next).not.toHaveBeenCalled();
     await run(b, await newEmail(b), ok());
-    expect(await config(b)).toMatchObject({ cooldownUntil: null, consecutiveFailures: 0 });
+    expect(await fastPause(b)).toBeNull();
   });
 
   it('treats a busy provider as a refusal: the mail waits, no attempt is used, nothing is held', async () => {
@@ -190,7 +196,7 @@ describe('per-user provider cooldown', () => {
       attempts: 0,
       errorCode: 'PROVIDER_BUSY',
     });
-    expect(await config(a)).toMatchObject({ accessIssue: 'PROVIDER_BUSY', consecutiveFailures: 1 });
+    expect(await fastPause(a)).toMatchObject({ reason: 'PROVIDER_BUSY', consecutiveFailures: 1 });
     // The waiting mail is read by itself when the pause ends: one job, for this user only.
     expect(vi.mocked(enqueueAiResume).mock.calls).toEqual([[a, error.resumesAt]]);
 
@@ -203,14 +209,10 @@ describe('per-user provider cooldown', () => {
     await run(b, await newEmail(b), ok());
 
     // The same mail is read at the first try after the pause, and the busy state is cleared.
-    await configureAI(a, { cooldownUntil: new Date(Date.now() - 1000) });
+    await endFastPause(a);
     await run(a, emailId, ok());
     expect(await op(emailId)).toMatchObject({ status: 'COMPLETED', attempts: 1 });
-    expect(await config(a)).toMatchObject({
-      accessIssue: null,
-      cooldownUntil: null,
-      consecutiveFailures: 0,
-    });
+    expect(await fastPause(a)).toBeNull();
   });
 
   it('still pauses and reports busy when the resume job cannot be queued', async () => {
@@ -224,7 +226,7 @@ describe('per-user provider cooldown', () => {
   });
 
   it('lets a busy pause grow like a rate limit while the provider stays busy', async () => {
-    await configureAI(a, { consecutiveFailures: 3 });
+    await setPause(a, FAST_MODEL, { consecutiveFailures: 3 });
     expect(
       secondsFromNow((await failure(run(a, await newEmail(a), refuse('PROVIDER_BUSY')))).resumesAt),
     ).toBe(480);
@@ -236,7 +238,7 @@ describe('per-user provider cooldown', () => {
       const error = await failure(run(a, await newEmail(a), perMinute));
       expect(error).toMatchObject({ name: 'AIAccessError', reason: 'RATE_LIMITED' });
       expect(secondsFromNow(error.resumesAt)).toBe(seconds);
-      await configureAI(a, { cooldownUntil: null });
+      await endFastPause(a);
     }
   });
 
@@ -251,13 +253,13 @@ describe('per-user provider cooldown', () => {
       vi.useFakeTimers({ toFake: ['Date'] });
       vi.setSystemTime(new Date(at));
       try {
-        await configureAI(a, { consecutiveFailures: 2 });
+        await setPause(a, FAST_MODEL, { consecutiveFailures: 2 });
         const perDay = googleQuota('GenerateRequestsPerDayPerProjectPerModel-FreeTier');
         const error = await failure(run(a, await newEmail(a), perDay));
         expect(error).toMatchObject({ reason: 'RATE_LIMITED', resumesAt: new Date(resumes) });
-        expect(await config(a)).toMatchObject({
-          accessIssue: 'RATE_LIMITED',
-          cooldownUntil: new Date(resumes),
+        expect(await fastPause(a)).toMatchObject({
+          reason: 'RATE_LIMITED',
+          resumesAt: new Date(resumes),
         });
         // The waiting mail is read by itself after the reset.
         expect(vi.mocked(enqueueAiResume).mock.calls).toEqual([[a, new Date(resumes)]]);
@@ -275,21 +277,114 @@ describe('per-user provider cooldown', () => {
   });
 
   it('grows with consecutive refusals up to 30 minutes and resets after a success', async () => {
-    await configureAI(a, { consecutiveFailures: 2 });
+    await setPause(a, FAST_MODEL, { consecutiveFailures: 2 });
     expect(
       secondsFromNow((await failure(run(a, await newEmail(a), refuse('RATE_LIMITED')))).resumesAt),
     ).toBe(240);
-    await configureAI(a, { consecutiveFailures: 10, cooldownUntil: null });
+    await setPause(a, FAST_MODEL, { consecutiveFailures: 10, resumesAt: null });
     expect(
       secondsFromNow((await failure(run(a, await newEmail(a), refuse('RATE_LIMITED')))).resumesAt),
     ).toBe(1800);
-    await configureAI(a, { cooldownUntil: new Date(Date.now() - 1000) });
+    await endFastPause(a);
     await run(a, await newEmail(a), ok());
-    expect(await config(a)).toMatchObject({
-      accessIssue: null,
-      cooldownUntil: null,
-      consecutiveFailures: 0,
+    expect(await fastPause(a)).toBeNull();
+  });
+
+  it('pauses only the model that failed; a success on another model does not reset it', async () => {
+    // Gemini 3.8 Flash (detailed) is busy.
+    const error = await failure(
+      run(a, await newEmail(a), refuse('PROVIDER_BUSY'), { detailed: true }),
+    );
+    expect(error).toMatchObject({ name: 'AIAccessError', reason: 'PROVIDER_BUSY' });
+    const paused = await pauseOf(a, DETAILED_MODEL);
+    expect(paused).toMatchObject({ reason: 'PROVIDER_BUSY', consecutiveFailures: 1 });
+
+    // Gemini 3.5 Flash-Lite (fast) keeps reading mail.
+    const sorting = ok();
+    await run(a, await newEmail(a), sorting);
+    expect(sorting).toHaveBeenCalledTimes(1);
+    expect(await fastPause(a)).toBeNull();
+    // Its success leaves the 3.8 Flash pause and its count as they were.
+    expect(await pauseOf(a, DETAILED_MODEL)).toEqual(paused);
+
+    // 3.8 Flash itself is not called during its pause.
+    const detail = ok();
+    expect(await failure(run(a, await newEmail(a), detail, { detailed: true }))).toMatchObject({
+      reason: 'PROVIDER_BUSY',
+      resumesAt: paused!.resumesAt,
     });
+    expect(detail).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['busy', 'PROVIDER_BUSY', 60_000, 60],
+    ['no answer in time', 'OUTCOME_UNKNOWN', 75_000, 60],
+  ] as const)(
+    'counts the pause from the failure: after a long wait (%s) it is the full pause',
+    async (_label, kind, waitedMs, pauseSeconds) => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      const started = new Date('2026-10-14T06:06:55Z');
+      vi.setSystemTime(started);
+      try {
+        const emailId = await newEmail(a);
+        const slow = vi.fn(async () => {
+          vi.setSystemTime(started.getTime() + waitedMs);
+          throw new ProviderFailure(kind, { failureCause: 'PROVIDER_ANSWER' });
+        });
+        const error = await failure(run(a, emailId, slow));
+        const failedAt = started.getTime() + waitedMs;
+        expect(error.resumesAt).toEqual(new Date(failedAt + pauseSeconds * 1000));
+        expect((await fastPause(a))!.resumesAt).toEqual(error.resumesAt);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+});
+
+describe('the test mail of "Read waiting mails now"', () => {
+  const testing = (emailId: string, consecutiveFailures = 2) =>
+    setPause(a, FAST_MODEL, {
+      consecutiveFailures,
+      resumesAt: new Date(Date.now() + 4 * 60_000),
+      testEmailId: emailId,
+      testStartedAt: new Date(),
+    });
+
+  it('alone may use the paused model; still busy, the pause starts again but is not longer', async () => {
+    const test = await newEmail(a);
+    const other = await newEmail(a);
+    await testing(test);
+
+    const notSent = ok();
+    expect(await failure(run(a, other, notSent))).toMatchObject({ reason: 'PROVIDER_BUSY' });
+    expect(notSent).not.toHaveBeenCalled();
+
+    const stillBusy = refuse('PROVIDER_BUSY', { status: 503 });
+    const error = await failure(run(a, test, stillBusy));
+    expect(stillBusy).toHaveBeenCalledTimes(1);
+    expect(error).toMatchObject({ name: 'AIAccessError', reason: 'PROVIDER_BUSY' });
+    // The pause was 2 minutes (2 failures in a row): it starts again at 2 minutes, not 4.
+    expect(secondsFromNow(error.resumesAt)).toBe(120);
+    expect(await fastPause(a)).toMatchObject({
+      consecutiveFailures: 2,
+      resumesAt: error.resumesAt,
+      testEmailId: test,
+      testResult: 'PROVIDER_BUSY',
+    });
+    // The test has its answer: now it waits like the other mail.
+    const again = ok();
+    expect(await failure(run(a, test, again))).toMatchObject({ reason: 'PROVIDER_BUSY' });
+    expect(again).not.toHaveBeenCalled();
+  });
+
+  it('that works ends the pause, and the other waiting mail follows by itself', async () => {
+    const test = await newEmail(a);
+    await testing(test);
+    await run(a, test, ok());
+    expect(await fastPause(a)).toBeNull();
+    expect(vi.mocked(enqueueAiResume)).toHaveBeenCalledTimes(1);
+    expect(secondsFromNow(vi.mocked(enqueueAiResume).mock.calls[0][1])).toBeCloseTo(0, 0);
   });
 });
 
@@ -303,7 +398,8 @@ describe('refusals and unusable outcomes', () => {
         reason: kind,
       });
       expect(await op(emailId)).toMatchObject({ status: 'PENDING', attempts: 0, errorCode: kind });
-      expect(await config(a)).toMatchObject({ accessIssue: kind, cooldownUntil: null });
+      expect(await config(a)).toMatchObject({ accessIssue: kind });
+      expect(await fastPause(a)).toBeNull();
       // Only the user can fix this, so no automatic try is queued.
       expect(enqueueAiResume).not.toHaveBeenCalled();
       // The call was sent, so it counts toward the safety limit.
@@ -330,9 +426,11 @@ describe('refusals and unusable outcomes', () => {
       attempts: 1,
       errorCode: 'OUTCOME_UNKNOWN',
     });
-    const saved = await config(a);
-    expect(saved).toMatchObject({ accessIssue: 'PROVIDER_BUSY', consecutiveFailures: 1 });
-    expect(saved.cooldownUntil).toEqual(error.resumesAt);
+    expect(await fastPause(a)).toMatchObject({
+      reason: 'PROVIDER_BUSY',
+      consecutiveFailures: 1,
+      resumesAt: error.resumesAt,
+    });
     // The waiting mail is read by itself when the pause ends.
     expect(vi.mocked(enqueueAiResume).mock.calls).toEqual([[a, error.resumesAt]]);
 
@@ -345,7 +443,7 @@ describe('refusals and unusable outcomes', () => {
     await run(b, await newEmail(b), ok());
 
     // After the pause the same mail gets a real second try.
-    await configureAI(a, { cooldownUntil: new Date(Date.now() - 1000) });
+    await endFastPause(a);
     await run(a, emailId, ok());
     expect(await op(emailId)).toMatchObject({ status: 'COMPLETED', attempts: 2 });
   });
@@ -355,7 +453,7 @@ describe('refusals and unusable outcomes', () => {
     const deadline = refuse('OUTCOME_UNKNOWN', { status: 504, failureCause: 'PROVIDER_DEADLINE' });
     for (let i = 0; i < 2; i++) {
       expect(await failure(run(a, emailId, deadline))).toBeInstanceOf(AIAccessError);
-      await configureAI(a, { cooldownUntil: null });
+      await endFastPause(a);
     }
     expect(await failure(run(a, emailId, deadline))).toBeInstanceOf(AIOutcomeUnknownError);
     const held = await op(emailId);
@@ -364,7 +462,7 @@ describe('refusals and unusable outcomes', () => {
     expect((await usage(a))!.calls).toBe(3);
 
     // Not a 4th time by itself, even when a job runs after the pause.
-    await configureAI(a, { cooldownUntil: null });
+    await endFastPause(a);
     await expect(run(a, emailId, deadline)).rejects.toThrow('requires review');
     expect(deadline).toHaveBeenCalledTimes(3);
   });
@@ -382,11 +480,8 @@ describe('refusals and unusable outcomes', () => {
     expect(failed).toMatchObject({ status: 'FAILED', attempts: 1, errorCode: 'UNCLASSIFIED' });
     // Only Career Companion can fix it: the user is not asked to approve a new try.
     expect(holdOf(failed, new Date())).toEqual({ approvable: null });
-    expect(await config(a)).toMatchObject({
-      accessIssue: null,
-      cooldownUntil: null,
-      consecutiveFailures: 0,
-    });
+    expect(await config(a)).toMatchObject({ accessIssue: null });
+    expect(await fastPause(a)).toBeNull();
     expect(enqueueAiResume).not.toHaveBeenCalled();
   });
 
@@ -396,18 +491,16 @@ describe('refusals and unusable outcomes', () => {
     expect(await failure(run(a, emailId, call))).toBeInstanceOf(SchemaValidationFailure);
     expect(await op(emailId)).toMatchObject({ status: 'FAILED', errorCode: 'INVALID_OUTPUT' });
     expect(await usage(a)).toMatchObject({ calls: 1, inputTokens: 7, outputTokens: 3 });
-    expect(await config(a)).toMatchObject({ accessIssue: null, cooldownUntil: null });
+    expect(await config(a)).toMatchObject({ accessIssue: null });
+    expect(await fastPause(a)).toBeNull();
   });
 
   it('never lets a job holding an older configuration change the saved state', async () => {
     await configureAI(a, { revision: 1 });
     await failure(run(a, await newEmail(a), refuse('KEY_REJECTED'), { revision: 0 }));
     await failure(run(a, await newEmail(a), refuse('RATE_LIMITED'), { revision: 0 }));
-    expect(await config(a)).toMatchObject({
-      accessIssue: null,
-      cooldownUntil: null,
-      consecutiveFailures: 0,
-    });
+    expect(await config(a)).toMatchObject({ accessIssue: null });
+    expect(await fastPause(a)).toBeNull();
   });
 });
 
@@ -491,7 +584,7 @@ describe('provenance and user-approved attempts', () => {
     await expect(run(a, emailId, call)).rejects.toBeInstanceOf(AIOutcomeUnknownError);
     // Re-opening the operation without a new approval does not permit another call.
     await prisma.aIOperation.updateMany({ where: { emailId }, data: { status: 'RETRYABLE' } });
-    await configureAI(a, { cooldownUntil: null });
+    await endFastPause(a);
     await expect(run(a, emailId, call)).rejects.toThrow('requires review');
     expect(call).toHaveBeenCalledTimes(1);
   });

@@ -18,6 +18,7 @@ import { enqueueEmailProcessingJob, enqueueRelevanceTriage } from '../services/e
 import { connectSandboxMailbox } from '../services/gmailConnection';
 import { fetchMessageBody, fetchMessageMetadata } from '../services/gmailFetcher';
 import { sandboxGmail } from '../services/sandbox/gmail';
+import { configureAI, setPause } from './helpers/aiAccess';
 
 const OWNER = 'owner@sandbox-mailbox.test';
 const OTHER = 'other@sandbox-mailbox.test';
@@ -350,5 +351,18 @@ describe('resetting the sandbox', () => {
     const again = (await send(mail())).body;
     const stored = await prisma.sandboxMessage.findUniqueOrThrow({ where: { id: again.id } });
     expect(stored.historyId).toBe(1);
+  });
+
+  it("clears every AI model's pause and keeps the AI settings", async () => {
+    const soon = (minutes: number) => new Date(Date.now() + minutes * 60_000);
+    for (const user of [owner, other]) {
+      await configureAI(user);
+      await setPause(user, 'gemini-3.8-flash', { resumesAt: soon(25), consecutiveFailures: 6 });
+    }
+    await setPause(owner, 'gemini-3.5-flash-lite', { reason: 'RATE_LIMITED', resumesAt: soon(1) });
+    expect((await reset()).status).toBe(200);
+    expect(await prisma.aIModelPause.count({ where: { userId: owner } })).toBe(0);
+    expect(await prisma.aIModelPause.count({ where: { userId: other } })).toBe(1);
+    expect(await prisma.aIConfiguration.count({ where: { userId: owner } })).toBe(1);
   });
 });

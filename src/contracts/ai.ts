@@ -125,7 +125,8 @@ export type AISampleTestResponse = z.infer<typeof AISampleTestResponseSchema>;
 // ─── POST /api/ai/waiting/read ──────────────────────────────────────────────
 
 /**
- * "Read waiting mails now": ends a running pause and offers the waiting mail again. Answers with
+ * "Read waiting mails now": while a model is paused, sends one waiting mail first as a test, and
+ * the others follow only if it works; without a pause, offers the waiting mail again. Answers with
  * the AI settings as they are right after that; the result of the new try shows in a later read.
  */
 export const ReadWaitingMailResponseSchema = AISettingsResponseSchema;

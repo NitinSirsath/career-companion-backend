@@ -71,7 +71,8 @@ export interface AiResumeJobData {
 }
 
 export const aiResumeJobOptions = (userId: string, pauseEndsAt: Date) => ({
-  singletonKey: `resume:${userId}`,
+  // One job per user and end time: a job queued for a later end never holds back an earlier one.
+  singletonKey: `resume:${userId}:${pauseEndsAt.toISOString()}`,
   startAfter: new Date(pauseEndsAt.getTime() + AI_RESUME_MARGIN_MS),
   retryLimit: 3,
   retryDelay: 60,
@@ -81,7 +82,7 @@ export const aiResumeJobOptions = (userId: string, pauseEndsAt: Date) => ({
 
 /**
  * Queues the job that offers a user's waiting mail again when a pause ends. The queue keeps one
- * waiting job per user: a second send while one waits returns null.
+ * waiting job per user and end time: a second send for the same end returns null.
  */
 export async function enqueueAiResume(userId: string, pauseEndsAt: Date): Promise<string | null> {
   return (await getQueue()).send(

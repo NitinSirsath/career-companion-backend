@@ -156,20 +156,17 @@ describe('Gmail → user-provided AI → application pipeline', () => {
       { status: 'PENDING', attempts: 0 },
     ]);
 
-    // Rate-limited: waits as PENDING with the attempt restored; the cooldown is that user's only.
+    // Rate-limited: waits as PENDING with the attempt restored; the pause is that user's only.
     expect(await prisma.email.findUniqueOrThrow({ where: { id: limitedEmail } })).toMatchObject({
       processingState: 'PENDING',
     });
     expect(await prisma.aIOperation.findMany({ where: { emailId: limitedEmail } })).toMatchObject([
       { status: 'PENDING', attempts: 0 },
     ]);
-    expect(
-      (await prisma.aIConfiguration.findUniqueOrThrow({ where: { userId: limited } }))
-        .cooldownUntil,
-    ).not.toBeNull();
-    expect(
-      (await prisma.aIConfiguration.findUniqueOrThrow({ where: { userId: ready } })).cooldownUntil,
-    ).toBeNull();
+    expect(await prisma.aIModelPause.findMany({ where: { userId: limited } })).toMatchObject([
+      { model: 'gemini-3.5-flash-lite', reason: 'RATE_LIMITED' },
+    ]);
+    expect(await prisma.aIModelPause.count({ where: { userId: ready } })).toBe(0);
   });
 
   it('resumes a waiting email after access is fixed, reusing completed work', async () => {

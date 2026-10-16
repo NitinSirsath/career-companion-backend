@@ -51,20 +51,23 @@ it('keeps existing queue positions and configures triage as a ten-second per-use
   expect(QUEUE_NAMES[4]).toBe('ai-resume-job');
 });
 
-it('starts a resume job just after the pause ends, one per user', () => {
+it('starts a resume job just after the pause ends, one per user and end time', () => {
   const pauseEndsAt = new Date('2026-10-13T10:00:00.000Z');
   expect(aiResumeJobOptions('user-1', pauseEndsAt)).toMatchObject({
-    singletonKey: 'resume:user-1',
+    singletonKey: 'resume:user-1:2026-10-13T10:00:00.000Z',
     startAfter: new Date('2026-10-13T10:00:02.000Z'),
   });
 });
 
-it('keeps one waiting resume job per user and lets a running one queue the next', async () => {
+it('keeps one waiting resume job per user and end time and lets a running one queue the next', async () => {
   const queue = await getQueue();
   const userA = `test-resume-a-${randomUUID()}`;
   const userB = `test-resume-b-${randomUUID()}`;
-  const inOneMinute = () => new Date(Date.now() + 60_000);
+  const minute = new Date(Date.now() + 60_000);
+  const inOneMinute = () => minute;
 
+  // A resume queued for a later end never holds back a newer, shorter pause.
+  expect(await enqueueAiResume(userA, new Date(Date.now() + 30 * 60_000))).toBeTruthy();
   const firstA = await enqueueAiResume(userA, inOneMinute());
   expect(firstA).toBeTruthy();
   expect(await enqueueAiResume(userA, inOneMinute())).toBeNull();

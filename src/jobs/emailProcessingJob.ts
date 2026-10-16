@@ -4,6 +4,7 @@ import { getQueue } from '../services/queue';
 import { AIAccessError, AIProviderError, TerminalAIError } from '../services/ai/errors';
 import { releaseClaimsAtStart } from '../services/ai/operations';
 import { processEmail } from '../services/ai/pipeline';
+import { endTest, resumeAfterPause } from '../services/ai/usage';
 import { markEmailProcessing, recordEmailFailure, returnEmailToPending } from '../services/email';
 import { logDebug, logEvent, logWarn, logError } from '../utils/log';
 
@@ -70,9 +71,15 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
   logDebug('job_started', { jobId: job.id, emailId, ...attempt });
 
   try {
-    // The worker alone moves an email (including a manually retried FAILED one) into PROCESSING.
-    await markEmailProcessing(userId, emailId);
-    await processEmail(userId, emailId, { signal: job.signal });
+    try {
+      // The worker alone moves an email (including a manually retried FAILED one) into PROCESSING.
+      await markEmailProcessing(userId, emailId);
+      await processEmail(userId, emailId, { signal: job.signal });
+    } finally {
+      // Whatever the outcome, a "Read waiting mails now" test this email left open without a
+      // busy answer ends, before the email can wait again.
+      await endTest(userId, emailId);
+    }
     logDebug('job_completed', {
       jobId: job.id,
       emailId,
@@ -84,10 +91,12 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
     if (err instanceof AIAccessError) {
       // Waiting for the user's AI access is not a processing failure (ADR-0001 decision 8): the
       // email returns to PENDING with no error fields, the job is acknowledged, and no email
-      // attempt is used. The reason lives once, on the user's AI configuration. A call with no
-      // answer in time comes here too, so its next try after the pause is not dropped.
+      // attempt is used. The reason lives once, on the user's AI configuration or the model's
+      // pause. A call with no answer in time comes here too, so its next try after the pause is
+      // not dropped. Our own daily limit ends at midnight UTC: the mail is read then, by itself.
       await returnEmailToPending(userId, emailId);
       await withdrawDelivery(job.id);
+      if (err.reason === 'SAFETY_LIMIT') await resumeAfterPause(userId, err.resumesAt);
       logEvent('job_waiting_for_ai', {
         jobId: job.id,
         emailId,

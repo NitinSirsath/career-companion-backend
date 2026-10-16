@@ -61,11 +61,13 @@ export interface OperationResult<T> {
  *
  * Per-user rules (ADR-0001 decisions 7–10):
  * - Access is resolved before the claim, so waiting for AI uses no attempt and no call.
- * - The claim reserves one call against the user's daily safety limit and respects the user's
- *   provider cooldown. One user's limit or cooldown never affects another user.
+ * - The claim reserves one call against the user's daily safety limit and respects the pause of
+ *   the model it calls. One user's limit or pause never affects another user, and one model's
+ *   pause never stops another model.
  * - A refusal (key, account, model, rate limit, busy provider) releases the claim and restores
  *   the attempt: it was rejected before any work was done. The user's access state records it.
- * - No answer in time uses the attempt and pauses as for a busy provider; the email waits.
+ * - No answer in time uses the attempt and pauses the model as for a busy provider; the email
+ *   waits.
  * - A claim no live job can hold goes back to waiting, its attempt used.
  * - Each user approval (`approvedRetries`) permits exactly one call beyond MAX_ATTEMPTS.
  */
@@ -125,7 +127,7 @@ export async function runOperation<T>(request: OperationRequest<T>): Promise<Ope
       retryAfter: null,
     },
   });
-  await noteProviderSuccess(access);
+  await noteProviderSuccess(access, model.id);
   logEvent('ai_call_completed', {
     userId,
     emailId,
@@ -225,7 +227,7 @@ async function claimAttempt(
         },
       });
       if (claim.count !== 1) throw new RetryableAIError('AI operation not ready');
-      await reserveUserCall(tx, userId, now);
+      await reserveUserCall(tx, { userId, model: call.model, emailId }, now);
     })
     .catch((err: unknown) => {
       if (err instanceof AIAccessError)
@@ -305,14 +307,18 @@ function logFailure(
 }
 
 /**
- * Records a failed call on the ledger and the user's access state, logs it, and returns the error
- * the caller sees.
+ * Records a failed call on the ledger and the model's or the user's access state, logs it, and
+ * returns the error the caller sees.
  */
 async function recordFailure(err: unknown, call: FailedCall): Promise<unknown> {
-  const durationMs = Date.now() - call.now.getTime();
+  // A pause is counted from the failure, not from the start of the call.
+  const failedAt = new Date();
+  const durationMs = failedAt.getTime() - call.now.getTime();
   if (err instanceof ProviderFailure && err.usage)
     await recordTokens(call.access.userId, call.now, err.usage);
-  const outcome = await prisma.$transaction((tx) => recordOutcome(tx, sortedFailure(err), call));
+  const outcome = await prisma.$transaction((tx) =>
+    recordOutcome(tx, sortedFailure(err), call, failedAt),
+  );
   await resumeAfterPause(call.access.userId, outcome.resumesAt);
   if (outcome.thrown instanceof AIProviderError) outcome.thrown.operationStage = call.operation;
   logFailure(err, call, { durationMs, result: outcome.next, resumesAt: outcome.resumesAt });
@@ -331,8 +337,9 @@ async function recordOutcome(
   tx: Prisma.TransactionClient,
   failure: ProviderFailure | null,
   call: FailedCall,
+  failedAt: Date,
 ): Promise<FailureOutcome> {
-  const { access, existing, now, modelId } = call;
+  const { access, existing, modelId } = call;
   const kind = failure?.kind;
   if (failure && isRefusal(kind)) {
     // Refused before any work was done: the claim is released and the attempt is not charged.
@@ -345,8 +352,9 @@ async function recordOutcome(
         retryAfter: null,
       },
     });
-    const resumesAt = await noteProviderFailure(tx, access, kind, now, {
+    const resumesAt = await noteProviderFailure(tx, access, kind, failedAt, {
       modelId,
+      emailId: existing.emailId,
       retryAfterMs: failure.retryAfterMs,
       quotaScope: failure.quotaScope,
     });
@@ -364,7 +372,7 @@ async function recordOutcome(
         : new TerminalAIError(failure.message);
     return { thrown, resumesAt: null, next: 'held' };
   }
-  if (kind === 'OUTCOME_UNKNOWN') return noAnswerInTime(tx, call);
+  if (kind === 'OUTCOME_UNKNOWN') return noAnswerInTime(tx, call, failedAt);
   await tx.aIOperation.update({
     where: { id: existing.id },
     data: { status: 'FAILED', errorCode: 'UNCLASSIFIED' },
@@ -373,20 +381,24 @@ async function recordOutcome(
 }
 
 /**
- * No answer in time: the attempt is used, and AI pauses as for a busy provider. With attempts left
- * the email waits and is tried again by itself when the pause ends; after the last one it waits
- * for the user's OK.
+ * No answer in time: the attempt is used, and the model pauses as for a busy provider. With
+ * attempts left the email waits and is tried again by itself when the pause ends; after the last
+ * one it waits for the user's OK.
  */
 async function noAnswerInTime(
   tx: Prisma.TransactionClient,
   call: FailedCall,
+  failedAt: Date,
 ): Promise<FailureOutcome> {
-  const { access, existing, now, modelId } = call;
+  const { access, existing, modelId } = call;
   await tx.aIOperation.update({
     where: { id: existing.id },
     data: { status: 'RETRYABLE', errorCode: 'OUTCOME_UNKNOWN' },
   });
-  const resumesAt = await noteProviderFailure(tx, access, 'OUTCOME_UNKNOWN', now, { modelId });
+  const resumesAt = await noteProviderFailure(tx, access, 'OUTCOME_UNKNOWN', failedAt, {
+    modelId,
+    emailId: existing.emailId,
+  });
   if (existing.attempts + 1 >= MAX_ATTEMPTS + existing.approvedRetries)
     return { thrown: new AIOutcomeUnknownError(), resumesAt, next: 'held' };
   return {

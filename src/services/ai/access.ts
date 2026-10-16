@@ -3,9 +3,11 @@
  * run now, and with what?". It reads by the userId of the job or session only; keys never travel
  * through the queue. There is no Career Companion key and no fallback to another provider.
  */
-import { AIAccessIssue } from '@prisma/client';
+import { AIAccessIssue, AIModelPause } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import {
+  AI_ROLES,
+  AIRole,
   CatalogProvider,
   ModelSource,
   getCatalogProvider,
@@ -15,7 +17,7 @@ import { AICapabilities, BoundModels, bindCapabilities } from './capabilities';
 import { CredentialUnreadableError, openApiKey } from './credentials';
 import { AIAccessError, AccessReason } from './errors';
 import { createProviderClient } from './providers';
-import { nextUtcMidnight, pauseReason, userDailyCallLimit, utcDay } from './usage';
+import { nextUtcMidnight, userDailyCallLimit, utcDay } from './usage';
 import { isProduction } from '../../utils/config';
 import { logError } from '../../utils/log';
 
@@ -38,7 +40,6 @@ export const CONFIGURATION_STATE = {
   accessIssueModel: true,
   verifiedAt: true,
   lastCheckedAt: true,
-  cooldownUntil: true,
   consentDisclosure: true,
   consentedAt: true,
   revision: true,
@@ -50,8 +51,23 @@ export interface ConfigurationState {
   detailedModel: string | null;
   accessIssue: AIAccessIssue | null;
   accessIssueModel: string | null;
-  cooldownUntil: Date | null;
   revision: number;
+}
+
+/** A running pause of a model the user's setup uses now (key, billing and limits are per user). */
+export interface ModelPause {
+  model: string;
+  /** The roles that use the model now. */
+  roles: AIRole[];
+  reason: AIAccessIssue;
+  resumesAt: Date;
+  /** The test mail of "Read waiting mails now" while it waits for the model's answer. */
+  testEmailId: string | null;
+}
+
+/** The user's own access state, and the running pauses of the models the setup uses now. */
+export interface UserAccess extends AccessStatus {
+  pauses: ModelPause[];
 }
 
 /** Stored problems that only the user can fix; AI work waits until they do. */
@@ -61,12 +77,6 @@ export const NEEDS_ATTENTION_ISSUES: readonly AIAccessIssue[] = [
   'MODEL_UNAVAILABLE',
   'KEY_UNREADABLE',
 ];
-
-/** True while a provider pause is running: it ends by itself at `resumesAt`. */
-export const isProviderPause = (
-  status: AccessStatus,
-): status is AccessStatus & { resumesAt: Date } =>
-  status.state === 'LIMITED' && status.resumesAt !== null && status.reason !== 'SAFETY_LIMIT';
 
 /** Hidden providers are built and evaluated outside production, never offered in it. */
 export const isOffered = (provider: CatalogProvider) =>
@@ -91,7 +101,10 @@ export function stateOf(reason: AccessReason): AccessState {
     : 'NEEDS_ATTENTION';
 }
 
-/** Access state from stored facts, in the plan §3.7 precedence. Pure. */
+/**
+ * The user's own access state from stored facts, in the plan §3.7 precedence. A model's pause is
+ * not part of it: it stops only the work on that model (see `withPause`). Pure.
+ */
 export function deriveAccess(
   config: ConfigurationState | null,
   callsToday: number,
@@ -109,10 +122,48 @@ export function deriveAccess(
   if (!offeredProvider(config.provider)) return status('NEEDS_ATTENTION', 'PROVIDER_UNSUPPORTED');
   if (config.accessIssue && NEEDS_ATTENTION_ISSUES.includes(config.accessIssue))
     return status('NEEDS_ATTENTION', config.accessIssue, null, config.accessIssueModel);
-  if (config.cooldownUntil && config.cooldownUntil > now)
-    return status('LIMITED', pauseReason(config.accessIssue), config.cooldownUntil);
   if (callsToday >= limit) return status('LIMITED', 'SAFETY_LIMIT', nextUtcMidnight(now));
   return status('READY', null);
+}
+
+/** The running pauses of the models the configuration uses now, with the roles that use them. */
+export function runningPauses(
+  config: Pick<ConfigurationState, 'provider' | 'fastModel' | 'detailedModel'> | null,
+  rows: AIModelPause[],
+  now: Date,
+): ModelPause[] {
+  const provider = config && getCatalogProvider(config.provider);
+  if (!provider) return [];
+  const { models } = modelsFor(provider, config);
+  return rows.flatMap(({ model, reason, resumesAt, testEmailId, testResult }) => {
+    const roles = AI_ROLES.filter((role) => models[role].id === model);
+    if (!roles.length || !resumesAt || resumesAt <= now) return [];
+    return [
+      { model, roles, reason, resumesAt, testEmailId: testResult === null ? testEmailId : null },
+    ];
+  });
+}
+
+/** Of the pauses on models these roles use, the one that ends last. */
+export function blockingPause(
+  pauses: readonly ModelPause[],
+  roles: readonly AIRole[],
+): ModelPause | null {
+  return pauses
+    .filter((pause) => pause.roles.some((role) => roles.includes(role)))
+    .reduce<ModelPause | null>(
+      (last, pause) => (last && last.resumesAt >= pause.resumesAt ? last : pause),
+      null,
+    );
+}
+
+/**
+ * The state for work that needs a paused model: the user's own problems come first, then the
+ * pause, then Career Companion's daily limit (the plan §3.7 precedence).
+ */
+export function withPause(access: AccessStatus, pause: ModelPause | null): AccessStatus {
+  if (!pause || (access.state !== 'READY' && access.reason !== 'SAFETY_LIMIT')) return access;
+  return { state: 'LIMITED', reason: pause.reason, modelId: null, resumesAt: pause.resumesAt };
 }
 
 export async function callsToday(userId: string, now: Date): Promise<number> {
@@ -124,13 +175,16 @@ export async function callsToday(userId: string, now: Date): Promise<number> {
 }
 
 /** Access state without decrypting anything. Used by the status API and the waiting re-offer. */
-export async function getAccessState(userId: string): Promise<AccessStatus> {
+export async function getAccessState(userId: string): Promise<UserAccess> {
   const now = new Date();
-  const config = await prisma.aIConfiguration.findUnique({
-    where: { userId },
-    select: CONFIGURATION_STATE,
-  });
-  return deriveAccess(config, await callsToday(userId, now), now);
+  const [config, pauses] = await Promise.all([
+    prisma.aIConfiguration.findUnique({ where: { userId }, select: CONFIGURATION_STATE }),
+    prisma.aIModelPause.findMany({ where: { userId } }),
+  ]);
+  return {
+    ...deriveAccess(config, await callsToday(userId, now), now),
+    pauses: runningPauses(config, pauses, now),
+  };
 }
 
 export function modelsFor(
@@ -156,6 +210,7 @@ export interface AIAccess extends AICapabilities {
 /**
  * Resolves the user's own AI access for one job (decrypting the key in memory) or throws
  * AIAccessError with the reason. Runs before any ledger claim, so waiting uses no attempt or call.
+ * A model's pause is checked when its call is claimed (`reserveUserCall`).
  */
 export async function resolveAIAccess(userId: string): Promise<AIAccess> {
   const now = new Date();

@@ -60,11 +60,7 @@ const newEmail = async () =>
       data: { userId, gmailMessageId: `trace-${Math.random()}`, subject: `${SENTINEL} subject` },
     })
   ).id;
-const endPause = () =>
-  prisma.aIConfiguration.updateMany({
-    where: { userId },
-    data: { cooldownUntil: null, accessIssue: null },
-  });
+const endPause = () => prisma.aIModelPause.deleteMany({ where: { userId } });
 const linesFor = (id: string) => lines.filter((line) => Object.values(line).includes(id));
 const only = (event: string) => {
   const found = lines.filter((line) => line.event === event);
@@ -89,7 +85,8 @@ beforeEach(async () => {
   process.env.AI_USER_DAILY_CALL_LIMIT = '100';
   await prisma.email.deleteMany({ where: { userId } });
   await prisma.aIUsageDay.deleteMany({ where: { userId } });
-  await configureAI(userId, { cooldownUntil: null, accessIssue: null, consecutiveFailures: 0 });
+  await configureAI(userId, { accessIssue: null });
+  await prisma.aIModelPause.deleteMany({ where: { userId } });
 });
 afterAll(async () => {
   vi.restoreAllMocks();

@@ -16,8 +16,12 @@ const { assertTestDatabase } = require('../dist/utils/testDatabase');
 
 // The migration under test, and every later migration that changes what it created. The legacy
 // lane holds none of them; the upgrade applies them together.
-const NEW_MIGRATIONS = ['20261002120000_user_provided_ai', '20261013100000_ai_provider_busy'];
-const NEW_UNIQUES = ['ai_configurations_pkey', 'ai_usage_days_pkey'];
+const NEW_MIGRATIONS = [
+  '20261002120000_user_provided_ai',
+  '20261013100000_ai_provider_busy',
+  '20261014100000_ai_model_pauses',
+];
+const NEW_UNIQUES = ['ai_configurations_pkey', 'ai_usage_days_pkey', 'ai_model_pauses_pkey'];
 const backend = path.resolve(__dirname, '..');
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-ai-migrate-'));
 

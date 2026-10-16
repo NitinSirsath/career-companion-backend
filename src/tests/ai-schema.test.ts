@@ -31,11 +31,25 @@ describe('AI configuration and usage persistence', () => {
   it.each([
     ['empty provider', { provider: '' }],
     ['unsealed key', { encryptedApiKey: 'sk-plaintext' }],
-    ['negative failure count', { consecutiveFailures: -1 }],
+    ['negative revision', { revision: -1 }],
   ])('rejects %s', async (_label, overrides) => {
     await expect(
       prisma.aIConfiguration.create({ data: configuration(overrides) }),
     ).rejects.toThrow();
+  });
+
+  it("keeps each model's pause with the configuration and rejects a negative failure count", async () => {
+    await prisma.aIConfiguration.create({ data: configuration() });
+    const pause = { userId, model: 'gemini-3.8-flash', reason: 'PROVIDER_BUSY' as const };
+    await expect(
+      prisma.aIModelPause.create({ data: { ...pause, consecutiveFailures: -1 } }),
+    ).rejects.toThrow();
+    await expect(prisma.aIModelPause.create({ data: { ...pause, model: '' } })).rejects.toThrow();
+    await prisma.aIModelPause.create({ data: pause });
+    await expect(prisma.aIModelPause.create({ data: pause })).rejects.toThrow();
+    // Removing the AI setup removes its pauses.
+    await prisma.aIConfiguration.delete({ where: { userId } });
+    expect(await prisma.aIModelPause.count({ where: { userId } })).toBe(0);
   });
 
   it('rejects negative counters and malformed days', async () => {

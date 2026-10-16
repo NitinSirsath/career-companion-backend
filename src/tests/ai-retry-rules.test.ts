@@ -21,7 +21,7 @@ import {
 } from '../services/enqueue';
 import { fetchMessageMetadata } from '../services/gmailFetcher';
 import { getQueue, stopQueue } from '../services/queue';
-import { configureAI } from './helpers/aiAccess';
+import { configureAI, pauseOf, setPause } from './helpers/aiAccess';
 
 const generateContent = vi.fn();
 vi.mock('@google/genai', async (importOriginal) => ({
@@ -38,6 +38,8 @@ vi.mock('../services/enqueue', async (importOriginal) => {
 });
 
 const EMAIL = 'owner@retry-rules.test';
+/** Sorting runs on the recommended fast model. */
+const FAST = 'gemini-3.5-flash-lite';
 let userId: string;
 
 const notJobMail = {
@@ -57,7 +59,7 @@ const mail = (id: string) => prisma.email.findUniqueOrThrow({ where: { id } });
 const ledger = (emailId: string) => prisma.aIOperation.findFirstOrThrow({ where: { emailId } });
 const attempts = async (emailId: string) =>
   (await prisma.aIOperation.findFirst({ where: { emailId } }))?.attempts;
-const pause = () => prisma.aIConfiguration.findUniqueOrThrow({ where: { userId } });
+const pause = () => pauseOf(userId, FAST);
 const callsToday = async () =>
   (
     await prisma.aIUsageDay.findUnique({
@@ -78,10 +80,7 @@ async function until(condition: () => Promise<boolean>) {
 
 /** The pause ends and the automatic read runs, as the resume job does then. */
 async function pauseEnds() {
-  await prisma.aIConfiguration.update({
-    where: { userId },
-    data: { cooldownUntil: new Date(Date.now() - 1000) },
-  });
+  await setPause(userId, FAST, { resumesAt: new Date(Date.now() - 1000) });
   await resumeWaitingEmails(userId);
 }
 
@@ -99,7 +98,8 @@ beforeEach(async () => {
   process.env.AI_USER_DAILY_CALL_LIMIT = '100';
   await prisma.email.deleteMany({ where: { userId } });
   await prisma.aIUsageDay.deleteMany({ where: { userId } });
-  await configureAI(userId, { cooldownUntil: null, accessIssue: null, consecutiveFailures: 0 });
+  await configureAI(userId, { accessIssue: null });
+  await prisma.aIModelPause.deleteMany({ where: { userId } });
   await clearJobs();
 });
 afterAll(async () => {
@@ -128,21 +128,19 @@ describe('no answer in time on a per-mail read', () => {
         attempts: 1,
         errorCode: 'OUTCOME_UNKNOWN',
       });
-      const { cooldownUntil, accessIssue } = await pause();
-      expect(accessIssue).toBe('PROVIDER_BUSY');
+      const { resumesAt, reason } = (await pause())!;
+      expect(reason).toBe('PROVIDER_BUSY');
 
       // The automatic read is queued for the end of the pause. Here the pause ends at once.
+      const resumeKey = `resume:${userId}:${resumesAt!.toISOString()}`;
       const [resume] = await prisma.$queryRaw<{ start_after: Date }[]>`
         SELECT start_after FROM pgboss.job
-        WHERE name = ${AI_RESUME_JOB} AND singleton_key = ${`resume:${userId}`}`;
-      expect(resume.start_after.getTime()).toBe(cooldownUntil!.getTime() + 2_000);
-      await prisma.aIConfiguration.update({
-        where: { userId },
-        data: { cooldownUntil: new Date(Date.now() - 1000) },
-      });
+        WHERE name = ${AI_RESUME_JOB} AND singleton_key = ${resumeKey}`;
+      expect(resume.start_after.getTime()).toBe(resumesAt!.getTime() + 2_000);
+      await setPause(userId, FAST, { resumesAt: new Date(Date.now() - 1000) });
       await prisma.$executeRaw`
         UPDATE pgboss.job SET start_after = now()
-        WHERE name = ${AI_RESUME_JOB} AND singleton_key = ${`resume:${userId}`}`;
+        WHERE name = ${AI_RESUME_JOB} AND singleton_key = ${resumeKey}`;
       await startAiResumeWorker();
 
       await until(async () => (await mail(emailId)).processingState === 'COMPLETED');

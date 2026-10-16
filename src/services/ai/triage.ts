@@ -1,5 +1,5 @@
 import type { AIAccess } from './access';
-import { getAccessState, resolveAIAccess } from './access';
+import { blockingPause, getAccessState, resolveAIAccess, withPause } from './access';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { fetchMessageMetadata } from '../gmailFetcher';
@@ -190,7 +190,6 @@ export async function classifyBatch(
       access,
       batchId,
       claimed,
-      now: run.now,
       modelId: access.models.fast.id,
       updateEmails,
       version,
@@ -234,7 +233,7 @@ export async function classifyBatch(
       byEmail.set(emailId, decision.decision);
     }
   });
-  await noteProviderSuccess(access);
+  await noteProviderSuccess(access, access.models.fast.id);
   logEvent('ai_batch_completed', {
     batchId,
     userId,
@@ -315,7 +314,7 @@ async function claimBatch(run: BatchRun, items: Candidate[]) {
       if (claim.count === 1) claimed.push(item);
     }
     if (!claimed.length) throw new RetryableAIError('AI operation not ready');
-    await reserveUserCall(tx, userId, now);
+    await reserveUserCall(tx, { userId, model: model.id, emailId: onlyEmail(claimed) }, now);
     if (run.updateEmails)
       await tx.email.updateMany({
         where: {
@@ -336,6 +335,12 @@ async function claimBatch(run: BatchRun, items: Candidate[]) {
     return { batchId: batch.id, claimed };
   });
 }
+
+/**
+ * The email of a batch of one, which can be the test mail of "Read waiting mails now" (an email
+ * read on its own goes through a batch of one).
+ */
+const onlyEmail = (claimed: Candidate[]) => (claimed.length === 1 ? claimed[0].emailId : undefined);
 
 /** The provider's answer left this email out: it is offered again, or fails once attempts run out. */
 async function saveMissingAnswer(tx: Prisma.TransactionClient, run: BatchRun, emailId: string) {
@@ -423,12 +428,13 @@ async function failBatch(
     access: AIAccess;
     batchId: string;
     claimed: Candidate[];
-    now: Date;
     modelId: string;
     updateEmails: boolean;
     version: string;
   },
 ): Promise<unknown> {
+  // A pause is counted from the failure, not from the start of the call.
+  const failedAt = new Date();
   const failure = failureKind(err);
   const kind = failure?.kind;
   const refusal = isRefusal(kind) ? kind : null;
@@ -494,17 +500,16 @@ async function failBatch(
             },
       });
     }
+    const pause = { modelId: ctx.modelId, emailId: onlyEmail(ctx.claimed) };
     if (refusal)
-      return noteProviderFailure(tx, ctx.access, refusal, ctx.now, {
-        modelId: ctx.modelId,
+      return noteProviderFailure(tx, ctx.access, refusal, failedAt, {
+        ...pause,
         retryAfterMs: failure?.retryAfterMs,
         quotaScope: failure?.quotaScope,
       });
     // The batch stays held; the pause keeps an outage from holding one batch after another.
     if (kind === 'OUTCOME_UNKNOWN')
-      return noteProviderFailure(tx, ctx.access, 'OUTCOME_UNKNOWN', ctx.now, {
-        modelId: ctx.modelId,
-      });
+      return noteProviderFailure(tx, ctx.access, 'OUTCOME_UNKNOWN', failedAt, pause);
     return null;
   });
   await resumeAfterPause(ctx.userId, resumesAt);
@@ -617,8 +622,14 @@ async function markDeterministicIrrelevant(userId: string, emailId: string) {
 }
 
 export async function runTriage(userId: string, signal?: AbortSignal) {
-  if ((await getAccessState(userId)).state !== 'READY')
+  // Sorting uses the fast model only: its pause stops it, another model's pause does not.
+  const user = await getAccessState(userId);
+  const access = withPause(user, blockingPause(user.pauses, ['fast']));
+  if (access.state !== 'READY') {
+    // Our own daily limit ends at midnight UTC: the waiting mail is read then, by itself.
+    if (access.reason === 'SAFETY_LIMIT') await resumeAfterPause(userId, access.resumesAt);
     return { batches: 0, emails: 0, stoppedBy: 'access_not_ready' as const };
+  }
   const started = Date.now();
   const handled = new Set<string>();
   let batches = 0,
@@ -680,6 +691,9 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
         group.forEach((candidate) => handled.add(candidate.emailId));
         // Nothing was claimed: another run or job holds these emails. Skip them and continue.
         if (err instanceof RetryableAIError) continue;
+        // The daily limit was reached during the run: the waiting mail is read after midnight UTC.
+        if (err instanceof AIAccessError && err.reason === 'SAFETY_LIMIT')
+          await resumeAfterPause(userId, err.resumesAt);
         // Every other AI outcome is already recorded on the ledger and the emails: stop this run.
         if (err instanceof AIProviderError) {
           stoppedBy = 'ai_failure';
