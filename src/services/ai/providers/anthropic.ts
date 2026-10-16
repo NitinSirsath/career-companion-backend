@@ -7,7 +7,7 @@ import type { CatalogProvider } from '../../../contracts/aiCatalog';
 import { ACCESS_FAILURE_KINDS, ProviderFailure } from '../errors';
 import { nullsToAbsent, strictJsonSchema } from './jsonSchema';
 import { retryAfterMs } from './headers';
-import { droppedConnection, libraryConnectionFailure } from './network';
+import { droppedConnection, libraryConnectionFailure, unansweredFailure } from './network';
 import { ProviderClient, VERIFY_TIMEOUT_MS, VerifyResult } from './types';
 
 /** Anthropic error bodies: `{ type: 'error', error: { type, message } }`. Read in memory only. */
@@ -21,17 +21,16 @@ function errorBody(err: APIError): { type?: string; message?: string } {
 
 /**
  * Anthropic error mapping (plan §3.6). Starting table; each row must be confirmed with a real key
- * before Claude is offered in production. Unrecognized → unknown outcome (held, never replayed).
+ * before Claude is offered in production. Unrecognized → no answer in time.
  */
 export function classifyAnthropicError(err: unknown): ProviderFailure {
   if (err instanceof ProviderFailure) return err;
   if (err instanceof APIConnectionError)
-    return new ProviderFailure(
-      'OUTCOME_UNKNOWN',
+    return unansweredFailure(
       libraryConnectionFailure(err, err instanceof APIConnectionTimeoutError),
     );
   const dropped = droppedConnection(err);
-  if (dropped) return new ProviderFailure('OUTCOME_UNKNOWN', dropped);
+  if (dropped) return unansweredFailure(dropped);
   if (!(err instanceof APIError) || typeof err.status !== 'number')
     return new ProviderFailure('OUTCOME_UNKNOWN', { failureCause: 'UNCLASSIFIED' });
   const status = err.status;
