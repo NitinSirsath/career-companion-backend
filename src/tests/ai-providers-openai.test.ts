@@ -1,6 +1,12 @@
 import { inspect } from 'util';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import OpenAI, { APIConnectionTimeoutError, APIError } from 'openai';
+import OpenAI, {
+  APIConnectionError,
+  APIConnectionTimeoutError,
+  APIError,
+  APIUserAbortError,
+} from 'openai';
+import { z } from 'zod';
 import { getCatalogProvider } from '../contracts/aiCatalog';
 import { bindCapabilities } from '../services/ai/capabilities';
 import {
@@ -37,6 +43,13 @@ const apiError = (status: number, code?: string, headers: Record<string, string>
     undefined,
     new Headers(headers),
   );
+/** What Node's fetch throws when a connection fails: the system or undici error is its cause. */
+const fetchFailed = (code: string) =>
+  new TypeError(`fetch failed ${SENTINEL}`, {
+    cause: Object.assign(new Error(`connect ${code} ${SENTINEL}`), { code }),
+  });
+const connectionError = (code: string) =>
+  new APIConnectionError({ message: 'Connection error.', cause: fetchFailed(code) });
 const failure = (pending: Promise<unknown>) =>
   pending.then(
     () => {
@@ -84,6 +97,58 @@ describe('OpenAI error mapping (plan §3.6)', () => {
     expect(`${JSON.stringify(mapped)} ${inspect(mapped)} ${mapped.stack}`).not.toContain(
       'SENTINEL',
     );
+  });
+
+  it.each([
+    [
+      "the library's own timer",
+      Object.assign(new APIConnectionTimeoutError(), {
+        cause: new DOMException('This operation was aborted', 'AbortError'),
+      }),
+      'TIMEOUT',
+    ],
+    ['a timeout with no cause', new APIConnectionTimeoutError({ message: SENTINEL }), 'TIMEOUT'],
+    [
+      'undici connect timeout',
+      Object.assign(new APIConnectionTimeoutError(), {
+        cause: fetchFailed('UND_ERR_CONNECT_TIMEOUT'),
+      }),
+      'NETWORK',
+      'UND_ERR_CONNECT_TIMEOUT',
+    ],
+    ['no DNS answer', connectionError('ENOTFOUND'), 'NETWORK', 'ENOTFOUND'],
+    ['connection refused', connectionError('ECONNREFUSED'), 'NETWORK', 'ECONNREFUSED'],
+    ['dropped after sending', connectionError('ECONNRESET'), 'NETWORK_AFTER_SEND', 'ECONNRESET'],
+    [
+      'closed while reading the answer',
+      new TypeError('terminated', {
+        cause: Object.assign(new Error(SENTINEL), { code: 'UND_ERR_SOCKET' }),
+      }),
+      'NETWORK_AFTER_SEND',
+      'UND_ERR_SOCKET',
+    ],
+    [
+      'a connection error with no code',
+      new APIConnectionError({ message: SENTINEL }),
+      'NETWORK_AFTER_SEND',
+    ],
+    ['an abort we never ask for', new APIUserAbortError({ message: SENTINEL }), 'UNCLASSIFIED'],
+    ['unknown error', new Error(SENTINEL), 'UNCLASSIFIED'],
+  ])(
+    '%s with no answer → OUTCOME_UNKNOWN, cause %s',
+    (_label, err, failureCause, networkCode?: string) => {
+      const mapped = classifyOpenAIError(err);
+      expect(mapped).toMatchObject({ kind: 'OUTCOME_UNKNOWN', failureCause, networkCode });
+      expect(`${JSON.stringify(mapped)} ${inspect(mapped)} ${mapped.stack}`).not.toContain(
+        'SENTINEL',
+      );
+    },
+  );
+
+  it.each([500, 503, 504])('%i is an answer, not a deadline: cause PROVIDER_ANSWER', (status) => {
+    expect(classifyOpenAIError(apiError(status))).toMatchObject({
+      failureCause: 'PROVIDER_ANSWER',
+    });
   });
 
   it('reads retry-after-ms, retry-after seconds and HTTP dates', () => {
@@ -144,6 +209,15 @@ describe('OpenAI adapter', () => {
     });
     expect(body).not.toHaveProperty('temperature'); // the model does not accept one
     expect(options).toEqual({ timeout: 30_000 });
+  });
+
+  it('builds the answer format before calling OpenAI, so its error is never taken for an answer', async () => {
+    const unbuildable = { ...CLASSIFICATION_CONTRACT, schema: z.object({ at: z.date() }) };
+    const error = await failure(
+      client().generateStructured({ contract: unbuildable, model: nano, input: 'x' }),
+    );
+    expect(error).not.toBeInstanceOf(ProviderFailure);
+    expect(create).not.toHaveBeenCalled();
   });
 
   it('derives a strict schema: every key required, optional keys nullable, nothing extra', () => {

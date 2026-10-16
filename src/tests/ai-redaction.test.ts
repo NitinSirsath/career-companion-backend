@@ -194,6 +194,13 @@ describe('no key or email content leaks anywhere', () => {
       Object.assign(new Error(`timeout ${KEY} ${CONTENT}`), { name: 'AbortError' }),
     );
     await processOne('timeout');
+    // A lost connection: only a code from the fixed list is kept, never the error's text.
+    generateContent.mockRejectedValueOnce(
+      new TypeError(`fetch failed ${KEY} ${CONTENT}`, {
+        cause: Object.assign(new Error(`${KEY} ${CONTENT}`), { code: `ECONNRESET ${KEY}` }),
+      }),
+    );
+    await processOne('network');
     generateContent.mockResolvedValueOnce({ text: `{"decision": "${CONTENT}", "key": "${KEY}"}` });
     await processOne('schema-invalid');
     generateContent.mockResolvedValueOnce({ text: `${CONTENT} ${KEY}` });

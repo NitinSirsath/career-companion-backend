@@ -195,15 +195,40 @@ describe("one mail's AI tries in the log", () => {
     },
   );
 
-  it('logs no cause yet for a call our timer stopped, which is held', async () => {
-    generateContent.mockRejectedValueOnce(
-      Object.assign(new Error(`aborted ${SENTINEL}`), { name: 'AbortError' }),
-    );
+  /** What Node's fetch throws when a connection fails: the system error is its cause. */
+  const fetchFailed = (code: string) =>
+    new TypeError(`fetch failed ${SENTINEL}`, {
+      cause: Object.assign(new Error(`${code} ${SENTINEL}`), { code }),
+    });
+  it.each([
+    {
+      label: 'our timer stopped',
+      error: new DOMException(`aborted ${SENTINEL}`, 'AbortError'),
+      logged: { failureCause: 'TIMEOUT' },
+    },
+    {
+      label: 'never reached Google',
+      error: fetchFailed('ECONNREFUSED'),
+      logged: { failureCause: 'NETWORK', networkCode: 'ECONNREFUSED' },
+    },
+    {
+      label: 'lost the line after sending',
+      error: fetchFailed('ECONNRESET'),
+      logged: { failureCause: 'NETWORK_AFTER_SEND', networkCode: 'ECONNRESET' },
+    },
+  ])('logs the cause of a call that $label, still held as today', async ({ error, logged }) => {
+    generateContent.mockRejectedValueOnce(error);
     const emailId = await newEmail();
     await processEmailJob(job(emailId));
     const failed = only('ai_call_failed');
-    expect(failed).toMatchObject({ level: 'warn', kind: 'OUTCOME_UNKNOWN', result: 'held' });
-    expect(failed).not.toHaveProperty('failureCause');
+    expect(failed).toMatchObject({
+      level: 'warn',
+      emailId,
+      kind: 'OUTCOME_UNKNOWN',
+      result: 'held',
+      timeoutMs: FAST.timeoutMs,
+      ...logged,
+    });
     expect(failed).not.toHaveProperty('status');
     expect(JSON.stringify(lines)).not.toContain(SENTINEL);
   });

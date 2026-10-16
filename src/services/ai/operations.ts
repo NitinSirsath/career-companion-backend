@@ -6,7 +6,6 @@ import {
   AIAccessError,
   AIOutcomeUnknownError,
   AIProviderError,
-  FailureCause,
   ProviderFailure,
   RetryableAIError,
   SchemaValidationFailure,
@@ -199,17 +198,6 @@ export function failureError(kind: ProviderFailure['kind'], message: string): AI
   return new TerminalAIError(message);
 }
 
-/**
- * Where a call failed, from what the failure carries. A timeout and a lost connection both arrive
- * without a status, so they are not told apart here (no cause is logged for them).
- */
-function failureCause(failure: ProviderFailure | null, provider: string): FailureCause | undefined {
-  if (!failure) return 'UNCLASSIFIED';
-  if (provider === 'gemini' && failure.status === 504) return 'PROVIDER_DEADLINE';
-  if (failure.status !== undefined || failure.kind === 'INVALID_OUTPUT') return 'PROVIDER_ANSWER';
-  return undefined;
-}
-
 /** What happens after a failed call: a pause, waiting for the user to fix access, or held. */
 type NextStep = 'paused' | 'waiting_for_user' | 'held';
 
@@ -239,7 +227,8 @@ function logFailure(
     provider: access.provider,
     model: call.modelId,
     kind: failure?.kind ?? 'UNCLASSIFIED',
-    failureCause: failureCause(failure, access.provider),
+    failureCause: failure?.failureCause ?? 'UNCLASSIFIED',
+    networkCode: failure?.networkCode,
     status: failure?.status,
     providerCode: failure?.providerCode,
     durationMs: outcome.durationMs,

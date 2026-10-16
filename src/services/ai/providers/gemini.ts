@@ -1,7 +1,8 @@
 import { GoogleGenAI, Schema, ThinkingLevel, Type } from '@google/genai';
 import { z } from 'zod';
 import type { CatalogModel, CatalogProvider } from '../../../contracts/aiCatalog';
-import { ACCESS_FAILURE_KINDS, ProviderFailure } from '../errors';
+import { ACCESS_FAILURE_KINDS, ProviderFailure, ProviderFailureDetails } from '../errors';
+import { droppedConnection } from './network';
 import { ProviderClient, VERIFY_TIMEOUT_MS, VerifyResult } from './types';
 
 const THINKING_LEVELS = { minimal: ThinkingLevel.MINIMAL, low: ThinkingLevel.LOW } as const;
@@ -83,13 +84,23 @@ function googleErrorBody(err: unknown): {
 }
 
 /**
+ * Where a Gemini call that got no answer failed: our own timer, the connection, or anything else,
+ * which is our bug.
+ */
+function unansweredCall(err: unknown): ProviderFailureDetails {
+  if (err instanceof Error && err.name === 'AbortError') return { failureCause: 'TIMEOUT' };
+  return droppedConnection(err) ?? { failureCause: 'UNCLASSIFIED' };
+}
+
+/**
  * Gemini API error mapping (plan §3.6). Starting table; each row must be confirmed with a real key
  * before Gemini is offered in production. Anything unrecognized is an unknown outcome: the
  * conservative choice, held and never replayed.
  *
  * 503 ("high demand") and 504 ("deadline expired") are Google's own answers that it did not do the
  * work, and Google does not charge a request that fails with a 400 or 500 error. Both are a busy
- * provider, not a limit on the user's account and not an unknown outcome.
+ * provider, not a limit on the user's account and not an unknown outcome. The 504 is Google's own
+ * deadline, the model's time limit we send with each call.
  */
 export function classifyGeminiError(err: unknown): ProviderFailure {
   if (err instanceof ProviderFailure) return err;
@@ -97,12 +108,13 @@ export function classifyGeminiError(err: unknown): ProviderFailure {
     typeof err === 'object' && err !== null && 'status' in err && typeof err.status === 'number'
       ? err.status
       : undefined;
-  if (status === undefined) return new ProviderFailure('OUTCOME_UNKNOWN');
+  if (status === undefined) return new ProviderFailure('OUTCOME_UNKNOWN', unansweredCall(err));
   const body = googleErrorBody(err);
-  const details = {
+  const details: ProviderFailureDetails = {
     status,
     providerCode: body.reason ?? body.status,
     retryAfterMs: body.retryAfterMs,
+    failureCause: status === 504 ? 'PROVIDER_DEADLINE' : 'PROVIDER_ANSWER',
   };
   if (body.reason === 'API_KEY_INVALID' || status === 401)
     return new ProviderFailure('KEY_REJECTED', details);
@@ -125,6 +137,13 @@ function thinkingConfig(model: CatalogModel | undefined) {
   return {};
 }
 
+/**
+ * Google is told the model's own time limit (in seconds) and answers 504 DEADLINE_EXCEEDED when it
+ * passes. We stop waiting this much later, so Google's answer normally comes first.
+ */
+const SERVER_TIMEOUT_HEADER = 'X-Server-Timeout';
+const ANSWER_GRACE_MS = 15_000;
+
 /** The fixed text of a key check. It holds nothing of the user's. */
 const VERIFY_INPUT = 'Reply with OK.';
 const VERIFY_MAX_OUTPUT_TOKENS = 16;
@@ -137,6 +156,12 @@ export function createGeminiClient(provider: CatalogProvider, apiKey: string): P
   });
   return {
     async generateStructured({ contract, model, input }) {
+      // Built before the call: an error in our own code is never taken for the provider's answer.
+      const responseSchema = geminiSchema(contract.schema);
+      // Not the SDK's `timeout`: it sends Google the same deadline it stops waiting at, so which
+      // one ends the call first is luck. Our own timer stops the call 15 seconds after Google's.
+      const stop = new AbortController();
+      const timer = setTimeout(() => stop.abort(), model.timeoutMs + ANSWER_GRACE_MS);
       let response;
       try {
         response = await client.models.generateContent({
@@ -145,15 +170,20 @@ export function createGeminiClient(provider: CatalogProvider, apiKey: string): P
           config: {
             systemInstruction: contract.instructions,
             responseMimeType: 'application/json',
-            responseSchema: geminiSchema(contract.schema),
+            responseSchema,
             ...(model.temperature === null ? {} : { temperature: model.temperature }),
             maxOutputTokens: contract.maxOutputTokens,
             ...thinkingConfig(model),
-            httpOptions: { timeout: model.timeoutMs },
+            httpOptions: {
+              headers: { [SERVER_TIMEOUT_HEADER]: String(Math.ceil(model.timeoutMs / 1000)) },
+            },
+            abortSignal: stop.signal,
           },
         });
       } catch (err) {
         throw classifyGeminiError(err);
+      } finally {
+        clearTimeout(timer);
       }
       const usage = {
         inputTokens: response.usageMetadata?.promptTokenCount ?? null,

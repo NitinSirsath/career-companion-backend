@@ -1,8 +1,9 @@
-import OpenAI, { APIConnectionError, APIError, APIUserAbortError } from 'openai';
+import OpenAI, { APIConnectionError, APIConnectionTimeoutError, APIError } from 'openai';
 import type { CatalogProvider } from '../../../contracts/aiCatalog';
 import { ACCESS_FAILURE_KINDS, ProviderFailure } from '../errors';
 import { retryAfterMs } from './headers';
 import { nullsToAbsent, strictJsonSchema } from './jsonSchema';
+import { droppedConnection, libraryConnectionFailure } from './network';
 import { ProviderClient, VERIFY_TIMEOUT_MS, VerifyResult } from './types';
 
 /**
@@ -11,10 +12,15 @@ import { ProviderClient, VERIFY_TIMEOUT_MS, VerifyResult } from './types';
  */
 export function classifyOpenAIError(err: unknown): ProviderFailure {
   if (err instanceof ProviderFailure) return err;
-  if (err instanceof APIConnectionError || err instanceof APIUserAbortError)
-    return new ProviderFailure('OUTCOME_UNKNOWN');
+  if (err instanceof APIConnectionError)
+    return new ProviderFailure(
+      'OUTCOME_UNKNOWN',
+      libraryConnectionFailure(err, err instanceof APIConnectionTimeoutError),
+    );
+  const dropped = droppedConnection(err);
+  if (dropped) return new ProviderFailure('OUTCOME_UNKNOWN', dropped);
   if (!(err instanceof APIError) || typeof err.status !== 'number')
-    return new ProviderFailure('OUTCOME_UNKNOWN');
+    return new ProviderFailure('OUTCOME_UNKNOWN', { failureCause: 'UNCLASSIFIED' });
   const status = err.status;
   const code = typeof err.code === 'string' ? err.code : err.type;
   const details = {
@@ -45,6 +51,8 @@ export function createOpenAIClient(provider: CatalogProvider, apiKey: string): P
   });
   return {
     async generateStructured({ contract, model, input }) {
+      // Built before the call: an error in our own code is never taken for the provider's answer.
+      const schema = strictJsonSchema(contract.schema);
       let completion;
       try {
         completion = await client.chat.completions.create(
@@ -58,7 +66,7 @@ export function createOpenAIClient(provider: CatalogProvider, apiKey: string): P
               type: 'json_schema',
               json_schema: {
                 name: contract.schemaName,
-                schema: strictJsonSchema(contract.schema),
+                schema,
                 strict: true,
               },
             },
