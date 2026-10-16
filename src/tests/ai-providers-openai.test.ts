@@ -30,16 +30,15 @@ vi.mock('openai', async (importOriginal) => {
 });
 
 const SENTINEL = 'sk-test-SENTINEL-openai private email body';
-const apiError = (status: number, code?: string, headers: Record<string, string> = {}) =>
+const apiError = (
+  status: number,
+  code?: string | null,
+  headers: Record<string, string> = {},
+  type = 'invalid_request_error',
+) =>
   APIError.generate(
     status,
-    {
-      error: {
-        message: `Incorrect API key provided: ${SENTINEL}`,
-        type: 'invalid_request_error',
-        code,
-      },
-    },
+    { error: { message: `Incorrect API key provided: ${SENTINEL}`, type, code } },
     undefined,
     new Headers(headers),
   );
@@ -82,12 +81,26 @@ describe('OpenAI error mapping (plan §3.6)', () => {
       apiError(429, 'insufficient_quota'),
       'ACCOUNT_OR_BILLING',
     ],
+    [
+      '429 billing_not_active (no active billing)',
+      apiError(429, null, {}, 'billing_not_active'),
+      'ACCOUNT_OR_BILLING',
+    ],
+    [
+      '400 billing_hard_limit_reached (spend limit)',
+      apiError(400, 'billing_hard_limit_reached'),
+      'ACCOUNT_OR_BILLING',
+    ],
     ['404 model', apiError(404, 'model_not_found'), 'MODEL_UNAVAILABLE'],
     ['400 model_not_found', apiError(400, 'model_not_found'), 'MODEL_UNAVAILABLE'],
     ['429 rate limit', apiError(429, 'rate_limit_exceeded'), 'RATE_LIMITED'],
-    ['503 overloaded', apiError(503), 'RATE_LIMITED'],
-    ['500', apiError(500), 'OUTCOME_UNKNOWN'],
-    ['502', apiError(502), 'OUTCOME_UNKNOWN'],
+    ['500 server error', apiError(500, null, {}, 'server_error'), 'PROVIDER_BUSY'],
+    ['502 bad gateway', apiError(502), 'PROVIDER_BUSY'],
+    ['503 overloaded', apiError(503, null, {}, 'server_error'), 'PROVIDER_BUSY'],
+    ['504 gateway timeout', apiError(504), 'PROVIDER_BUSY'],
+    ['409 conflict', apiError(409), 'PROVIDER_BUSY'],
+    ['408 (not in the busy list)', apiError(408), 'OUTCOME_UNKNOWN'],
+    ['501 (not in the busy list)', apiError(501), 'OUTCOME_UNKNOWN'],
     ['other 400', apiError(400, 'invalid_value'), 'INVALID_REQUEST'],
     ['timeout', new APIConnectionTimeoutError({ message: SENTINEL }), 'OUTCOME_UNKNOWN'],
     ['unknown error', new Error(SENTINEL), 'OUTCOME_UNKNOWN'],
@@ -144,10 +157,23 @@ describe('OpenAI error mapping (plan §3.6)', () => {
     );
   });
 
-  it.each([500, 503, 504])('%i is an answer, not a deadline: cause PROVIDER_ANSWER', (status) => {
-    expect(classifyOpenAIError(apiError(status))).toMatchObject({
-      failureCause: 'PROVIDER_ANSWER',
-    });
+  it.each([409, 500, 502, 503, 504])(
+    '%i is an answer, not a deadline: cause PROVIDER_ANSWER',
+    (status) => {
+      expect(classifyOpenAIError(apiError(status))).toMatchObject({
+        failureCause: 'PROVIDER_ANSWER',
+      });
+    },
+  );
+
+  it("keeps OpenAI's request ID, so a failure can be found with OpenAI, and only an ID", () => {
+    expect(
+      classifyOpenAIError(apiError(503, null, { 'x-request-id': 'req_7f3a9c2e41b8d6' })),
+    ).toMatchObject({ kind: 'PROVIDER_BUSY', providerRequestId: 'req_7f3a9c2e41b8d6' });
+    expect(classifyOpenAIError(apiError(503)).providerRequestId).toBeUndefined();
+    const odd = classifyOpenAIError(apiError(503, null, { 'x-request-id': `req ${SENTINEL}` }));
+    expect(odd.providerRequestId).toBeUndefined();
+    expect(`${JSON.stringify(odd)} ${inspect(odd)}`).not.toContain('SENTINEL');
   });
 
   it('reads retry-after-ms, retry-after seconds and HTTP dates', () => {
