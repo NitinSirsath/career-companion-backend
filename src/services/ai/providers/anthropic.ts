@@ -1,8 +1,13 @@
-import Anthropic, { APIConnectionError, APIError, APIUserAbortError } from '@anthropic-ai/sdk';
+import Anthropic, {
+  APIConnectionError,
+  APIConnectionTimeoutError,
+  APIError,
+} from '@anthropic-ai/sdk';
 import type { CatalogProvider } from '../../../contracts/aiCatalog';
 import { ACCESS_FAILURE_KINDS, ProviderFailure } from '../errors';
 import { nullsToAbsent, strictJsonSchema } from './jsonSchema';
 import { retryAfterMs } from './headers';
+import { droppedConnection, libraryConnectionFailure } from './network';
 import { ProviderClient, VERIFY_TIMEOUT_MS, VerifyResult } from './types';
 
 /** Anthropic error bodies: `{ type: 'error', error: { type, message } }`. Read in memory only. */
@@ -20,10 +25,15 @@ function errorBody(err: APIError): { type?: string; message?: string } {
  */
 export function classifyAnthropicError(err: unknown): ProviderFailure {
   if (err instanceof ProviderFailure) return err;
-  if (err instanceof APIConnectionError || err instanceof APIUserAbortError)
-    return new ProviderFailure('OUTCOME_UNKNOWN');
+  if (err instanceof APIConnectionError)
+    return new ProviderFailure(
+      'OUTCOME_UNKNOWN',
+      libraryConnectionFailure(err, err instanceof APIConnectionTimeoutError),
+    );
+  const dropped = droppedConnection(err);
+  if (dropped) return new ProviderFailure('OUTCOME_UNKNOWN', dropped);
   if (!(err instanceof APIError) || typeof err.status !== 'number')
-    return new ProviderFailure('OUTCOME_UNKNOWN');
+    return new ProviderFailure('OUTCOME_UNKNOWN', { failureCause: 'UNCLASSIFIED' });
   const status = err.status;
   const { type, message } = errorBody(err);
   const details = { status, providerCode: type, retryAfterMs: retryAfterMs(err.headers) };
@@ -63,6 +73,7 @@ export function createAnthropicClient(provider: CatalogProvider, apiKey: string)
   });
   return {
     async generateStructured({ contract, model, input }) {
+      // Built before the call: an error in our own code is never taken for the provider's answer.
       const schema = strictJsonSchema(contract.schema);
       const native = model.structuredOutput === 'anthropic_native';
       let message;
