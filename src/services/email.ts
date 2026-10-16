@@ -6,7 +6,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { AppError } from '../errors';
 import { logEvent } from '../utils/log';
-import { getAccessState } from './ai/access';
+import { blockingPause, getAccessState, withPause } from './ai/access';
 import { HoldReason, holdOf } from './ai/heldOperations';
 import { enqueueEmailProcessingJob } from './enqueue';
 
@@ -177,7 +177,10 @@ async function approveHeldOperations(
       },
     );
 
-  const access = await getAccessState(userId);
+  // The model a held step uses must not be paused either.
+  const user = await getAccessState(userId);
+  const roles = held.map(({ op }) => (op.operation === 'extraction' ? 'detailed' : 'fast'));
+  const access = withPause(user, blockingPause(user.pauses, roles));
   if (access.state !== 'READY')
     throw new AppError(409, 'AI_ACCESS_UNAVAILABLE', 'Fix AI access before approving a retry.', {
       state: access.state,
