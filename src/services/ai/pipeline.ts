@@ -105,7 +105,9 @@ async function classificationPlan(email: EmailWithResult) {
 
   const operations = await prisma.aIOperation.count({ where: { emailId: email.id } });
   if (result && !operations)
-    throw new TerminalAIError('Legacy partial AI result requires reconciliation');
+    throw new TerminalAIError(
+      'An older AI result for this email is incomplete; Career Companion must check it',
+    );
 
   // The batched check already decided this email; only extraction is left.
   const batchDecision =
@@ -285,7 +287,9 @@ export async function selectExtractionContract(
       rows.length > 1 ||
       rows.some((row) => !['extraction/v2', 'extraction/v3'].includes(row.version))
     )
-      throw new TerminalAIError('Extraction version requires reconciliation');
+      throw new TerminalAIError(
+        'The AI details of this email have conflicting versions; Career Companion must check it',
+      );
     const version =
       rows[0]?.version ?? (agendaExtractionV3Enabled() ? 'extraction/v3' : 'extraction/v2');
     if (!rows.length)
