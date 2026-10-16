@@ -13,7 +13,7 @@ export const QUEUE_NAMES = [
 ] as const;
 
 /**
- * Queues that limit jobs per singleton key (the user). `stately`: one queued and one running.
+ * Queues that limit jobs per singleton key. `stately`: one queued and one running.
  * `short`: one queued, so a job that is running can queue the next one.
  */
 const QUEUE_POLICIES: Partial<Record<(typeof QUEUE_NAMES)[number], 'stately' | 'short'>> = {
