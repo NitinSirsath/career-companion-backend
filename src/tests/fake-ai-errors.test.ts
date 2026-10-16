@@ -15,6 +15,7 @@ import { processEmailJob } from '../jobs/emailProcessingJob';
 import { CLASSIFICATION_CONTRACT } from '../services/ai/contracts';
 import { ProviderFailure } from '../services/ai/errors';
 import { createProviderClient } from '../services/ai/providers';
+import { nextPacificMidnight } from '../services/ai/usage';
 import { EmailProcessingJobData } from '../services/enqueue';
 import { fetchMessageBody, fetchMessageMetadata } from '../services/gmailFetcher';
 import { FIXTURE_KEY, configureAI } from './helpers/aiAccess';
@@ -88,16 +89,16 @@ async function failureOf(fault: FakeAiError, providerId: string) {
 const KINDS_TODAY: Record<FakeAiError, [string, string, string]> = {
   busy: ['PROVIDER_BUSY', 'RATE_LIMITED', 'RATE_LIMITED'],
   'no-answer': ['OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
-  deadline: ['PROVIDER_BUSY', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
+  deadline: ['OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
   'rate-minute': ['RATE_LIMITED', 'RATE_LIMITED', 'RATE_LIMITED'],
   'rate-day': ['RATE_LIMITED', 'RATE_LIMITED', 'RATE_LIMITED'],
   key: ['KEY_REJECTED', 'KEY_REJECTED', 'KEY_REJECTED'],
   billing: ['ACCOUNT_OR_BILLING', 'ACCOUNT_OR_BILLING', 'ACCOUNT_OR_BILLING'],
   'model-gone': ['MODEL_UNAVAILABLE', 'MODEL_UNAVAILABLE', 'MODEL_UNAVAILABLE'],
   unusable: ['INVALID_OUTPUT', 'INVALID_OUTPUT', 'INVALID_OUTPUT'],
-  'no-connection': ['OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
+  'no-connection': ['PROVIDER_BUSY', 'PROVIDER_BUSY', 'PROVIDER_BUSY'],
   'line-dropped': ['OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
-  'server-error': ['OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
+  'server-error': ['PROVIDER_BUSY', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
 };
 const answer = ['PROVIDER_ANSWER', 'PROVIDER_ANSWER', 'PROVIDER_ANSWER'] as const;
 /** Where each fault failed, as the adapters sort it: Gemini, OpenAI, Anthropic. */
@@ -241,31 +242,31 @@ describe('each fake Gemini error through the email pipeline', () => {
     await job;
   }
 
+  /** How long AI pauses, from the try: seconds, or until Google's daily reset. */
+  const pauseOf = (until: Date | null, startedAt: Date | null) => {
+    if (!until || !startedAt) return null;
+    if (until.getTime() === nextPacificMidnight(startedAt).getTime()) return 'Pacific midnight';
+    return (until.getTime() - startedAt.getTime()) / 1000;
+  };
   const busy = { mail: 'PENDING', step: 'PENDING PROVIDER_BUSY', issue: 'PROVIDER_BUSY' };
   const rateLimited = { mail: 'PENDING', step: 'PENDING RATE_LIMITED', issue: 'RATE_LIMITED' };
-  const unknown = {
-    mail: 'FAILED',
-    step: 'UNKNOWN OUTCOME_UNKNOWN',
-    issue: 'PROVIDER_UNAVAILABLE',
-  };
+  // No answer in time: the try is used, the mail waits, and AI pauses as for a busy provider.
+  const noAnswer = { mail: 'PENDING', step: 'RETRYABLE OUTCOME_UNKNOWN', issue: 'PROVIDER_BUSY' };
   const waitsFor = (issue: string) => ({ mail: 'PENDING', step: `PENDING ${issue}`, issue });
   // What the mail, its first AI step and the user's AI state show today after one fake error.
   it.each([
-    ['busy', { ...busy, pauseSeconds: 60 }],
-    ['no-answer', { ...unknown, pauseSeconds: 120 }],
-    ['deadline', { ...busy, pauseSeconds: 60 }],
-    ['rate-minute', { ...rateLimited, pauseSeconds: 10 }],
-    ['rate-day', { ...rateLimited, pauseSeconds: 10 }],
-    ['key', { ...waitsFor('KEY_REJECTED'), pauseSeconds: null }],
-    ['billing', { ...waitsFor('ACCOUNT_OR_BILLING'), pauseSeconds: null }],
-    ['model-gone', { ...waitsFor('MODEL_UNAVAILABLE'), pauseSeconds: null }],
-    [
-      'unusable',
-      { mail: 'FAILED', step: 'FAILED INVALID_OUTPUT', issue: null, pauseSeconds: null },
-    ],
-    ['no-connection', { ...unknown, pauseSeconds: 120 }],
-    ['line-dropped', { ...unknown, pauseSeconds: 120 }],
-    ['server-error', { ...unknown, pauseSeconds: 120 }],
+    ['busy', { ...busy, pause: 60 }],
+    ['no-answer', { ...noAnswer, pause: 60 }],
+    ['deadline', { ...noAnswer, pause: 60 }],
+    ['rate-minute', { ...rateLimited, pause: 10 }],
+    ['rate-day', { ...rateLimited, pause: 'Pacific midnight' }],
+    ['key', { ...waitsFor('KEY_REJECTED'), pause: null }],
+    ['billing', { ...waitsFor('ACCOUNT_OR_BILLING'), pause: null }],
+    ['model-gone', { ...waitsFor('MODEL_UNAVAILABLE'), pause: null }],
+    ['unusable', { mail: 'FAILED', step: 'FAILED INVALID_OUTPUT', issue: null, pause: null }],
+    ['no-connection', { ...busy, pause: 60 }],
+    ['line-dropped', { ...noAnswer, pause: 60 }],
+    ['server-error', { ...busy, pause: 60 }],
   ] as const)('%s → %o', async (fault, expected) => {
     answers = fakeAiAnswers(fault);
     const { id: emailId } = await prisma.email.create({
@@ -275,12 +276,11 @@ describe('each fake Gemini error through the email pipeline', () => {
     const email = await prisma.email.findUniqueOrThrow({ where: { id: emailId } });
     const operation = await prisma.aIOperation.findFirstOrThrow({ where: { emailId } });
     const config = await prisma.aIConfiguration.findUniqueOrThrow({ where: { userId } });
-    const startedAt = operation.startedAt?.getTime() ?? 0;
     expect({
       mail: email.processingState,
       step: `${operation.status} ${operation.errorCode}`,
       issue: config.accessIssue,
-      pauseSeconds: config.cooldownUntil && (config.cooldownUntil.getTime() - startedAt) / 1000,
+      pause: pauseOf(config.cooldownUntil, operation.startedAt),
     }).toEqual(expected);
   });
 });
