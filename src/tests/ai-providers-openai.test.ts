@@ -270,28 +270,38 @@ describe('OpenAI adapter', () => {
   });
 
   it.each([
-    ['truncated output', completion('{"decision":', { finish_reason: 'length' })],
+    ['truncated output', completion('{"decision":', { finish_reason: 'length' }), 'length'],
     [
       'a refusal',
       {
         choices: [{ finish_reason: 'stop', message: { content: null, refusal: SENTINEL } }],
         usage: { prompt_tokens: 1, completion_tokens: 1 },
       },
+      'refusal',
     ],
-    ['empty content', completion(null)],
-    ['non-JSON', completion(`not json ${SENTINEL}`)],
-    ['schema-invalid JSON', completion(JSON.stringify({ decision: 'MAYBE', reasoning: SENTINEL }))],
-  ])('reports %s as INVALID_OUTPUT with usage and no provider text', async (_label, response) => {
-    create.mockResolvedValue(response);
-    const error = await failure(capabilities().classifier.classifyRelevance({ subject: 's' }));
-    expect(error).toBeInstanceOf(ProviderFailure);
-    expect(error.kind).toBe('INVALID_OUTPUT');
-    expect(error.usage).toEqual({
-      inputTokens: response.usage.prompt_tokens,
-      outputTokens: response.usage.completion_tokens,
-    });
-    expect(`${JSON.stringify(error)} ${inspect(error)}`).not.toContain('SENTINEL');
-  });
+    ['empty content', completion(null), undefined],
+    ['non-JSON', completion(`not json ${SENTINEL}`), undefined],
+    [
+      'schema-invalid JSON',
+      completion(JSON.stringify({ decision: 'MAYBE', reasoning: SENTINEL })),
+      undefined,
+    ],
+  ])(
+    'reports %s as INVALID_OUTPUT with usage and no provider text',
+    async (_label, response, stopReason) => {
+      create.mockResolvedValue(response);
+      const error = await failure(capabilities().classifier.classifyRelevance({ subject: 's' }));
+      expect(error).toBeInstanceOf(ProviderFailure);
+      expect(error.kind).toBe('INVALID_OUTPUT');
+      // Why it stopped early, or that the model refused: a token, never its text.
+      expect(error.stopReason).toBe(stopReason);
+      expect(error.usage).toEqual({
+        inputTokens: response.usage.prompt_tokens,
+        outputTokens: response.usage.completion_tokens,
+      });
+      expect(`${JSON.stringify(error)} ${inspect(error)}`).not.toContain('SENTINEL');
+    },
+  );
 
   it('sanitizes SDK errors thrown by a call', async () => {
     create.mockRejectedValue(apiError(429, 'insufficient_quota'));
@@ -321,11 +331,25 @@ describe('OpenAI content-free verification', () => {
       apiError(404, 'model_not_found'),
       { result: 'REJECTED', kind: 'MODEL_UNAVAILABLE', modelId: 'gpt-5-nano' },
     ],
-    [apiError(429, 'rate_limit_exceeded'), { result: 'INCONCLUSIVE' }],
-    [new APIConnectionTimeoutError(), { result: 'INCONCLUSIVE' }],
-  ])('maps a lookup failure (%#) without throwing', async (err, expected) => {
+    [
+      apiError(429, 'rate_limit_exceeded'),
+      {
+        result: 'INCONCLUSIVE',
+        failure: { kind: 'RATE_LIMITED', httpStatus: 429, providerCode: 'rate_limit_exceeded' },
+      },
+    ],
+    [
+      new APIConnectionTimeoutError(),
+      { result: 'INCONCLUSIVE', failure: { kind: 'NO_ANSWER_IN_TIME', cause: 'TIMEOUT' } },
+    ],
+  ])('maps a lookup failure (%#) without throwing, and says why', async (err, expected) => {
     retrieve.mockRejectedValue(err);
-    expect(await client().verifyModels(['gpt-5-nano'])).toEqual(expected);
+    const result = await client().verifyModels(['gpt-5-nano']);
+    expect(result).toMatchObject(expected);
+    expect(result).toMatchObject({
+      failure: { provider: 'openai', model: 'gpt-5-nano', timeoutMs: 10_000 },
+    });
+    expect(JSON.stringify(result)).not.toContain('SENTINEL');
   });
 });
 
