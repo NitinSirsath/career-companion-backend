@@ -522,10 +522,10 @@ model AICallBudget {
 
 // ─── User-provided AI (ADR-0001) ─────────────────────────────────────────────
 
-/// Why a user's AI access cannot be used now. Needs attention: KEY_REJECTED, ACCOUNT_OR_BILLING,
-/// MODEL_UNAVAILABLE, KEY_UNREADABLE (stored key cannot be decrypted; re-enter it). Limited (with
-/// cooldownUntil): RATE_LIMITED, PROVIDER_BUSY (the provider answered that it is overloaded),
-/// PROVIDER_UNAVAILABLE (the provider did not answer).
+/// Why a user's AI access cannot be used now. Needs attention, on the configuration: KEY_REJECTED,
+/// ACCOUNT_OR_BILLING, MODEL_UNAVAILABLE, KEY_UNREADABLE (stored key cannot be decrypted; re-enter
+/// it). A model's pause, on AIModelPause: RATE_LIMITED, PROVIDER_BUSY (the provider answered that
+/// it is overloaded, or did not answer in time), PROVIDER_UNAVAILABLE (older pauses only).
 enum AIAccessIssue {
   KEY_REJECTED
   ACCOUNT_OR_BILLING
@@ -539,31 +539,51 @@ enum AIAccessIssue {
 /// One active AI setup per user (ADR-0001 decision 5). The key is write-only AES-256-GCM
 /// ciphertext bound to the user; it is selected only where a provider call or verification needs it.
 model AIConfiguration {
-  userId              String         @id @db.Uuid
+  userId            String         @id @db.Uuid
   /// Catalog provider ID (code catalog, not a database catalog).
-  provider            String
-  encryptedApiKey     String
+  provider          String
+  encryptedApiKey   String
   /// null follows the catalog's recommended model for the role.
-  fastModel           String?
-  detailedModel       String?
-  accessIssue         AIAccessIssue?
-  accessIssueModel    String?
-  verifiedAt          DateTime?
-  lastCheckedAt       DateTime?
-  /// Per-user provider cooldown; survives the UTC day boundary.
-  cooldownUntil       DateTime?
-  consecutiveFailures Int            @default(0)
+  fastModel         String?
+  detailedModel     String?
+  accessIssue       AIAccessIssue?
+  accessIssueModel  String?
+  verifiedAt        DateTime?
+  lastCheckedAt     DateTime?
   /// Catalog disclosure version the user agreed to, and when.
-  consentDisclosure   String
-  consentedAt         DateTime
+  consentDisclosure String
+  consentedAt       DateTime
   /// Incremented on every save; job-side state writes are conditional on it.
-  revision            Int            @default(0)
-  createdAt           DateTime       @default(now())
-  updatedAt           DateTime       @updatedAt
+  revision          Int            @default(0)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pauses AIModelPause[]
 
   @@map("ai_configurations")
+}
+
+/// One model's pause for one user: the provider was busy, limited the key, or did not answer in
+/// time. Each model pauses on its own; a success on the model removes its row. Survives the UTC
+/// day boundary.
+model AIModelPause {
+  userId              String          @db.Uuid
+  /// Catalog model ID.
+  model               String
+  reason              AIAccessIssue
+  resumesAt           DateTime?
+  /// Failures in a row on this model: each makes the next pause longer.
+  consecutiveFailures Int             @default(0)
+  /// The waiting mail "Read waiting mails now" sent as a test, when, and how it failed (null while
+  /// it runs). Only the test mail may use the model until it answers.
+  testEmailId         String?         @db.Uuid
+  testStartedAt       DateTime?
+  testResult          String?
+  configuration       AIConfiguration @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@id([userId, model])
+  @@map("ai_model_pauses")
 }
 
 /// Career Companion's own per-user counts for one UTC day. `calls` is the safety limit counter.
