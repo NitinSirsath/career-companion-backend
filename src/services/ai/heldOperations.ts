@@ -33,6 +33,26 @@ function heldBatchClaim(op: LedgerRow, now: Date): { approvable: HoldReason | nu
   return { approvable: stale ? 'OUTCOME_UNKNOWN' : null };
 }
 
+/** The email's operations that are not tried again by themselves, each with its hold. */
+export function heldOperations<Op extends LedgerRow>(
+  email: {
+    aiProcessingResult: { processingStatus: string } | null;
+    aiOperations: Op[];
+  },
+  now: Date,
+): { holds: { op: Op; approvable: HoldReason | null }[]; legacyPartial: boolean } {
+  const holds = email.aiOperations.flatMap((op) => {
+    const hold = holdOf(op, now);
+    return hold ? [{ op, approvable: hold.approvable }] : [];
+  });
+  // A result from before the ledger, left unfinished: only the operator can finish it.
+  const legacyPartial =
+    !!email.aiProcessingResult &&
+    email.aiProcessingResult.processingStatus !== 'COMPLETED' &&
+    email.aiOperations.length === 0;
+  return { holds, legacyPartial };
+}
+
 /** null: not held. `approvable: null`: held for the operator only. */
 export function holdOf(op: LedgerRow, now: Date): { approvable: HoldReason | null } | null {
   if (op.status === 'COMPLETED') return null;
