@@ -84,9 +84,14 @@ describe('Anthropic error mapping (plan §3.6)', () => {
     ['403 permission_error', apiError(403, 'permission_error'), 'ACCOUNT_OR_BILLING'],
     ['404 not_found_error', apiError(404, 'not_found_error'), 'MODEL_UNAVAILABLE'],
     ['429 rate_limit_error', apiError(429, 'rate_limit_error'), 'RATE_LIMITED'],
-    ['529 overloaded_error', apiError(529, 'overloaded_error'), 'RATE_LIMITED'],
-    ['500 api_error', apiError(500, 'api_error'), 'OUTCOME_UNKNOWN'],
-    ['504 timeout_error', apiError(504, 'timeout_error'), 'OUTCOME_UNKNOWN'],
+    ['529 overloaded_error', apiError(529, 'overloaded_error'), 'PROVIDER_BUSY'],
+    ['529 with no error type', apiError(529), 'PROVIDER_BUSY'],
+    ['500 api_error', apiError(500, 'api_error'), 'PROVIDER_BUSY'],
+    ['503', apiError(503), 'PROVIDER_BUSY'],
+    ['504 timeout_error', apiError(504, 'timeout_error'), 'PROVIDER_BUSY'],
+    ['409 conflict', apiError(409), 'PROVIDER_BUSY'],
+    ['408 (not in the busy list)', apiError(408), 'OUTCOME_UNKNOWN'],
+    ['502 (not in the busy list)', apiError(502), 'OUTCOME_UNKNOWN'],
     ['other 400', apiError(400, 'invalid_request_error'), 'INVALID_REQUEST'],
     ['413', apiError(413, 'request_too_large'), 'INVALID_REQUEST'],
     ['timeout', new APIConnectionTimeoutError({ message: SENTINEL }), 'OUTCOME_UNKNOWN'],
@@ -142,7 +147,7 @@ describe('Anthropic error mapping (plan §3.6)', () => {
     );
   });
 
-  it.each([500, 503, 504, 529])(
+  it.each([409, 500, 503, 504, 529])(
     '%i is an answer, not a deadline: cause PROVIDER_ANSWER',
     (status) => {
       expect(classifyAnthropicError(apiError(status))).toMatchObject({
@@ -150,6 +155,20 @@ describe('Anthropic error mapping (plan §3.6)', () => {
       });
     },
   );
+
+  it("keeps Anthropic's request ID, so a failure can be found with Anthropic, and only an ID", () => {
+    expect(
+      classifyAnthropicError(
+        apiError(529, 'overloaded_error', 'x', { 'request-id': 'req_011CSHoEeqs5C35K2UUqR7Fy' }),
+      ),
+    ).toMatchObject({ kind: 'PROVIDER_BUSY', providerRequestId: 'req_011CSHoEeqs5C35K2UUqR7Fy' });
+    expect(classifyAnthropicError(apiError(529)).providerRequestId).toBeUndefined();
+    const odd = classifyAnthropicError(
+      apiError(529, 'overloaded_error', 'x', { 'request-id': `req ${SENTINEL}` }),
+    );
+    expect(odd.providerRequestId).toBeUndefined();
+    expect(`${JSON.stringify(odd)} ${inspect(odd)}`).not.toContain('SENTINEL');
+  });
 
   it('keeps the error type token and the retry-after delay', () => {
     expect(
@@ -289,7 +308,7 @@ describe('Anthropic adapter', () => {
         subject: 's',
       }),
     );
-    expect(error).toMatchObject({ kind: 'RATE_LIMITED', status: 529 });
+    expect(error).toMatchObject({ kind: 'PROVIDER_BUSY', status: 529 });
     expect(error.message).not.toContain('SENTINEL');
   });
 });
