@@ -4,6 +4,7 @@
  * through the queue. There is no Career Companion key and no fallback to another provider.
  */
 import { AIAccessIssue, AIModelPause } from '@prisma/client';
+import type { AIFailure } from '../../contracts/ai';
 import { prisma } from '../../db/prisma';
 import {
   AI_ROLES,
@@ -16,6 +17,7 @@ import {
 import { AICapabilities, BoundModels, bindCapabilities } from './capabilities';
 import { CredentialUnreadableError, openApiKey } from './credentials';
 import { AIAccessError, AccessReason } from './errors';
+import { readFailure } from './failures';
 import { createProviderClient } from './providers';
 import { nextUtcMidnight, userDailyCallLimit, utcDay } from './usage';
 import { isProduction } from '../../utils/config';
@@ -38,6 +40,7 @@ export const CONFIGURATION_STATE = {
   detailedModel: true,
   accessIssue: true,
   accessIssueModel: true,
+  accessFailure: true,
   verifiedAt: true,
   lastCheckedAt: true,
   consentDisclosure: true,
@@ -63,6 +66,10 @@ export interface ModelPause {
   resumesAt: Date;
   /** The test mail of "Read waiting mails now" while it waits for the model's answer. */
   testEmailId: string | null;
+  /** The last test mail of "Read waiting mails now", and how it failed (null while it runs). */
+  test: { emailId: string; startedAt: Date | null; result: string | null } | null;
+  /** The failure that started or last extended the pause. */
+  failure: AIFailure | null;
 }
 
 /** The user's own access state, and the running pauses of the models the setup uses now. */
@@ -135,11 +142,22 @@ export function runningPauses(
   const provider = config && getCatalogProvider(config.provider);
   if (!provider) return [];
   const { models } = modelsFor(provider, config);
-  return rows.flatMap(({ model, reason, resumesAt, testEmailId, testResult }) => {
+  return rows.flatMap((row) => {
+    const { model, reason, resumesAt, testEmailId, testResult } = row;
     const roles = AI_ROLES.filter((role) => models[role].id === model);
     if (!roles.length || !resumesAt || resumesAt <= now) return [];
     return [
-      { model, roles, reason, resumesAt, testEmailId: testResult === null ? testEmailId : null },
+      {
+        model,
+        roles,
+        reason,
+        resumesAt,
+        testEmailId: testResult === null ? testEmailId : null,
+        test: testEmailId
+          ? { emailId: testEmailId, startedAt: row.testStartedAt, result: testResult }
+          : null,
+        failure: readFailure(row.lastFailure),
+      },
     ];
   });
 }
@@ -159,11 +177,22 @@ export function blockingPause(
 
 /**
  * The state for work that needs a paused model: the user's own problems come first, then the
- * pause, then Career Companion's daily limit (the plan §3.7 precedence).
+ * pause, then Career Companion's daily limit (the plan §3.7 precedence). `pause` is set when the
+ * pause decides it.
  */
-export function withPause(access: AccessStatus, pause: ModelPause | null): AccessStatus {
-  if (!pause || (access.state !== 'READY' && access.reason !== 'SAFETY_LIMIT')) return access;
-  return { state: 'LIMITED', reason: pause.reason, modelId: null, resumesAt: pause.resumesAt };
+export function withPause(
+  access: AccessStatus,
+  pause: ModelPause | null,
+): AccessStatus & { pause: ModelPause | null } {
+  if (!pause || (access.state !== 'READY' && access.reason !== 'SAFETY_LIMIT'))
+    return { ...access, pause: null };
+  return {
+    state: 'LIMITED',
+    reason: pause.reason,
+    modelId: pause.model,
+    resumesAt: pause.resumesAt,
+    pause,
+  };
 }
 
 export async function callsToday(userId: string, now: Date): Promise<number> {
