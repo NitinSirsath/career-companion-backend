@@ -127,7 +127,6 @@ export const EmailAIStatusSchema = z.object({
   readNowTest: z.enum(['TEST_MAIL', 'WAITS_FOR_TEST_MAIL']).nullable(),
 });
 export type EmailAIStatus = z.infer<typeof EmailAIStatusSchema>;
-
 export type AIRetryApprovalDetails = z.infer<typeof AIRetryApprovalDetailsSchema>;
 
 export const CorrectEmailMatchRequestSchema = z
