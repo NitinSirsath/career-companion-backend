@@ -99,8 +99,30 @@ const KINDS_TODAY: Record<FakeAiError, [string, string, string]> = {
   'line-dropped': ['OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
   'server-error': ['OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
 };
+const answer = ['PROVIDER_ANSWER', 'PROVIDER_ANSWER', 'PROVIDER_ANSWER'] as const;
+/** Where each fault failed, as the adapters sort it: Gemini, OpenAI, Anthropic. */
+const CAUSES: Record<FakeAiError, readonly [string, string, string]> = {
+  busy: answer,
+  'no-answer': ['TIMEOUT', 'TIMEOUT', 'TIMEOUT'],
+  deadline: ['PROVIDER_DEADLINE', 'PROVIDER_ANSWER', 'PROVIDER_ANSWER'],
+  'rate-minute': answer,
+  'rate-day': answer,
+  key: answer,
+  billing: answer,
+  'model-gone': answer,
+  unusable: answer,
+  'no-connection': ['NETWORK', 'NETWORK', 'NETWORK'],
+  'line-dropped': ['NETWORK_AFTER_SEND', 'NETWORK_AFTER_SEND', 'NETWORK_AFTER_SEND'],
+  'server-error': answer,
+};
+const NETWORK_CODES: Partial<Record<FakeAiError, string>> = {
+  'no-connection': 'ENOTFOUND',
+  'line-dropped': 'ECONNRESET',
+};
 const byProvider = FAULTS.flatMap((fault) =>
-  AI_PROVIDER_IDS.map((providerId, i) => [fault, providerId, KINDS_TODAY[fault][i]] as const),
+  AI_PROVIDER_IDS.map(
+    (providerId, i) => [fault, providerId, KINDS_TODAY[fault][i], CAUSES[fault][i]] as const,
+  ),
 );
 
 describe('each fake AI error through the real adapter and error handling', () => {
@@ -111,10 +133,12 @@ describe('each fake AI error through the real adapter and error handling', () =>
     vi.useRealTimers();
   });
 
-  it.each(byProvider)('%s from %s → %s', async (fault, providerId, kind) => {
+  it.each(byProvider)('%s from %s → %s, cause %s', async (fault, providerId, kind, cause) => {
     const failure = await failureOf(fault, providerId);
     expect(failure).toBeInstanceOf(ProviderFailure);
     expect(failure.kind).toBe(kind);
+    expect(failure.failureCause).toBe(cause);
+    expect(failure.networkCode).toBe(NETWORK_CODES[fault]);
   });
 
   it.each([
