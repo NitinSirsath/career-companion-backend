@@ -102,19 +102,18 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
 
     await recordEmailFailure(userId, emailId, failure, final);
 
-    logError(
-      'job_failed',
-      {
-        jobId: job.id,
-        emailId,
-        outcome: failureOutcome(terminal, exhausted),
-        errorCategory: failure.category,
-        errorStage: failure.stage,
-        durationMs: Date.now() - startTime,
-        ...attempt,
-      },
-      err,
-    );
+    const fields = {
+      jobId: job.id,
+      emailId,
+      outcome: failureOutcome(terminal, exhausted),
+      errorStage: failure.stage,
+      durationMs: Date.now() - startTime,
+      ...attempt,
+    };
+    // An AI or Gmail failure is an expected outcome: a warning with our category, without a
+    // stack. Anything else is a fault in our code or database: an error with its own category.
+    if (failure.category === 'ProcessingError') logError('job_failed', fields, err);
+    else logWarn('job_failed', { ...fields, errorCategory: failure.category });
     // Terminal work is acknowledged; anything else lets pg-boss record retry or exhaustion.
     // The original error stays in memory: only the sanitized category reaches pg-boss storage.
     if (!terminal) throw new EmailJobFailure(failure.category);
