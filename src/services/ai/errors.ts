@@ -1,3 +1,5 @@
+import type { AIFailure } from '../../contracts/ai';
+
 /**
  * Base of every AI-layer error. Messages are application-written; there is deliberately no
  * `cause`, so an original provider or SDK error can never travel with it into logs or storage.
@@ -131,6 +133,8 @@ export interface ProviderFailureDetails {
   providerCode?: string;
   retryAfterMs?: number;
   quotaScope?: QuotaScope;
+  freeTier?: boolean;
+  stopReason?: string;
   usage?: { inputTokens: number | null; outputTokens: number | null };
   /** Where the call failed. The provider's answer, unless the adapter says otherwise. */
   failureCause?: FailureCause;
@@ -148,6 +152,10 @@ export class ProviderFailure extends AIProviderError {
   readonly providerCode?: string;
   readonly retryAfterMs?: number;
   readonly quotaScope?: QuotaScope;
+  /** The quota a rate limit hit was the provider's free tier. */
+  readonly freeTier?: boolean;
+  /** Why the provider stopped an unusable answer (for example MAX_TOKENS); a token, never text. */
+  readonly stopReason?: string;
   readonly usage?: { inputTokens: number | null; outputTokens: number | null };
   readonly failureCause: FailureCause;
   /** The failed connection's system or undici code, from a fixed list; never free text. */
@@ -169,6 +177,9 @@ export class ProviderFailure extends AIProviderError {
         : undefined;
     this.retryAfterMs = details.retryAfterMs;
     this.quotaScope = details.quotaScope;
+    this.freeTier = details.freeTier;
+    this.stopReason =
+      details.stopReason && PROVIDER_CODE.test(details.stopReason) ? details.stopReason : undefined;
     this.usage = details.usage;
     this.failureCause = details.failureCause ?? 'PROVIDER_ANSWER';
     this.networkCode =
@@ -202,6 +213,8 @@ export class AIAccessError extends AIProviderError {
   constructor(
     readonly reason: AccessReason,
     readonly resumesAt: Date | null = null,
+    /** The failure behind a model's pause, when it is known. */
+    readonly failure: AIFailure | null = null,
   ) {
     super('AI access is not available', false);
     this.name = 'AIAccessError';
