@@ -1,3 +1,4 @@
+import type { AIFailure } from '../../../contracts/ai';
 import type { CatalogModel } from '../../../contracts/aiCatalog';
 import type { AIContract, AIUsage } from '../contracts';
 
@@ -21,7 +22,8 @@ export interface StructuredResponse {
 
 /**
  * Check that a key authenticates and can use the given models. It never sends anything of the
- * user's: a model lookup, or a fixed tiny request where a lookup proves nothing.
+ * user's: a model lookup, or a fixed tiny request where a lookup proves nothing. A check that
+ * failed says which model, what the provider answered and how long it waited (`failure`).
  */
 export type VerifyResult =
   | { result: 'VERIFIED' }
@@ -29,8 +31,9 @@ export type VerifyResult =
       result: 'REJECTED';
       kind: 'KEY_REJECTED' | 'ACCOUNT_OR_BILLING' | 'MODEL_UNAVAILABLE';
       modelId?: string;
+      failure?: AIFailure;
     }
-  | { result: 'INCONCLUSIVE' };
+  | { result: 'INCONCLUSIVE'; failure?: AIFailure };
 
 export interface ProviderClient {
   /**
