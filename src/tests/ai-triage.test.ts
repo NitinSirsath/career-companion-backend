@@ -26,7 +26,7 @@ import {
   autoIrrelevant,
 } from '../services/ai/triage';
 import { RELEVANCE_TRIAGE_WORKER_OPTIONS } from '../jobs/relevanceTriageJob';
-import { relevanceTriageJobOptions } from '../services/enqueue';
+import { enqueueAiResume, relevanceTriageJobOptions } from '../services/enqueue';
 import { getQueue } from '../services/queue';
 import { parseAI_TRIAGE_BATCH_ENABLED, parseAI_TRIAGE_BATCH_SIZE } from '../utils/config';
 import { fetchMessageMetadata } from '../services/gmailFetcher';
@@ -36,6 +36,7 @@ import { holdOf } from '../services/ai/heldOperations';
 import { bindCapabilities } from '../services/ai/capabilities';
 import { strictJsonSchema } from '../services/ai/providers/jsonSchema';
 import { reofferPendingEmails } from '../services/ai/offer';
+import { nextUtcMidnight, utcDay } from '../services/ai/usage';
 
 const send = vi.fn();
 const classify = vi.fn();
@@ -43,6 +44,7 @@ const classifySingle = vi.fn();
 vi.mock('../services/enqueue', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/enqueue')>()),
   enqueueEmailProcessingJob: vi.fn(async (...args: unknown[]) => send(...args)),
+  enqueueAiResume: vi.fn(async () => 'resume-job'),
 }));
 vi.mock('../services/queue', () => ({
   QUEUE_NAMES: [
@@ -54,7 +56,11 @@ vi.mock('../services/queue', () => ({
   getQueue: vi.fn(),
 }));
 vi.mock('../services/gmailFetcher');
-vi.mock('../services/ai/access', () => ({ getAccessState: vi.fn(), resolveAIAccess: vi.fn() }));
+vi.mock('../services/ai/access', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/ai/access')>()),
+  getAccessState: vi.fn(),
+  resolveAIAccess: vi.fn(),
+}));
 
 const providerFixture = {
   provider: 'fixture',
@@ -98,13 +104,9 @@ beforeEach(async () => {
   process.env.RELEVANCE_CONFIDENCE_THRESHOLD = '0.7';
   await prisma.aIConfiguration.update({
     where: { userId },
-    data: {
-      cooldownUntil: null,
-      accessIssue: null,
-      accessIssueModel: null,
-      consecutiveFailures: 0,
-    },
+    data: { accessIssue: null, accessIssueModel: null },
   });
+  await prisma.aIModelPause.deleteMany({ where: { userId } });
   vi.mocked(fetchMessageMetadata).mockResolvedValue({
     labelIds: ['INBOX'],
     snippet: 'fixture',
@@ -283,6 +285,7 @@ describe('COM-125 relevance batch pure behavior', () => {
       reason: null,
       modelId: null,
       resumesAt: null,
+      pauses: [],
     });
     vi.mocked(resolveAIAccess).mockResolvedValue(provider);
     await runTriage(userId);
@@ -530,6 +533,7 @@ describe('COM-125 relevance batch pure behavior', () => {
       reason: null,
       modelId: null,
       resumesAt: null,
+      pauses: [],
     });
     vi.mocked(resolveAIAccess).mockResolvedValue(provider);
     classify.mockResolvedValue({
@@ -563,6 +567,7 @@ describe('COM-125 relevance batch pure behavior', () => {
       reason: null,
       modelId: null,
       resumesAt: null,
+      pauses: [],
     });
     vi.mocked(resolveAIAccess).mockResolvedValue(provider);
   };
@@ -819,10 +824,104 @@ describe('COM-125 relevance batch pure behavior', () => {
       reason: 'RATE_LIMITED',
       modelId: null,
       resumesAt: null,
+      pauses: [],
     });
     await expect(runTriage(userId)).resolves.toMatchObject({ stoppedBy: 'access_not_ready' });
     expect(fetchMessageMetadata).not.toHaveBeenCalled();
     expect(await prisma.aIOperation.count({ where: { emailId: email.id } })).toBe(0);
+  });
+
+  it('42a sorting stops while the fast model is paused, not for a pause of the detailed model', async () => {
+    const email = await prisma.email.create({ data: { userId, gmailMessageId: 'paused-1' } });
+    const pause = (model: string, roles: ('fast' | 'detailed')[]) => ({
+      model,
+      roles,
+      reason: 'PROVIDER_BUSY' as const,
+      resumesAt: new Date(Date.now() + 60_000),
+      testEmailId: null,
+    });
+    const access = { state: 'READY', reason: null, modelId: null, resumesAt: null } as const;
+    vi.mocked(fetchMessageMetadata).mockClear();
+    vi.mocked(getAccessState).mockResolvedValue({
+      ...access,
+      pauses: [pause('fixture-fast', ['fast'])],
+    });
+    await expect(runTriage(userId)).resolves.toMatchObject({ stoppedBy: 'access_not_ready' });
+    expect(fetchMessageMetadata).not.toHaveBeenCalled();
+
+    vi.mocked(getAccessState).mockResolvedValue({
+      ...access,
+      pauses: [pause('fixture-detailed', ['detailed'])],
+    });
+    vi.mocked(resolveAIAccess).mockResolvedValue(provider);
+    classify.mockResolvedValue({
+      data: { results: [{ key: 'e1', decision: 'IRRELEVANT', confidence: 0.9, category: null }] },
+      usage: { inputTokens: 1, outputTokens: 1 },
+      version: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH,
+      model: 'fixture-fast',
+    });
+    await runTriage(userId);
+    expect(classify).toHaveBeenCalledTimes(1);
+    expect(await prisma.email.findUniqueOrThrow({ where: { id: email.id } })).toMatchObject({
+      relevanceState: 'IRRELEVANT',
+    });
+  });
+
+  it('42b a batch claims nothing on a paused fast model, and a refusal pauses that model only', async () => {
+    const email = await prisma.email.create({ data: { userId, gmailMessageId: 'paused-2' } });
+    const items = [
+      { emailId: email.id, input: { sender: null, subject: 'x', labels: [], snippet: null } },
+    ];
+    classify.mockRejectedValue(new ProviderFailure('PROVIDER_BUSY'));
+    await expect(classifyBatch(userId, items, provider)).rejects.toBeInstanceOf(AIAccessError);
+    const paused = await prisma.aIModelPause.findMany({ where: { userId } });
+    expect(paused).toEqual([
+      expect.objectContaining({
+        model: 'fixture-fast',
+        reason: 'PROVIDER_BUSY',
+        consecutiveFailures: 1,
+      }),
+    ]);
+    // During the pause nothing more is sent or claimed.
+    classify.mockClear();
+    await expect(classifyBatch(userId, items, provider)).rejects.toMatchObject({
+      reason: 'PROVIDER_BUSY',
+      resumesAt: paused[0].resumesAt,
+    });
+    expect(classify).not.toHaveBeenCalled();
+    expect(await prisma.aIBatch.count({ where: { userId } })).toBe(1);
+  });
+
+  it("42c waits for midnight UTC while Career Companion's daily limit is reached", async () => {
+    const resumesAt = new Date(Date.now() + 3_600_000);
+    vi.mocked(getAccessState).mockResolvedValue({
+      state: 'LIMITED',
+      reason: 'SAFETY_LIMIT',
+      modelId: null,
+      resumesAt,
+      pauses: [],
+    });
+    vi.mocked(enqueueAiResume).mockClear();
+    await expect(runTriage(userId)).resolves.toMatchObject({ stoppedBy: 'access_not_ready' });
+    expect(enqueueAiResume).toHaveBeenCalledWith(userId, resumesAt);
+  });
+
+  it("42d a run that reaches Career Companion's daily limit waits for midnight UTC", async () => {
+    const email = await prisma.email.create({ data: { userId, gmailMessageId: 'limit-run-1' } });
+    ready();
+    process.env.AI_USER_DAILY_CALL_LIMIT = '1';
+    await prisma.aIUsageDay.create({ data: { userId, day: utcDay(new Date()), calls: 1 } });
+    vi.mocked(enqueueAiResume).mockClear();
+    try {
+      await expect(runTriage(userId)).resolves.toMatchObject({ stoppedBy: 'ai_failure' });
+    } finally {
+      process.env.AI_USER_DAILY_CALL_LIMIT = '100';
+    }
+    expect(classify).not.toHaveBeenCalled();
+    expect(enqueueAiResume).toHaveBeenCalledWith(userId, nextUtcMidnight(new Date()));
+    expect(await prisma.email.findUniqueOrThrow({ where: { id: email.id } })).toMatchObject({
+      processingState: 'PENDING',
+    });
   });
 
   it('26 redaction logs contain no provider input fields', () => {
@@ -867,6 +966,7 @@ describe('strict relevance rules apply to new mails only', () => {
       reason: null,
       modelId: null,
       resumesAt: null,
+      pauses: [],
     });
     vi.mocked(resolveAIAccess).mockResolvedValue(provider);
   };
