@@ -163,19 +163,25 @@ describe('Gemini error mapping (plan §3.6)', () => {
     violations: quotaIds.map((quotaId) => ({ quotaMetric: SENTINEL, quotaId })),
   });
   it.each([
-    ['a daily free-tier limit', ['GenerateRequestsPerDayPerProjectPerModel-FreeTier'], 'PER_DAY'],
-    ['a per-minute limit', ['GenerateRequestsPerMinutePerProjectPerModel'], 'PER_MINUTE'],
+    [
+      'a daily free-tier limit',
+      ['GenerateRequestsPerDayPerProjectPerModel-FreeTier'],
+      'PER_DAY',
+      true,
+    ],
+    ['a per-minute limit', ['GenerateRequestsPerMinutePerProjectPerModel'], 'PER_MINUTE', false],
     [
       'per-minute and daily limits at once',
       ['GenerateContentInputTokensPerModelPerMinute', 'GenerateRequestsPerDayPerProjectPerModel'],
       'PER_DAY',
+      false,
     ],
-    ['no quota named', [], undefined],
-  ])('reads which quota a 429 hit: %s → %s', (_label, quotaIds, quotaScope) => {
+    ['no quota named', [], undefined, false],
+  ])('reads which quota a 429 hit: %s → %s', (_label, quotaIds, quotaScope, freeTier) => {
     const mapped = classifyGeminiError(
       googleError(429, { status: 'RESOURCE_EXHAUSTED', details: [quotaFailure(...quotaIds)] }),
     );
-    expect(mapped).toMatchObject({ kind: 'RATE_LIMITED', quotaScope });
+    expect(mapped).toMatchObject({ kind: 'RATE_LIMITED', quotaScope, freeTier });
     expect(`${JSON.stringify(mapped)} ${inspect(mapped)}`).not.toContain('SENTINEL');
   });
 });
@@ -313,6 +319,27 @@ describe('Gemini adapter', () => {
     },
   );
 
+  it.each([
+    [
+      'cut off',
+      { text: '{"decision": "REL', candidates: [{ finishReason: 'MAX_TOKENS' }] },
+      'MAX_TOKENS',
+    ],
+    ['blocked', { text: '', promptFeedback: { blockReason: 'SAFETY' } }, 'SAFETY'],
+    ['stopped by safety', { text: '', candidates: [{ finishReason: 'SAFETY' }] }, 'SAFETY'],
+    ['a normal stop', { text: 'not json', candidates: [{ finishReason: 'STOP' }] }, undefined],
+    [
+      'a reason that is not a token',
+      { text: '', candidates: [{ finishReason: `MAX ${SENTINEL}` }] },
+      undefined,
+    ],
+  ])('says why Google stopped an unusable answer: %s', async (_label, response, stopReason) => {
+    mockGenerateContent.mockResolvedValue(response);
+    const error = await failure(capabilities().classifier.classifyRelevance({ sender: 'test' }));
+    expect(error).toMatchObject({ kind: 'INVALID_OUTPUT', stopReason });
+    expect(`${JSON.stringify(error)} ${inspect(error)}`).not.toContain('SENTINEL');
+  });
+
   it('extracts missing fields as null on the detailed model', async () => {
     mockGenerateContent.mockResolvedValue({
       text: JSON.stringify({
@@ -393,6 +420,12 @@ describe('Gemini key check', () => {
       result: 'REJECTED',
       kind: 'MODEL_UNAVAILABLE',
       modelId: 'gemini-2.5-flash',
+      failure: expect.objectContaining({
+        kind: 'MODEL_UNAVAILABLE',
+        model: 'gemini-2.5-flash',
+        httpStatus: 404,
+        providerCode: 'NOT_FOUND',
+      }),
     });
   });
 
@@ -409,14 +442,35 @@ describe('Gemini key check', () => {
       googleError(404),
       { result: 'REJECTED', kind: 'MODEL_UNAVAILABLE', modelId: 'gemini-2.5-flash-lite' },
     ],
-    [googleError(429), { result: 'INCONCLUSIVE' }],
-    [googleError(503, { status: 'UNAVAILABLE' }), { result: 'INCONCLUSIVE' }],
-    [googleError(504, { status: 'DEADLINE_EXCEEDED' }), { result: 'INCONCLUSIVE' }],
-    [googleError(500), { result: 'INCONCLUSIVE' }],
-    [new TypeError('fetch failed'), { result: 'INCONCLUSIVE' }],
-  ])('maps a failed check (%#) without throwing', async (err, expected) => {
+    [googleError(429), { result: 'INCONCLUSIVE', failure: { kind: 'RATE_LIMITED' } }],
+    [
+      googleError(503, { status: 'UNAVAILABLE' }),
+      {
+        result: 'INCONCLUSIVE',
+        failure: { kind: 'PROVIDER_BUSY', httpStatus: 503, providerCode: 'UNAVAILABLE' },
+      },
+    ],
+    [
+      googleError(504, { status: 'DEADLINE_EXCEEDED' }),
+      {
+        result: 'INCONCLUSIVE',
+        failure: { kind: 'NO_ANSWER_IN_TIME', cause: 'PROVIDER_DEADLINE', httpStatus: 504 },
+      },
+    ],
+    [googleError(500), { result: 'INCONCLUSIVE', failure: { kind: 'PROVIDER_BUSY' } }],
+    [
+      new TypeError('fetch failed'),
+      { result: 'INCONCLUSIVE', failure: { kind: 'INTERNAL_ERROR', cause: 'UNCLASSIFIED' } },
+    ],
+  ])('maps a failed check (%#) without throwing, and says why', async (err, expected) => {
     mockGenerateContent.mockRejectedValue(err);
-    expect(await client().verifyModels(['gemini-2.5-flash-lite'])).toEqual(expected);
+    const result = await client().verifyModels(['gemini-2.5-flash-lite']);
+    expect(result).toMatchObject(expected);
+    // Which model, how long the check waited and its own limit; never the provider's text.
+    expect(result).toMatchObject({
+      failure: { provider: 'gemini', model: 'gemini-2.5-flash-lite', timeoutMs: 10_000 },
+    });
+    expect(JSON.stringify(result)).not.toContain('SENTINEL');
   });
 });
 
