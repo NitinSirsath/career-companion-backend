@@ -115,6 +115,19 @@ const FAILURE_MESSAGES: Record<FailureKind, string> = {
 };
 
 const PROVIDER_CODE = /^[A-Za-z_]{2,64}$/;
+const NETWORK_CODE =
+  /^(ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|UND_ERR_[A-Z_]{1,40})$/;
+
+export interface ProviderFailureDetails {
+  message?: string;
+  status?: number;
+  providerCode?: string;
+  retryAfterMs?: number;
+  usage?: { inputTokens: number | null; outputTokens: number | null };
+  /** Where the call failed. The provider's answer, unless the adapter says otherwise. */
+  failureCause?: FailureCause;
+  networkCode?: string;
+}
 
 /**
  * Thrown by provider adapters and the capability layer only, and converted at the operation
@@ -127,16 +140,13 @@ export class ProviderFailure extends AIProviderError {
   readonly providerCode?: string;
   readonly retryAfterMs?: number;
   readonly usage?: { inputTokens: number | null; outputTokens: number | null };
+  readonly failureCause: FailureCause;
+  /** The failed connection's system or undici code, from a fixed list; never free text. */
+  readonly networkCode?: string;
 
   constructor(
     readonly kind: FailureKind,
-    details: {
-      message?: string;
-      status?: number;
-      providerCode?: string;
-      retryAfterMs?: number;
-      usage?: { inputTokens: number | null; outputTokens: number | null };
-    } = {},
+    details: ProviderFailureDetails = {},
   ) {
     super(
       details.message ?? FAILURE_MESSAGES[kind],
@@ -150,6 +160,11 @@ export class ProviderFailure extends AIProviderError {
         : undefined;
     this.retryAfterMs = details.retryAfterMs;
     this.usage = details.usage;
+    this.failureCause = details.failureCause ?? 'PROVIDER_ANSWER';
+    this.networkCode =
+      details.networkCode && NETWORK_CODE.test(details.networkCode)
+        ? details.networkCode
+        : undefined;
   }
 }
 
