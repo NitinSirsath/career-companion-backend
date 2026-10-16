@@ -132,16 +132,15 @@ describe('Anthropic error mapping (plan §3.6)', () => {
     ],
     ['an abort we never ask for', new APIUserAbortError({ message: SENTINEL }), 'UNCLASSIFIED'],
     ['unknown error', new Error(SENTINEL), 'UNCLASSIFIED'],
-  ])(
-    '%s with no answer → OUTCOME_UNKNOWN, cause %s',
-    (_label, err, failureCause, networkCode?: string) => {
-      const mapped = classifyAnthropicError(err);
-      expect(mapped).toMatchObject({ kind: 'OUTCOME_UNKNOWN', failureCause, networkCode });
-      expect(`${JSON.stringify(mapped)} ${inspect(mapped)} ${mapped.stack}`).not.toContain(
-        'SENTINEL',
-      );
-    },
-  );
+  ])('%s with no answer: cause %s', (_label, err, failureCause, networkCode?: string) => {
+    const mapped = classifyAnthropicError(err);
+    // A request that never left is busy (no try used); anything else is no answer in time.
+    const kind = failureCause === 'NETWORK' ? 'PROVIDER_BUSY' : 'OUTCOME_UNKNOWN';
+    expect(mapped).toMatchObject({ kind, failureCause, networkCode });
+    expect(`${JSON.stringify(mapped)} ${inspect(mapped)} ${mapped.stack}`).not.toContain(
+      'SENTINEL',
+    );
+  });
 
   it.each([500, 503, 504, 529])(
     '%i is an answer, not a deadline: cause PROVIDER_ANSWER',
