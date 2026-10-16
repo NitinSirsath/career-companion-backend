@@ -77,7 +77,6 @@ describe('access state precedence (plan §3.7)', () => {
       { state: 'NEEDS_ATTENTION', reason: 'MODEL_UNAVAILABLE', modelId: 'gemini-2.5-flash' },
     ],
     [
-
       'safety limit',
       base,
       10,
