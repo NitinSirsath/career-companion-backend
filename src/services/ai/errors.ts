@@ -51,7 +51,7 @@ export class SchemaValidationFailure extends TerminalAIError {
 /** An operation's outcome is unknown (timeout, lost connection): held, never replayed. */
 export class AIOutcomeUnknownError extends TerminalAIError {
   constructor() {
-    super('AI provider outcome unknown; reconciliation required');
+    super(FAILURE_MESSAGES.OUTCOME_UNKNOWN);
     this.name = 'OutcomeUnknown';
   }
 }
@@ -72,6 +72,20 @@ export type FailureKind =
   | 'OUTCOME_UNKNOWN'
   | 'INVALID_OUTPUT'
   | 'INVALID_REQUEST';
+
+/**
+ * Where a call failed, logged with each failure: our own timer ran out (TIMEOUT), Google answered
+ * that its deadline expired (PROVIDER_DEADLINE, 504), no connection before the request was sent
+ * (NETWORK), the connection dropped after it was sent (NETWORK_AFTER_SEND), the provider answered
+ * (PROVIDER_ANSWER), or an error we cannot sort, which is our own bug (UNCLASSIFIED).
+ */
+export type FailureCause =
+  | 'TIMEOUT'
+  | 'PROVIDER_DEADLINE'
+  | 'NETWORK'
+  | 'NETWORK_AFTER_SEND'
+  | 'PROVIDER_ANSWER'
+  | 'UNCLASSIFIED';
 
 export const ACCESS_FAILURE_KINDS = [
   'KEY_REJECTED',
@@ -95,7 +109,7 @@ const FAILURE_MESSAGES: Record<FailureKind, string> = {
   MODEL_UNAVAILABLE: 'AI model is not available to this key',
   RATE_LIMITED: 'AI provider rejected request; retry after cooldown',
   PROVIDER_BUSY: 'AI provider is busy; retry after cooldown',
-  OUTCOME_UNKNOWN: 'AI provider outcome unknown; reconciliation required',
+  OUTCOME_UNKNOWN: 'No clear answer from the AI provider; it is not tried again by itself',
   INVALID_OUTPUT: 'AI provider returned malformed structured data',
   INVALID_REQUEST: 'AI provider rejected request',
 };
