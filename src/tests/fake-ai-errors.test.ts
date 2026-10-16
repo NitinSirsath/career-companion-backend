@@ -209,12 +209,8 @@ describe('each fake Gemini error through the email pipeline', () => {
   beforeEach(async () => {
     vi.mocked(fetchMessageMetadata).mockResolvedValue({ labelIds: ['INBOX'], snippet: 'Hello' });
     vi.mocked(fetchMessageBody).mockResolvedValue('Synthetic interview invitation body');
-    await configureAI(userId, {
-      accessIssue: null,
-      accessIssueModel: null,
-      cooldownUntil: null,
-      consecutiveFailures: 0,
-    });
+    await configureAI(userId, { accessIssue: null, accessIssueModel: null });
+    await prisma.aIModelPause.deleteMany({ where: { userId } });
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -242,18 +238,18 @@ describe('each fake Gemini error through the email pipeline', () => {
     await job;
   }
 
-  /** How long AI pauses, from the try: seconds, or until Google's daily reset. */
-  const pauseOf = (until: Date | null, startedAt: Date | null) => {
+  /** How long the model pauses, from the try (to the second): seconds, or until Google's daily reset. */
+  const pauseOf = (until: Date | null | undefined, startedAt: Date | null) => {
     if (!until || !startedAt) return null;
     if (until.getTime() === nextPacificMidnight(startedAt).getTime()) return 'Pacific midnight';
-    return (until.getTime() - startedAt.getTime()) / 1000;
+    return Math.round((until.getTime() - startedAt.getTime()) / 1000);
   };
   const busy = { mail: 'PENDING', step: 'PENDING PROVIDER_BUSY', issue: 'PROVIDER_BUSY' };
   const rateLimited = { mail: 'PENDING', step: 'PENDING RATE_LIMITED', issue: 'RATE_LIMITED' };
-  // No answer in time: the try is used, the mail waits, and AI pauses as for a busy provider.
+  // No answer in time: the try is used, the mail waits, and the model pauses as for a busy provider.
   const noAnswer = { mail: 'PENDING', step: 'RETRYABLE OUTCOME_UNKNOWN', issue: 'PROVIDER_BUSY' };
   const waitsFor = (issue: string) => ({ mail: 'PENDING', step: `PENDING ${issue}`, issue });
-  // What the mail, its first AI step and the user's AI state show today after one fake error.
+  // What the mail, its first AI step and the user's or the model's AI state show after one fake error.
   it.each([
     ['busy', { ...busy, pause: 60 }],
     ['no-answer', { ...noAnswer, pause: 60 }],
@@ -276,11 +272,16 @@ describe('each fake Gemini error through the email pipeline', () => {
     const email = await prisma.email.findUniqueOrThrow({ where: { id: emailId } });
     const operation = await prisma.aIOperation.findFirstOrThrow({ where: { emailId } });
     const config = await prisma.aIConfiguration.findUniqueOrThrow({ where: { userId } });
+    const paused = await prisma.aIModelPause.findMany({ where: { userId } });
+    // Only the model of the step that failed pauses.
+    expect(paused.map((pause) => pause.model)).toEqual(
+      expected.pause === null ? [] : [operation.model],
+    );
     expect({
       mail: email.processingState,
       step: `${operation.status} ${operation.errorCode}`,
-      issue: config.accessIssue,
-      pause: pauseOf(config.cooldownUntil, operation.startedAt),
+      issue: config.accessIssue ?? paused[0]?.reason ?? null,
+      pause: pauseOf(paused[0]?.resumesAt, operation.startedAt),
     }).toEqual(expected);
   });
 });
