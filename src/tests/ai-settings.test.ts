@@ -4,9 +4,9 @@ import { app } from '../index';
 import { prisma } from '../db/prisma';
 import { openApiKey, sealApiKey } from '../services/ai/credentials';
 import { createProviderClient, VerifyResult } from '../services/ai/providers';
-import { utcDay } from '../services/ai/usage';
+import { nextUtcMidnight, utcDay } from '../services/ai/usage';
 import { reofferPendingEmails, resumeWaitingEmails } from '../services/ai/offer';
-import { configureAI } from './helpers/aiAccess';
+import { configureAI, pauseOf, setPause } from './helpers/aiAccess';
 import { JobExtractionSchema } from '../services/ai/contracts';
 import { ProviderFailure } from '../services/ai/errors';
 import { fakeProviderClient } from './helpers/fakeProviderClient';
@@ -19,6 +19,8 @@ vi.mock('../services/queue', () => ({
 }));
 
 const OWNER = 'owner@ai-settings.test';
+const FAST = 'gemini-3.5-flash-lite';
+const DETAILED = 'gemini-3.8-flash';
 const OTHER = 'other@ai-settings.test';
 const KEY = 'AIza-test-SENTINEL-0123456789abcdef';
 const DISCLOSURE = 'gemini-draft-2026-10';
@@ -174,16 +176,51 @@ describe('saving verifies first and stores a write-only key', () => {
   });
 
   it('replaces the ciphertext when a new key is saved and resets limitation state', async () => {
-    await configureAI(userId, {
-      cooldownUntil: new Date(Date.now() + 60_000),
-      accessIssue: 'RATE_LIMITED',
+    await configureAI(userId, { accessIssue: 'ACCOUNT_OR_BILLING' });
+    await setPause(userId, DETAILED, {
+      reason: 'RATE_LIMITED',
+      resumesAt: new Date(Date.now() + 60_000),
       consecutiveFailures: 3,
     });
     const before = (await config())!;
     await put({ provider: 'gemini', apiKey: KEY });
     const after = (await config())!;
     expect(after.encryptedApiKey).not.toBe(before.encryptedApiKey);
-    expect(after).toMatchObject({ cooldownUntil: null, accessIssue: null, consecutiveFailures: 0 });
+    expect(after).toMatchObject({ accessIssue: null });
+    expect(await pauseOf(userId, DETAILED)).toBeNull();
+  });
+
+  it("ends a role's pause when another model is chosen for it; a model the save keeps stays paused", async () => {
+    await configureAI(userId);
+    await setPause(userId, DETAILED, {
+      resumesAt: new Date(Date.now() + 25 * 60_000),
+      consecutiveFailures: 6,
+    });
+    const fastPause = await setPause(userId, FAST, {
+      reason: 'RATE_LIMITED',
+      resumesAt: new Date(Date.now() + 60_000),
+    });
+    // Sorted already: it waits for the detailed model.
+    const waiting = await prisma.email.create({ data: { userId, gmailMessageId: 'needs-detail' } });
+    await prisma.aIOperation.create({
+      data: {
+        emailId: waiting.id,
+        operation: 'classification',
+        version: 'classification/v3',
+        status: 'COMPLETED',
+      },
+    });
+    const res = await put({
+      provider: 'gemini',
+      apiKey: '',
+      models: { detailed: 'gemini-2.5-flash' },
+    });
+    expect(res.status).toBe(200);
+    expect(await pauseOf(userId, DETAILED)).toBeNull();
+    expect(await pauseOf(userId, FAST)).toEqual(fastPause);
+    // Reading the details continues at once with the new model.
+    expect(jobs()).toEqual([['email-processing-job', { userId, emailId: waiting.id }]]);
+    expect(res.body.access).toMatchObject({ state: 'LIMITED', reason: 'RATE_LIMITED' });
   });
 
   it.each([
@@ -229,9 +266,10 @@ describe('saving verifies first and stores a write-only key', () => {
   });
 
   it('switches provider only after the new key verifies, with new consent and a fresh state', async () => {
-    await configureAI(userId, {
-      accessIssue: 'RATE_LIMITED',
-      cooldownUntil: new Date(Date.now() + 60_000),
+    await configureAI(userId, { accessIssue: 'KEY_REJECTED' });
+    await setPause(userId, DETAILED, {
+      reason: 'RATE_LIMITED',
+      resumesAt: new Date(Date.now() + 60_000),
       consecutiveFailures: 2,
     });
     const before = (await config())!;
@@ -268,10 +306,9 @@ describe('saving verifies first and stores a write-only key', () => {
     expect(after).toMatchObject({
       provider: 'openai',
       accessIssue: null,
-      cooldownUntil: null,
-      consecutiveFailures: 0,
       revision: before.revision + 1,
     });
+    expect(await prisma.aIModelPause.count({ where: { userId } })).toBe(0);
   });
 
   it("is per user: another user's settings stay separate", async () => {
@@ -285,12 +322,23 @@ describe('check again and remove', () => {
     expect((await check()).status).toBe(404);
   });
 
-  it('clears a needs-attention problem on success but keeps an active rate-limit cooldown', async () => {
-    const cooldownUntil = new Date(Date.now() + 60_000);
-    await configureAI(userId, { accessIssue: 'KEY_REJECTED', cooldownUntil });
+  it("clears a needs-attention problem on success but never changes a model's pause", async () => {
+    await configureAI(userId, { accessIssue: 'KEY_REJECTED' });
+    const paused = await setPause(userId, DETAILED, {
+      reason: 'RATE_LIMITED',
+      resumesAt: new Date(Date.now() + 60_000),
+      consecutiveFailures: 2,
+    });
     const res = await check();
-    expect(res.body).toMatchObject({ verification: 'VERIFIED', access: { verified: true } });
-    expect(await config()).toMatchObject({ accessIssue: null, cooldownUntil });
+    expect(res.body).toMatchObject({
+      verification: 'VERIFIED',
+      access: { verified: true, state: 'LIMITED', reason: 'RATE_LIMITED' },
+    });
+    expect(await config()).toMatchObject({ accessIssue: null });
+    expect(await pauseOf(userId, DETAILED)).toEqual(paused);
+    verifyResult = { result: 'INCONCLUSIVE' };
+    await check();
+    expect(await pauseOf(userId, DETAILED)).toEqual(paused);
   });
 
   it('records a definitive rejection and never overwrites known state when inconclusive', async () => {
@@ -343,12 +391,31 @@ describe('re-offering waiting emails', () => {
     expect(await reofferPendingEmails(userId)).toBe(0);
     await configureAI(userId, { accessIssue: 'KEY_REJECTED' });
     expect(await reofferPendingEmails(userId)).toBe(0);
-    await configureAI(userId, {
-      accessIssue: 'RATE_LIMITED',
-      cooldownUntil: new Date(Date.now() + 60_000),
+    // One model in both roles, paused: nothing can be read.
+    await configureAI(userId, { accessIssue: null, fastModel: DETAILED });
+    await setPause(userId, DETAILED, {
+      reason: 'RATE_LIMITED',
+      resumesAt: new Date(Date.now() + 60_000),
     });
     expect(await reofferPendingEmails(userId)).toBe(0);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('leaves mail that needs a paused model waiting and offers the mail another model reads', async () => {
+    await configureAI(userId);
+    await setPause(userId, DETAILED, { resumesAt: new Date(Date.now() + 60_000) });
+    const unsorted = await prisma.email.create({ data: { userId, gmailMessageId: 'unsorted' } });
+    const sorted = await prisma.email.create({ data: { userId, gmailMessageId: 'sorted' } });
+    await prisma.aIOperation.create({
+      data: {
+        emailId: sorted.id,
+        operation: 'classification',
+        version: 'classification/v3',
+        status: 'COMPLETED',
+      },
+    });
+    expect(await reofferPendingEmails(userId)).toBe(1);
+    expect(jobs()).toEqual([['email-processing-job', { userId, emailId: unsorted.id }]]);
   });
 
   it('re-offers at most 100 pending emails, newest first, once access is ready', async () => {
@@ -395,9 +462,9 @@ const jobs = () => send.mock.calls.map((call) => (call as unknown[]).slice(0, 2)
 
 describe('reading waiting mail by itself when a pause ends', () => {
   it('offers the waiting mail again once the pause is over', async () => {
-    await configureAI(userId, {
-      accessIssue: 'PROVIDER_BUSY',
-      cooldownUntil: new Date(Date.now() - 1000),
+    await configureAI(userId);
+    await setPause(userId, FAST, {
+      resumesAt: new Date(Date.now() - 1000),
       consecutiveFailures: 1,
     });
     const waiting = await prisma.email.create({ data: { userId, gmailMessageId: 'resume-1' } });
@@ -405,36 +472,30 @@ describe('reading waiting mail by itself when a pause ends', () => {
     expect(jobs()).toEqual([['email-processing-job', { userId, emailId: waiting.id }]]);
   });
 
-  it('waits for the newer pause when one is running, and offers nothing', async () => {
-    const until = new Date(Date.now() + 90_000);
-    await configureAI(userId, { accessIssue: 'PROVIDER_BUSY', cooldownUntil: until });
+  it("leaves mail for a model that is still paused to that pause's own job", async () => {
+    await configureAI(userId);
+    await setPause(userId, FAST, { resumesAt: new Date(Date.now() + 90_000) });
     await prisma.email.create({ data: { userId, gmailMessageId: 'resume-2' } });
-    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     await resumeWaitingEmails(userId);
-    expect(jobs()).toEqual([['ai-resume-job', { userId }]]);
-    expect((send.mock.calls[0] as unknown[])[2]).toMatchObject({
-      startAfter: new Date(until.getTime() + 2000),
-    });
-    expect(log.mock.calls.map(([line]) => JSON.parse(String(line)))).toContainEqual(
-      expect.objectContaining({
-        event: 'ai_pause_extended',
-        userId,
-        reason: 'PROVIDER_BUSY',
-        resumesAt: until.toISOString(),
-      }),
-    );
-    log.mockRestore();
+    expect(send).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['a key problem', { accessIssue: 'KEY_REJECTED' }, {}],
-    ['the daily safety limit', {}, { calls: 500 }],
-  ] as const)('makes no automatic try for %s', async (_label, state, used) => {
-    await configureAI(userId, state);
-    await prisma.aIUsageDay.create({ data: { userId, day: utcDay(new Date()), ...used } });
+  it('makes no automatic try for a key problem', async () => {
+    await configureAI(userId, { accessIssue: 'KEY_REJECTED' });
     await prisma.email.create({ data: { userId, gmailMessageId: 'resume-3' } });
     await resumeWaitingEmails(userId);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("waits for midnight UTC while Career Companion's daily limit is reached", async () => {
+    await configureAI(userId);
+    await prisma.aIUsageDay.create({ data: { userId, day: utcDay(new Date()), calls: 500 } });
+    await prisma.email.create({ data: { userId, gmailMessageId: 'resume-4' } });
+    await resumeWaitingEmails(userId);
+    expect(jobs()).toEqual([['ai-resume-job', { userId }]]);
+    expect((send.mock.calls[0] as unknown[])[2]).toMatchObject({
+      startAfter: new Date(nextUtcMidnight(new Date()).getTime() + 2000),
+    });
   });
 });
 
@@ -442,32 +503,75 @@ describe('read waiting mails now', () => {
   const readNow = (body: object = {}, email = OWNER) =>
     request(app).post('/api/ai/waiting/read').set(as(email)).send(body);
 
-  it('ends a running pause, keeps the count of failed tries and offers the waiting mail', async () => {
-    await configureAI(userId, {
-      accessIssue: 'PROVIDER_BUSY',
-      cooldownUntil: new Date(Date.now() + 25 * 60_000),
-      consecutiveFailures: 4,
+  /** A waiting mail received on that day; `sorted` mails wait for the detailed model. */
+  const waitingMail = async (day: number, sorted: boolean) => {
+    const email = await prisma.email.create({
+      data: { userId, gmailMessageId: `now-${day}`, receivedAt: new Date(Date.UTC(2026, 9, day)) },
     });
-    const waiting = await prisma.email.create({ data: { userId, gmailMessageId: 'now-1' } });
+    if (sorted)
+      await prisma.aIOperation.create({
+        data: {
+          emailId: email.id,
+          operation: 'classification',
+          version: 'classification/v3',
+          status: 'COMPLETED',
+        },
+      });
+    return email.id;
+  };
+
+  it('during a pause sends one waiting mail first, as a test; the others wait for it', async () => {
+    await configureAI(userId);
+    const resumesAt = new Date(Date.now() + 25 * 60_000);
+    await setPause(userId, DETAILED, { resumesAt, consecutiveFailures: 4 });
+    const older = await waitingMail(10, true);
+    const test = await waitingMail(11, true);
+    const unsorted = await waitingMail(12, false);
     await prisma.email.create({
       data: { userId, gmailMessageId: 'now-done', processingState: 'COMPLETED' },
     });
     const res = await readNow();
     expect(res.status).toBe(200);
+    // While the test runs, the screen shows a new try instead of the pause.
     expect(res.body).toMatchObject({
       access: { state: 'READY', reason: null, resumesAt: null },
-      waitingEmails: 1,
+      waitingEmails: 3,
     });
     expect(JSON.stringify(res.body)).not.toContain('SENTINEL');
-    // If the provider is still busy, the next pause grows from here instead of starting over.
-    expect(await config()).toMatchObject({ cooldownUntil: null, consecutiveFailures: 4 });
-    expect(jobs()).toEqual([['email-processing-job', { userId, emailId: waiting.id }]]);
+    // The newest mail that needs the paused model goes first, alone.
+    expect(jobs()).toEqual([['email-processing-job', { userId, emailId: test }]]);
+    // The pause and its count stay: only the test mail may use the model until it answers.
+    expect(await pauseOf(userId, DETAILED)).toMatchObject({
+      resumesAt,
+      consecutiveFailures: 4,
+      testEmailId: test,
+      testStartedAt: expect.any(Date),
+      testResult: null,
+    });
+    // A sync meanwhile offers the test mail and mail for the other model, never the rest.
+    send.mockClear();
+    expect(await reofferPendingEmails(userId)).toBe(2);
+    expect(jobs().map(([, data]) => (data as { emailId: string }).emailId)).toEqual([
+      unsorted,
+      test,
+    ]);
+    expect(jobs().flat()).not.toContainEqual({ userId, emailId: older });
+  });
+
+  it('offers the waiting mail as usual when none of it needs the paused model', async () => {
+    await configureAI(userId);
+    const paused = await setPause(userId, DETAILED, { resumesAt: new Date(Date.now() + 60_000) });
+    const unsorted = await waitingMail(12, false);
+    expect((await readNow()).status).toBe(200);
+    expect(jobs()).toEqual([['email-processing-job', { userId, emailId: unsorted }]]);
+    expect(await pauseOf(userId, DETAILED)).toEqual(paused);
   });
 
   it('offers waiting mail that was left after a pause ended', async () => {
-    await configureAI(userId, {
-      accessIssue: 'RATE_LIMITED',
-      cooldownUntil: new Date(Date.now() - 1000),
+    await configureAI(userId);
+    await setPause(userId, FAST, {
+      reason: 'RATE_LIMITED',
+      resumesAt: new Date(Date.now() - 1000),
     });
     const waiting = await prisma.email.create({ data: { userId, gmailMessageId: 'now-2' } });
     expect((await readNow()).status).toBe(200);
@@ -475,17 +579,28 @@ describe('read waiting mails now', () => {
   });
 
   it.each([
-    ['a key problem', { accessIssue: 'KEY_REJECTED' }, {}, 'KEY_REJECTED'],
-    ['a refused model', { accessIssue: 'MODEL_UNAVAILABLE' }, {}, 'MODEL_UNAVAILABLE'],
-    ['the daily safety limit', {}, { calls: 500 }, 'SAFETY_LIMIT'],
-  ] as const)('changes nothing and offers nothing for %s', async (_label, state, used, reason) => {
+    ['a key problem', { accessIssue: 'KEY_REJECTED' }, 'KEY_REJECTED'],
+    ['a refused model', { accessIssue: 'MODEL_UNAVAILABLE' }, 'MODEL_UNAVAILABLE'],
+  ] as const)('changes nothing and offers nothing for %s', async (_label, state, reason) => {
     await configureAI(userId, state);
-    await prisma.aIUsageDay.create({ data: { userId, day: utcDay(new Date()), ...used } });
     await prisma.email.create({ data: { userId, gmailMessageId: 'now-3' } });
     const res = await readNow();
     expect(res.status).toBe(200);
     expect(res.body.access.reason).toBe(reason);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('offers nothing at the daily safety limit: the waiting mail is read after midnight UTC', async () => {
+    await configureAI(userId);
+    await prisma.aIUsageDay.create({ data: { userId, day: utcDay(new Date()), calls: 500 } });
+    await prisma.email.create({ data: { userId, gmailMessageId: 'now-3' } });
+    const res = await readNow();
+    expect(res.status).toBe(200);
+    expect(res.body.access.reason).toBe('SAFETY_LIMIT');
+    expect(jobs()).toEqual([['ai-resume-job', { userId }]]);
+    expect((send.mock.calls[0] as unknown[])[2]).toMatchObject({
+      startAfter: new Date(nextUtcMidnight(new Date()).getTime() + 2000),
+    });
   });
 
   it('answers a user without AI as not set up', async () => {
@@ -496,13 +611,11 @@ describe('read waiting mails now', () => {
   });
 
   it("never touches another user's pause or mail", async () => {
-    await configureAI(userId, {
-      accessIssue: 'PROVIDER_BUSY',
-      cooldownUntil: new Date(Date.now() + 60_000),
-    });
+    await configureAI(userId);
+    const paused = await setPause(userId, FAST, { resumesAt: new Date(Date.now() + 60_000) });
     await prisma.email.create({ data: { userId, gmailMessageId: 'now-4' } });
     expect((await readNow({}, OTHER)).status).toBe(200);
-    expect((await config())!.cooldownUntil).not.toBeNull();
+    expect(await pauseOf(userId, FAST)).toEqual(paused);
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -595,12 +708,42 @@ describe('sample-email test', () => {
       details: { state: 'LIMITED', reason: 'PROVIDER_BUSY' },
     });
     expect(res.body.error.details.resumesAt).toEqual(expect.any(String));
-    expect((await config())!.accessIssue).toBe('PROVIDER_BUSY');
+    // Only the model that was busy pauses.
+    expect(await pauseOf(userId, FAST)).toMatchObject({ reason: 'PROVIDER_BUSY' });
+    expect(await pauseOf(userId, DETAILED)).toBeNull();
+    expect((await config())!.accessIssue).toBeNull();
     expect(send).toHaveBeenCalledWith(
       'ai-resume-job',
       { userId },
-      expect.objectContaining({ singletonKey: `resume:${userId}` }),
+      expect.objectContaining({
+        singletonKey: `resume:${userId}:${res.body.error.details.resumesAt}`,
+      }),
     );
+  });
+
+  it("makes no call on a paused model, and a success on the other model leaves that model's pause", async () => {
+    await configureAI(userId);
+    const resumesAt = new Date(Date.now() + 60_000);
+    const paused = await setPause(userId, DETAILED, { resumesAt, consecutiveFailures: 2 });
+    client = fakeProviderClient({
+      classification: {
+        decision: 'RELEVANT',
+        category: 'INTERVIEW',
+        confidence: 0.9,
+        reasoning: 'r',
+      },
+      extraction,
+    });
+    vi.mocked(createProviderClient).mockReturnValue(client);
+    const res = await sample();
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatchObject({
+      code: 'AI_ACCESS_UNAVAILABLE',
+      details: { state: 'LIMITED', reason: 'PROVIDER_BUSY', resumesAt: resumesAt.toISOString() },
+    });
+    expect(client.calls('email_relevance')).toHaveLength(1);
+    expect(client.calls('job_extraction')).toHaveLength(0);
+    expect(await pauseOf(userId, DETAILED)).toEqual(paused);
   });
 
   it('reports unusable output without holding anything', async () => {
