@@ -128,7 +128,13 @@ describe('AI settings errors', () => {
       error: {
         code: 'AI_ACCESS_UNAVAILABLE',
         message: 'AI access cannot be used right now.',
-        details: { state: 'LIMITED', reason: 'SAFETY_LIMIT', resumesAt: expect.any(String) },
+        details: {
+          state: 'LIMITED',
+          reason: 'SAFETY_LIMIT',
+          resumesAt: expect.any(String),
+          modelId: null,
+          failure: null,
+        },
       },
     });
   });
@@ -334,6 +340,8 @@ describe('email retry errors', () => {
               provider: null,
               model: null,
               attemptedAt: null,
+              triedAt: [],
+              failure: null,
             },
           ],
           currentProvider: null,
@@ -351,7 +359,13 @@ describe('email retry errors', () => {
       error: {
         code: 'AI_ACCESS_UNAVAILABLE',
         message: 'Fix AI access before approving a retry.',
-        details: { state: expect.any(String), reason: expect.any(String), resumesAt: null },
+        details: {
+          state: expect.any(String),
+          reason: expect.any(String),
+          resumesAt: null,
+          modelId: null,
+          failure: null,
+        },
       },
     });
   });
