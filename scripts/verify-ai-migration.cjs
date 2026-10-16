@@ -20,6 +20,7 @@ const NEW_MIGRATIONS = [
   '20261002120000_user_provided_ai',
   '20261013100000_ai_provider_busy',
   '20261014100000_ai_model_pauses',
+  '20261015100000_ai_failure_details',
 ];
 const NEW_UNIQUES = ['ai_configurations_pkey', 'ai_usage_days_pkey', 'ai_model_pauses_pkey'];
 const backend = path.resolve(__dirname, '..');
