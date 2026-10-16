@@ -86,10 +86,16 @@ function migrate(env) {
   if (result.error || result.status !== 0) stop('the database could not be brought up to date');
 }
 
-function start(env) {
+function start(env, preload) {
   const server = spawn(
     process.execPath,
-    [require.resolve('ts-node-dev/lib/bin.js'), '--respawn', '--transpile-only', 'src/index.ts'],
+    [
+      require.resolve('ts-node-dev/lib/bin.js'),
+      '--respawn',
+      '--transpile-only',
+      ...(preload ? ['-r', preload] : []),
+      'src/index.ts',
+    ],
     { cwd: root, env, stdio: 'inherit' },
   );
   // ts-node-dev stops the server it runs only on SIGTERM, so Ctrl+C is passed on as SIGTERM.
@@ -97,13 +103,19 @@ function start(env) {
   server.on('exit', (code) => process.exit(code ?? 0));
 }
 
-async function main() {
+/**
+ * Sets up and starts dev mode. `preload` is a module the server loads before the app; only the
+ * fake-AI-errors command passes one, so `npm run devmode` itself stays real AI only.
+ */
+async function runDevMode(preload) {
   ensureEnvFile();
   // .env.dev wins over the shell, so an exported DATABASE_URL can never redirect dev mode.
   const env = { ...process.env, ...readEnv() };
   await ensureDatabase(env.DATABASE_URL);
   migrate(env);
-  start(env);
+  start(env, preload);
 }
 
-main().catch((err) => stop(err.message));
+if (require.main === module) runDevMode().catch((err) => stop(err.message));
+
+module.exports = { runDevMode };
