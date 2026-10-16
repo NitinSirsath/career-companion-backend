@@ -1,9 +1,10 @@
 import { inspect } from 'util';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, GoogleGenAI } from '@google/genai';
+import { z } from 'zod';
 import { getCatalogProvider } from '../contracts/aiCatalog';
 import { bindCapabilities } from '../services/ai/capabilities';
-import { AI_CONTRACT_VERSIONS } from '../services/ai/contracts';
+import { AI_CONTRACT_VERSIONS, CLASSIFICATION_CONTRACT } from '../services/ai/contracts';
 import { ProviderFailure } from '../services/ai/errors';
 import { classifyGeminiError, createGeminiClient } from '../services/ai/providers/gemini';
 
@@ -24,6 +25,11 @@ const SENTINEL = 'sk-test-SENTINEL-7f3a private email body';
 /** The SDK puts the Google error body (JSON) in the message, as ApiError does. */
 const googleError = (status: number, body: object = {}) =>
   new ApiError({ status, message: JSON.stringify({ error: { message: SENTINEL, ...body } }) });
+/** What Node's fetch throws when a connection fails: the system or undici error is its cause. */
+const fetchFailed = (code: string) =>
+  new TypeError(`fetch failed ${SENTINEL}`, {
+    cause: Object.assign(new Error(`connect ${code} ${SENTINEL}`), { code }),
+  });
 
 const failure = (pending: Promise<unknown>) =>
   pending.then(
@@ -82,6 +88,59 @@ describe('Gemini error mapping (plan §3.6)', () => {
     expect(mapped.cause).toBeUndefined();
   });
 
+  it.each([
+    [
+      'our timer (AbortError)',
+      new DOMException('This operation was aborted', 'AbortError'),
+      'TIMEOUT',
+    ],
+    ['no DNS answer', fetchFailed('ENOTFOUND'), 'NETWORK', 'ENOTFOUND'],
+    ['connection refused', fetchFailed('ECONNREFUSED'), 'NETWORK', 'ECONNREFUSED'],
+    [
+      'connect timeout',
+      fetchFailed('UND_ERR_CONNECT_TIMEOUT'),
+      'NETWORK',
+      'UND_ERR_CONNECT_TIMEOUT',
+    ],
+    ['dropped after sending', fetchFailed('ECONNRESET'), 'NETWORK_AFTER_SEND', 'ECONNRESET'],
+    [
+      'closed while reading the answer',
+      new TypeError('terminated', {
+        cause: Object.assign(new Error(SENTINEL), { code: 'UND_ERR_SOCKET' }),
+      }),
+      'NETWORK_AFTER_SEND',
+      'UND_ERR_SOCKET',
+    ],
+    ['a code not on the list', fetchFailed('EHOSTUNREACH'), 'NETWORK_AFTER_SEND'],
+    ['a code with text', fetchFailed(`ECONNRESET ${SENTINEL}`), 'NETWORK_AFTER_SEND'],
+    ['our own bug', new RangeError(SENTINEL), 'UNCLASSIFIED'],
+    ['fetch failed with no cause', new TypeError(`fetch failed ${SENTINEL}`), 'UNCLASSIFIED'],
+  ])(
+    '%s with no answer → OUTCOME_UNKNOWN, cause %s',
+    (_label, err, failureCause, networkCode?: string) => {
+      const mapped = classifyGeminiError(err);
+      expect(mapped).toMatchObject({ kind: 'OUTCOME_UNKNOWN', failureCause, networkCode });
+      expect(mapped.status).toBeUndefined();
+      expect(`${JSON.stringify(mapped)} ${inspect(mapped)} ${mapped.stack}`).not.toContain(
+        'SENTINEL',
+      );
+    },
+  );
+
+  it.each([
+    [
+      '504 deadline expired',
+      googleError(504, { status: 'DEADLINE_EXCEEDED' }),
+      'PROVIDER_DEADLINE',
+    ],
+    ['503 high demand', googleError(503, { status: 'UNAVAILABLE' }), 'PROVIDER_ANSWER'],
+    ['500', googleError(500, { status: 'INTERNAL' }), 'PROVIDER_ANSWER'],
+    ['429', googleError(429, { status: 'RESOURCE_EXHAUSTED' }), 'PROVIDER_ANSWER'],
+    ['400', googleError(400, { status: 'INVALID_ARGUMENT' }), 'PROVIDER_ANSWER'],
+  ])('%s is an answer from Google: cause %s', (_label, err, failureCause) => {
+    expect(classifyGeminiError(err)).toMatchObject({ failureCause, networkCode: undefined });
+  });
+
   it('keeps only allowlisted provider tokens and the retry delay', () => {
     const mapped = classifyGeminiError(
       googleError(429, {
@@ -123,7 +182,9 @@ describe('Gemini adapter', () => {
           temperature: 0.1,
           maxOutputTokens: 2048,
           thinkingConfig: { thinkingBudget: 0 },
-          httpOptions: { timeout: 30_000 },
+          // Google's deadline is the model's time limit; our own timer is the abort signal.
+          httpOptions: { headers: { 'X-Server-Timeout': '30' } },
+          abortSignal: expect.any(AbortSignal),
         }),
       }),
     );
@@ -149,7 +210,7 @@ describe('Gemini adapter', () => {
     expect(first.config).not.toHaveProperty('temperature');
     expect(second.model).toBe('gemini-3.8-flash');
     expect(second.config.thinkingConfig).toEqual({ thinkingLevel: 'LOW' });
-    expect(second.config.httpOptions).toEqual({ timeout: 60_000 });
+    expect(second.config.httpOptions).toEqual({ headers: { 'X-Server-Timeout': '60' } });
   });
 
   it('turns SDK errors into sanitized provider failures', async () => {
@@ -160,6 +221,15 @@ describe('Gemini adapter', () => {
     expect(error).toBeInstanceOf(ProviderFailure);
     expect(error.kind).toBe('RATE_LIMITED');
     expect(error.message).not.toContain('SENTINEL');
+  });
+
+  it('builds the answer format before calling Google, so its error is never taken for an answer', async () => {
+    const unbuildable = { ...CLASSIFICATION_CONTRACT, schema: z.object({ at: z.date() }) };
+    const error = await failure(
+      client().generateStructured({ contract: unbuildable, model: flashLite, input: 'x' }),
+    );
+    expect(error).not.toBeInstanceOf(ProviderFailure);
+    expect(mockGenerateContent).not.toHaveBeenCalled();
   });
 
   it('runs each contract on the model bound to its role and reports usage', async () => {
