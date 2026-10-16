@@ -69,10 +69,8 @@ async function processOne(subject: string) {
     data: { userId, gmailMessageId: `redaction-${Math.random()}`, subject },
   });
   await processEmailJob(job(email.id)).catch(() => undefined);
-  await prisma.aIConfiguration.updateMany({
-    where: { userId },
-    data: { cooldownUntil: null, accessIssue: null },
-  });
+  await prisma.aIConfiguration.updateMany({ where: { userId }, data: { accessIssue: null } });
+  await prisma.aIModelPause.deleteMany({ where: { userId } });
   return email.id;
 }
 
@@ -174,10 +172,7 @@ describe('no key or email content leaks anywhere', () => {
     generateContent.mockRejectedValueOnce(leakyError(500));
     await call('post', '/api/ai/settings/sample-test');
     // Google's 500 is busy: its pause ends here, so the next sample test calls again.
-    await prisma.aIConfiguration.updateMany({
-      where: { userId },
-      data: { cooldownUntil: null, accessIssue: null },
-    });
+    await prisma.aIModelPause.deleteMany({ where: { userId } });
     generateContent.mockResolvedValueOnce({ text: `not json ${CONTENT} ${KEY}` });
     await call('post', '/api/ai/settings/sample-test');
 
