@@ -11,6 +11,7 @@ import { prisma } from '../db/prisma';
 import { getCatalogProvider, recommendedModel } from '../contracts/aiCatalog';
 import { processEmailJob } from '../jobs/emailProcessingJob';
 import * as aiPipeline from '../services/ai/pipeline';
+import { TerminalAIError } from '../services/ai/errors';
 import { runOperation } from '../services/ai/operations';
 import { EmailProcessingJobData } from '../services/enqueue';
 import { fetchMessageBody, fetchMessageMetadata } from '../services/gmailFetcher';
@@ -150,7 +151,7 @@ describe("one mail's AI tries in the log", () => {
     {
       label: '504 deadline expired',
       answer: googleError(504, 'DEADLINE_EXCEEDED'),
-      logged: answered('PROVIDER_BUSY', 'PROVIDER_DEADLINE', 'paused'),
+      logged: answered('OUTCOME_UNKNOWN', 'PROVIDER_DEADLINE', 'retry_scheduled'),
     },
     {
       label: '401 key rejected',
@@ -160,7 +161,7 @@ describe("one mail's AI tries in the log", () => {
     {
       label: '500 server error',
       answer: googleError(500, 'INTERNAL'),
-      logged: answered('OUTCOME_UNKNOWN', 'PROVIDER_ANSWER', 'held'),
+      logged: answered('PROVIDER_BUSY', 'PROVIDER_ANSWER', 'paused'),
     },
     {
       label: '400 refused request',
@@ -200,23 +201,29 @@ describe("one mail's AI tries in the log", () => {
     new TypeError(`fetch failed ${SENTINEL}`, {
       cause: Object.assign(new Error(`${code} ${SENTINEL}`), { code }),
     });
+  const noAnswer = { kind: 'OUTCOME_UNKNOWN', result: 'retry_scheduled' };
   it.each([
     {
       label: 'our timer stopped',
       error: new DOMException(`aborted ${SENTINEL}`, 'AbortError'),
-      logged: { failureCause: 'TIMEOUT' },
+      logged: { ...noAnswer, failureCause: 'TIMEOUT' },
     },
     {
       label: 'never reached Google',
       error: fetchFailed('ECONNREFUSED'),
-      logged: { failureCause: 'NETWORK', networkCode: 'ECONNREFUSED' },
+      logged: {
+        kind: 'PROVIDER_BUSY',
+        result: 'paused',
+        failureCause: 'NETWORK',
+        networkCode: 'ECONNREFUSED',
+      },
     },
     {
       label: 'lost the line after sending',
       error: fetchFailed('ECONNRESET'),
-      logged: { failureCause: 'NETWORK_AFTER_SEND', networkCode: 'ECONNRESET' },
+      logged: { ...noAnswer, failureCause: 'NETWORK_AFTER_SEND', networkCode: 'ECONNRESET' },
     },
-  ])('logs the cause of a call that $label, still held as today', async ({ error, logged }) => {
+  ])('logs the cause of a call that $label, and its next step', async ({ error, logged }) => {
     generateContent.mockRejectedValueOnce(error);
     const emailId = await newEmail();
     await processEmailJob(job(emailId));
@@ -224,9 +231,8 @@ describe("one mail's AI tries in the log", () => {
     expect(failed).toMatchObject({
       level: 'warn',
       emailId,
-      kind: 'OUTCOME_UNKNOWN',
-      result: 'held',
       timeoutMs: FAST.timeoutMs,
+      resumesAt: expect.stringMatching(ISO_UTC),
       ...logged,
     });
     expect(failed).not.toHaveProperty('status');
@@ -245,7 +251,7 @@ describe("one mail's AI tries in the log", () => {
         throw new TypeError(`cannot read ${SENTINEL}`);
       },
     });
-    await expect(bug).rejects.toThrow(TypeError);
+    await expect(bug).rejects.toBeInstanceOf(TerminalAIError);
     expect(only('ai_call_failed')).toMatchObject({
       level: 'error',
       emailId,
@@ -255,6 +261,28 @@ describe("one mail's AI tries in the log", () => {
       result: 'held',
       category: 'TypeError',
       where: expect.stringMatching(/^src\/tests\/ai-trace-logs\.test\.ts:\d+$/),
+    });
+    expect(JSON.stringify(lines)).not.toContain(SENTINEL);
+  });
+
+  it('fails the mail on an error the adapter cannot sort, logged as an error, never a provider outcome', async () => {
+    const emailId = await newEmail();
+    generateContent.mockRejectedValueOnce(new RangeError(`bad ${SENTINEL}`));
+    await processEmailJob(job(emailId));
+    expect(only('ai_call_failed')).toMatchObject({
+      level: 'error',
+      emailId,
+      kind: 'UNCLASSIFIED',
+      failureCause: 'UNCLASSIFIED',
+      result: 'held',
+    });
+    expect(lines.some((line) => line.event === 'ai_paused')).toBe(false);
+    expect(await prisma.email.findUniqueOrThrow({ where: { id: emailId } })).toMatchObject({
+      processingState: 'FAILED',
+    });
+    expect(await prisma.aIOperation.findFirstOrThrow({ where: { emailId } })).toMatchObject({
+      status: 'FAILED',
+      errorCode: 'UNCLASSIFIED',
     });
     expect(JSON.stringify(lines)).not.toContain(SENTINEL);
   });
