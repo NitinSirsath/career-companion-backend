@@ -116,7 +116,18 @@ describe("Google's deadline and our timer", () => {
     expect(requests[0].headers.get('X-Server-Timeout')).toBe('10');
     expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
-    expect(await pending).toEqual({ result: 'INCONCLUSIVE' });
+    // The check says why Google did not confirm the key: which model, and how long it waited.
+    expect(await pending).toEqual({
+      result: 'INCONCLUSIVE',
+      failure: expect.objectContaining({
+        kind: 'NO_ANSWER_IN_TIME',
+        cause: 'TIMEOUT',
+        provider: 'gemini',
+        model: 'gemini-3.8-flash',
+        waitedMs: 10_000,
+        timeoutMs: 10_000,
+      }),
+    });
   });
 });
 
