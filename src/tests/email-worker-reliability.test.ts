@@ -191,7 +191,7 @@ describe('email worker attributable outcomes', () => {
     },
   );
 
-  it('fails an unknown outcome at once, held for review, without a queue retry', async () => {
+  it("fails the last try with no answer in time at once, held for the user's OK, without a queue retry", async () => {
     vi.spyOn(aiPipeline, 'processEmail').mockRejectedValue(new AIOutcomeUnknownError());
     await expect(processEmailJob(job(0))).resolves.toBeUndefined();
     expect(await email()).toMatchObject({
@@ -336,9 +336,9 @@ describe('manual email retry preserves paid claims and user decisions', () => {
       ['an unknown outcome', 'UNKNOWN', {}],
       ['unusable output', 'FAILED', { errorCode: 'INVALID_OUTPUT' }],
       [
-        'a stale claim after a crash',
+        'a stale claim on its last try',
         'PROCESSING',
-        { startedAt: new Date(Date.now() - 20 * 60_000) },
+        { startedAt: new Date(Date.now() - 20 * 60_000), attempts: 3 },
       ],
       ['exhausted attempts', 'RETRYABLE', { attempts: 3 }],
     ] as const)('approves exactly one more attempt after %s', async (_label, status, extra) => {
@@ -349,6 +349,14 @@ describe('manual email retry preserves paid claims and user decisions', () => {
       expect(await op()).toMatchObject({ status: 'RETRYABLE', approvedRetries: 1 });
       // Its own delivery identity: the failed delivery still holds the email's singleton slot.
       expect(enqueueEmailProcessingJob).toHaveBeenCalledWith(userId, emailId, 1);
+    });
+
+    it('offers a stale claim with tries left again without asking: its try is already counted', async () => {
+      await failedWithOperation('PROCESSING', { startedAt: new Date(Date.now() - 20 * 60_000) });
+      vi.mocked(enqueueEmailProcessingJob).mockResolvedValue('job-id');
+      expect((await retry()).status).toBe(200);
+      expect(enqueueEmailProcessingJob).toHaveBeenCalledWith(userId, emailId, undefined);
+      expect(await op()).toMatchObject({ status: 'PROCESSING', attempts: 1, approvedRetries: 0 });
     });
 
     it('records one approval even when the user clicks twice at once', async () => {

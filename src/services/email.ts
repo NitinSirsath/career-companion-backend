@@ -11,7 +11,7 @@ import { HoldReason, holdOf } from './ai/heldOperations';
 import { enqueueEmailProcessingJob } from './enqueue';
 
 // 300s expiry + ~120s detection + 60 * 2^3 backoff; also clears the
-// 15-minute uncertain AI claim threshold by five minutes.
+// uncertain AI claim thresholds (15 minutes for a batch) by five minutes.
 export const EMAIL_PROCESSING_STUCK_MS = 20 * 60_000;
 
 /** One page of emails, newest first, plus one extra row so the caller can tell if more exist. */
@@ -85,7 +85,7 @@ const RETRY_STATE = {
 type RetryOperation = Prisma.EmailGetPayload<{
   select: typeof RETRY_STATE;
 }>['aiOperations'][number];
-/** An operation that is never replayed automatically, and why the user may approve one more call. */
+/** An operation that is not tried again by itself, and why the user may approve one more call. */
 type HeldOperation = { op: RetryOperation; approvable: HoldReason };
 
 /**
@@ -108,7 +108,7 @@ export async function retryEmail(
 }
 
 /**
- * Checks that the email may be retried. Held operations are never replayed automatically: when
+ * Checks that the email may be retried. Held operations are not tried again by themselves: when
  * the outcome was uncertain or unusable, the user may approve exactly one more call with
  * `acceptPossibleDuplicateCharge`. Engineering failures and legacy partial results stay with the
  * operator.

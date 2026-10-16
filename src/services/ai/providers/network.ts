@@ -1,4 +1,4 @@
-import type { ProviderFailureDetails } from '../errors';
+import { ProviderFailure, ProviderFailureDetails } from '../errors';
 
 type FailurePlace = Pick<ProviderFailureDetails, 'failureCause' | 'networkCode'>;
 
@@ -48,4 +48,16 @@ export function droppedConnection(err: unknown): FailurePlace | undefined {
 export function libraryConnectionFailure(err: Error, timedOut: boolean): FailurePlace {
   const failure = connectionFailure(err.cause);
   return timedOut && failure.networkCode === undefined ? { failureCause: 'TIMEOUT' } : failure;
+}
+
+/**
+ * A call that got no answer. A request that never left is a busy provider: nothing reached it, so
+ * it waits and uses no try. Anything else (our timer, a connection that dropped after sending) is
+ * no answer in time, as is an error we cannot sort, which the operation then fails as our own bug.
+ */
+export function unansweredFailure(place: FailurePlace): ProviderFailure {
+  return new ProviderFailure(
+    place.failureCause === 'NETWORK' ? 'PROVIDER_BUSY' : 'OUTCOME_UNKNOWN',
+    place,
+  );
 }

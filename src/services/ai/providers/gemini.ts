@@ -1,8 +1,13 @@
 import { GoogleGenAI, Schema, ThinkingLevel, Type } from '@google/genai';
 import { z } from 'zod';
 import type { CatalogModel, CatalogProvider } from '../../../contracts/aiCatalog';
-import { ACCESS_FAILURE_KINDS, ProviderFailure, ProviderFailureDetails } from '../errors';
-import { droppedConnection } from './network';
+import {
+  ACCESS_FAILURE_KINDS,
+  ProviderFailure,
+  ProviderFailureDetails,
+  QuotaScope,
+} from '../errors';
+import { droppedConnection, unansweredFailure } from './network';
 import { ProviderClient, VERIFY_TIMEOUT_MS, VerifyResult } from './types';
 
 const THINKING_LEVELS = { minimal: ThinkingLevel.MINIMAL, low: ThinkingLevel.LOW } as const;
@@ -51,6 +56,20 @@ export function geminiSchema(schema: z.ZodType): Schema {
   return derived;
 }
 
+/** Which of Google's quotas a 429 hit, from its quota IDs (for example `…PerDay…-FreeTier`). */
+function quotaScope(quotaIds: string[]): QuotaScope | undefined {
+  if (quotaIds.some((id) => id.includes('PerDay'))) return 'PER_DAY';
+  if (quotaIds.some((id) => id.includes('PerMinute'))) return 'PER_MINUTE';
+  return undefined;
+}
+
+type GoogleErrorDetail = {
+  '@type'?: unknown;
+  reason?: unknown;
+  retryDelay?: unknown;
+  violations?: { quotaId?: unknown }[];
+};
+
 /**
  * Reads the Google API error body (`{ error: { status, details } }`, carried as the SDK error's
  * message) in memory. Only allowlisted tokens leave this function; the text is never kept.
@@ -59,24 +78,27 @@ function googleErrorBody(err: unknown): {
   status?: string;
   reason?: string;
   retryAfterMs?: number;
+  quotaScope?: QuotaScope;
 } {
   try {
     const message = err instanceof Error ? err.message : '';
     const body = JSON.parse(message) as {
-      error?: {
-        status?: unknown;
-        details?: { '@type'?: unknown; reason?: unknown; retryDelay?: unknown }[];
-      };
+      error?: { status?: unknown; details?: GoogleErrorDetail[] };
     };
     const details = Array.isArray(body.error?.details) ? body.error.details : [];
     const reason = details.find((d) => typeof d.reason === 'string')?.reason as string | undefined;
     const delay = details.find((d) => typeof d.retryDelay === 'string')?.retryDelay as
       string | undefined;
     const seconds = delay ? Number(delay.replace(/s$/, '')) : NaN;
+    const quotaIds = details
+      .flatMap((d) => (Array.isArray(d.violations) ? d.violations : []))
+      .map((violation) => violation?.quotaId)
+      .filter((id): id is string => typeof id === 'string');
     return {
       status: typeof body.error?.status === 'string' ? body.error.status : undefined,
       reason,
       retryAfterMs: Number.isFinite(seconds) ? Math.round(seconds * 1000) : undefined,
+      quotaScope: quotaScope(quotaIds),
     };
   } catch {
     return {};
@@ -92,15 +114,17 @@ function unansweredCall(err: unknown): ProviderFailureDetails {
   return droppedConnection(err) ?? { failureCause: 'UNCLASSIFIED' };
 }
 
+/** Google's short server errors: it did not do the work, so the mail waits and uses no try. */
+const BUSY_STATUSES = [500, 502, 503];
+
 /**
  * Gemini API error mapping (plan §3.6). Starting table; each row must be confirmed with a real key
- * before Gemini is offered in production. Anything unrecognized is an unknown outcome: the
- * conservative choice, held and never replayed.
+ * before Gemini is offered in production.
  *
- * 503 ("high demand") and 504 ("deadline expired") are Google's own answers that it did not do the
- * work, and Google does not charge a request that fails with a 400 or 500 error. Both are a busy
- * provider, not a limit on the user's account and not an unknown outcome. The 504 is Google's own
- * deadline, the model's time limit we send with each call.
+ * 503 ("high demand"), 500 and 502 are Google's own answers that it did not do the work, and Google
+ * does not charge a request that fails with a 400 or 500 error: a busy provider. 504 ("deadline
+ * expired") is Google's own deadline, the model's time limit we send with each call, passing: no
+ * answer in time, like our own timer. A 408 or another 5xx is treated as no answer in time too.
  */
 export function classifyGeminiError(err: unknown): ProviderFailure {
   if (err instanceof ProviderFailure) return err;
@@ -108,12 +132,13 @@ export function classifyGeminiError(err: unknown): ProviderFailure {
     typeof err === 'object' && err !== null && 'status' in err && typeof err.status === 'number'
       ? err.status
       : undefined;
-  if (status === undefined) return new ProviderFailure('OUTCOME_UNKNOWN', unansweredCall(err));
+  if (status === undefined) return unansweredFailure(unansweredCall(err));
   const body = googleErrorBody(err);
   const details: ProviderFailureDetails = {
     status,
     providerCode: body.reason ?? body.status,
     retryAfterMs: body.retryAfterMs,
+    quotaScope: body.quotaScope,
     failureCause: status === 504 ? 'PROVIDER_DEADLINE' : 'PROVIDER_ANSWER',
   };
   if (body.reason === 'API_KEY_INVALID' || status === 401)
@@ -122,7 +147,7 @@ export function classifyGeminiError(err: unknown): ProviderFailure {
     return new ProviderFailure('ACCOUNT_OR_BILLING', details);
   if (status === 404) return new ProviderFailure('MODEL_UNAVAILABLE', details);
   if (status === 429) return new ProviderFailure('RATE_LIMITED', details);
-  if (status === 503 || status === 504) return new ProviderFailure('PROVIDER_BUSY', details);
+  if (BUSY_STATUSES.includes(status)) return new ProviderFailure('PROVIDER_BUSY', details);
   if (status === 408 || status >= 500) return new ProviderFailure('OUTCOME_UNKNOWN', details);
   return new ProviderFailure('INVALID_REQUEST', details);
 }

@@ -1,6 +1,6 @@
 import { emailJobOptions } from '../services/enqueue';
 import { EMAIL_PROCESSING_STUCK_MS } from '../services/email';
-import { STALE_PROCESSING_MS } from '../services/ai/heldOperations';
+import { STALE_PROCESSING_MS } from '../services/ai/operations';
 import { GmailStatusResponseSchema } from '../contracts/gmail';
 import { syncUser } from '../services/gmailSync';
 /* eslint-disable @typescript-eslint/no-explicit-any */

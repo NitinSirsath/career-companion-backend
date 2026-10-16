@@ -1,14 +1,18 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '@google/genai';
 import { z } from 'zod';
 import { prisma } from '../db/prisma';
-import { runOperation } from '../services/ai/operations';
+import { STALE_PROCESSING_MS, runOperation } from '../services/ai/operations';
 import {
   AIAccessError,
   AIOutcomeUnknownError,
   FailureKind,
   ProviderFailure,
   SchemaValidationFailure,
+  TerminalAIError,
 } from '../services/ai/errors';
+import { holdOf } from '../services/ai/heldOperations';
+import { classifyGeminiError } from '../services/ai/providers/gemini';
 import { nextUtcMidnight, utcDay } from '../services/ai/usage';
 import { enqueueAiResume } from '../services/enqueue';
 import { configureAI, fakeAccess } from './helpers/aiAccess';
@@ -65,6 +69,25 @@ const failure = (pending: Promise<unknown>) =>
   );
 const secondsFromNow = (date: Date | null) =>
   Math.round(((date?.getTime() ?? 0) - Date.now()) / 1000);
+/** Google's 429 for one quota, read by the real Gemini error mapping. */
+const googleQuota = (quotaId: string) =>
+  vi.fn().mockRejectedValue(
+    classifyGeminiError(
+      new ApiError({
+        status: 429,
+        message: JSON.stringify({
+          error: {
+            code: 429,
+            status: 'RESOURCE_EXHAUSTED',
+            details: [
+              { '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId }] },
+              { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '10s' },
+            ],
+          },
+        }),
+      }),
+    ),
+  );
 
 beforeAll(async () => {
   await prisma.user.deleteMany({ where: { email: { endsWith: '@limits.test' } } });
@@ -159,7 +182,7 @@ describe('per-user provider cooldown', () => {
 
   it('treats a busy provider as a refusal: the mail waits, no attempt is used, nothing is held', async () => {
     const emailId = await newEmail(a);
-    const error = await failure(run(a, emailId, refuse('PROVIDER_BUSY', { status: 504 })));
+    const error = await failure(run(a, emailId, refuse('PROVIDER_BUSY', { status: 503 })));
     expect(error).toMatchObject({ name: 'AIAccessError', reason: 'PROVIDER_BUSY' });
     expect(secondsFromNow(error.resumesAt)).toBe(60);
     expect(await op(emailId)).toMatchObject({
@@ -206,6 +229,43 @@ describe('per-user provider cooldown', () => {
       secondsFromNow((await failure(run(a, await newEmail(a), refuse('PROVIDER_BUSY')))).resumesAt),
     ).toBe(480);
   });
+
+  it('waits as long as Google asks for a per-minute limit, and longer when it repeats', async () => {
+    const perMinute = googleQuota('GenerateRequestsPerMinutePerProjectPerModel-FreeTier');
+    for (const seconds of [10, 20, 40]) {
+      const error = await failure(run(a, await newEmail(a), perMinute));
+      expect(error).toMatchObject({ name: 'AIAccessError', reason: 'RATE_LIMITED' });
+      expect(secondsFromNow(error.resumesAt)).toBe(seconds);
+      await configureAI(a, { cooldownUntil: null });
+    }
+  });
+
+  it.each([
+    // US summer time ends that morning: 1:30 PM in India.
+    ['2026-11-01T10:00:00Z', '2026-11-02T08:00:00Z'],
+    // Summer time: 12:30 PM in India.
+    ['2026-10-14T10:00:00Z', '2026-10-15T07:00:00Z'],
+  ])(
+    "waits for Google's reset at midnight Pacific time: a daily 429 at %s resumes at %s",
+    async (at, resumes) => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(at));
+      try {
+        await configureAI(a, { consecutiveFailures: 2 });
+        const perDay = googleQuota('GenerateRequestsPerDayPerProjectPerModel-FreeTier');
+        const error = await failure(run(a, await newEmail(a), perDay));
+        expect(error).toMatchObject({ reason: 'RATE_LIMITED', resumesAt: new Date(resumes) });
+        expect(await config(a)).toMatchObject({
+          accessIssue: 'RATE_LIMITED',
+          cooldownUntil: new Date(resumes),
+        });
+        // The waiting mail is read by itself after the reset.
+        expect(vi.mocked(enqueueAiResume).mock.calls).toEqual([[a, new Date(resumes)]]);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('bounds a long retry-after to one hour', async () => {
     const error = await failure(
@@ -259,27 +319,75 @@ describe('refusals and unusable outcomes', () => {
     });
   });
 
-  it('holds an unknown outcome and pauses that user briefly so an outage holds one call, not many', async () => {
+  it('uses one try for no answer in time: the mail waits, AI pauses as for busy, then tries again', async () => {
     const emailId = await newEmail(a);
-    const error = await failure(run(a, emailId, refuse('OUTCOME_UNKNOWN')));
-    expect(error).toBeInstanceOf(AIOutcomeUnknownError);
+    const timeout = refuse('OUTCOME_UNKNOWN', { failureCause: 'TIMEOUT' });
+    const error = await failure(run(a, emailId, timeout));
+    expect(error).toMatchObject({ name: 'AIAccessError', reason: 'PROVIDER_BUSY' });
+    expect(secondsFromNow(error.resumesAt)).toBe(60);
     expect(await op(emailId)).toMatchObject({
-      status: 'UNKNOWN',
+      status: 'RETRYABLE',
       attempts: 1,
       errorCode: 'OUTCOME_UNKNOWN',
     });
     const saved = await config(a);
-    expect(saved).toMatchObject({ accessIssue: 'PROVIDER_UNAVAILABLE', consecutiveFailures: 1 });
-    expect(secondsFromNow(saved.cooldownUntil)).toBe(120);
-    // The held mail stays held; the other waiting mail is offered again when the pause ends.
-    expect(vi.mocked(enqueueAiResume).mock.calls).toEqual([[a, saved.cooldownUntil]]);
+    expect(saved).toMatchObject({ accessIssue: 'PROVIDER_BUSY', consecutiveFailures: 1 });
+    expect(saved.cooldownUntil).toEqual(error.resumesAt);
+    // The waiting mail is read by itself when the pause ends.
+    expect(vi.mocked(enqueueAiResume).mock.calls).toEqual([[a, error.resumesAt]]);
 
+    // During the pause nothing is sent for this user; another user is not affected.
     const next = ok();
     expect(await failure(run(a, await newEmail(a), next))).toMatchObject({
-      reason: 'PROVIDER_UNAVAILABLE',
+      reason: 'PROVIDER_BUSY',
     });
     expect(next).not.toHaveBeenCalled();
     await run(b, await newEmail(b), ok());
+
+    // After the pause the same mail gets a real second try.
+    await configureAI(a, { cooldownUntil: new Date(Date.now() - 1000) });
+    await run(a, emailId, ok());
+    expect(await op(emailId)).toMatchObject({ status: 'COMPLETED', attempts: 2 });
+  });
+
+  it("waits for the user's OK after the 3rd try with no answer; each try counts toward the safety limit", async () => {
+    const emailId = await newEmail(a);
+    const deadline = refuse('OUTCOME_UNKNOWN', { status: 504, failureCause: 'PROVIDER_DEADLINE' });
+    for (let i = 0; i < 2; i++) {
+      expect(await failure(run(a, emailId, deadline))).toBeInstanceOf(AIAccessError);
+      await configureAI(a, { cooldownUntil: null });
+    }
+    expect(await failure(run(a, emailId, deadline))).toBeInstanceOf(AIOutcomeUnknownError);
+    const held = await op(emailId);
+    expect(held).toMatchObject({ status: 'RETRYABLE', attempts: 3, errorCode: 'OUTCOME_UNKNOWN' });
+    expect(holdOf(held, new Date())).toEqual({ approvable: 'ATTEMPTS_EXHAUSTED' });
+    expect((await usage(a))!.calls).toBe(3);
+
+    // Not a 4th time by itself, even when a job runs after the pause.
+    await configureAI(a, { cooldownUntil: null });
+    await expect(run(a, emailId, deadline)).rejects.toThrow('requires review');
+    expect(deadline).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    ['an error in our own code', () => vi.fn().mockRejectedValue(new RangeError('bug'))],
+    [
+      'an error the adapter could not sort',
+      () => refuse('OUTCOME_UNKNOWN', { failureCause: 'UNCLASSIFIED' }),
+    ],
+  ])('fails %s for us to check: never an unknown outcome, and no pause', async (_label, call) => {
+    const emailId = await newEmail(a);
+    expect(await failure(run(a, emailId, call()))).toBeInstanceOf(TerminalAIError);
+    const failed = await op(emailId);
+    expect(failed).toMatchObject({ status: 'FAILED', attempts: 1, errorCode: 'UNCLASSIFIED' });
+    // Only Career Companion can fix it: the user is not asked to approve a new try.
+    expect(holdOf(failed, new Date())).toEqual({ approvable: null });
+    expect(await config(a)).toMatchObject({
+      accessIssue: null,
+      cooldownUntil: null,
+      consecutiveFailures: 0,
+    });
+    expect(enqueueAiResume).not.toHaveBeenCalled();
   });
 
   it('fails unusable output for review and records its tokens', async () => {
@@ -300,6 +408,49 @@ describe('refusals and unusable outcomes', () => {
       cooldownUntil: null,
       consecutiveFailures: 0,
     });
+  });
+});
+
+describe('a claim no live job can hold', () => {
+  const claimed = async (emailId: string, msAgo: number, attempts = 1) =>
+    prisma.aIOperation.create({
+      data: {
+        emailId,
+        operation: 'classification',
+        version: 'v1',
+        status: 'PROCESSING',
+        attempts,
+        startedAt: new Date(Date.now() - msAgo),
+      },
+    });
+
+  it('goes back to waiting with its try counted, and the next job tries again', async () => {
+    const emailId = await newEmail(a);
+    await claimed(emailId, STALE_PROCESSING_MS + 1000);
+    const call = ok();
+    await run(a, emailId, call);
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(await op(emailId)).toMatchObject({ status: 'COMPLETED', attempts: 2 });
+  });
+
+  it("after the 3rd try waits for the user's OK instead", async () => {
+    const emailId = await newEmail(a);
+    await claimed(emailId, STALE_PROCESSING_MS + 1000, 3);
+    const call = ok();
+    await expect(run(a, emailId, call)).rejects.toThrow('requires review');
+    expect(call).not.toHaveBeenCalled();
+    const held = await op(emailId);
+    expect(held).toMatchObject({ status: 'RETRYABLE', attempts: 3 });
+    expect(holdOf(held, new Date())).toEqual({ approvable: 'ATTEMPTS_EXHAUSTED' });
+  });
+
+  it('is left alone while a live job may still be waiting for its answer', async () => {
+    const emailId = await newEmail(a);
+    await claimed(emailId, 60_000);
+    const call = ok();
+    await expect(run(a, emailId, call)).rejects.toThrow('requires review');
+    expect(call).not.toHaveBeenCalled();
+    expect(await op(emailId)).toMatchObject({ status: 'PROCESSING', attempts: 1 });
   });
 });
 

@@ -87,14 +87,15 @@ describe('Durable AI external-effect boundary', () => {
     await expect(run(call)).rejects.toThrow('requires review');
     expect(call).toHaveBeenCalledTimes(1);
   });
-  it('does not repeat an ambiguous network outcome', async () => {
+  it('does not repeat an error it cannot sort: our own bug, never an unknown outcome', async () => {
     const call = vi.fn().mockRejectedValue(new Error('timeout'));
     await expect(run(call)).rejects.toThrow();
     await expect(run(call)).rejects.toThrow('requires review');
     expect(call).toHaveBeenCalledTimes(1);
-    expect((await prisma.aIOperation.findFirstOrThrow({ where: { emailId } })).status).toBe(
-      'UNKNOWN',
-    );
+    expect(await prisma.aIOperation.findFirstOrThrow({ where: { emailId } })).toMatchObject({
+      status: 'FAILED',
+      errorCode: 'UNCLASSIFIED',
+    });
   });
   it('never charges an attempt for an explicit provider refusal (ADR-0001 decision 9)', async () => {
     const call = vi.fn().mockRejectedValue(new ProviderFailure('RATE_LIMITED'));

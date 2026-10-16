@@ -173,6 +173,11 @@ describe('no key or email content leaks anywhere', () => {
     // Sample test: provider error, then output that echoes the email text but is not usable.
     generateContent.mockRejectedValueOnce(leakyError(500));
     await call('post', '/api/ai/settings/sample-test');
+    // Google's 500 is busy: its pause ends here, so the next sample test calls again.
+    await prisma.aIConfiguration.updateMany({
+      where: { userId },
+      data: { cooldownUntil: null, accessIssue: null },
+    });
     generateContent.mockResolvedValueOnce({ text: `not json ${CONTENT} ${KEY}` });
     await call('post', '/api/ai/settings/sample-test');
 

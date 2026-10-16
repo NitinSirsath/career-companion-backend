@@ -10,14 +10,13 @@ import { AIAccessIssue, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { enqueueAiResume } from '../enqueue';
 import type { AIUsage } from './contracts';
-import { AIAccessError, FailureKind, PAUSE_FAILURE_KINDS, aiSetting } from './errors';
+import { AIAccessError, FailureKind, QuotaScope, aiSetting } from './errors';
 import * as config from '../../utils/config';
 import { logEvent, logWarn } from '../../utils/log';
 
 export const MAX_DAILY_VERIFICATIONS = 20;
 
 const RATE_LIMIT_BASE_MS = 60_000;
-const UNKNOWN_OUTCOME_BASE_MS = 120_000;
 const MAX_COOLDOWN_MS = 30 * 60_000;
 const RETRY_AFTER_MIN_MS = 10_000;
 const RETRY_AFTER_MAX_MS = 60 * 60_000;
@@ -27,7 +26,10 @@ export const userDailyCallLimit = () => aiSetting(config.userDailyCallLimit);
 
 export const utcDay = (now: Date) => now.toISOString().slice(0, 10);
 
-/** Stored problems that pass by themselves: each comes with a cooldown, and a success clears it. */
+/**
+ * Stored problems that pass by themselves: each comes with a cooldown, and a success clears it.
+ * PROVIDER_UNAVAILABLE is no longer recorded; older configurations can still hold it.
+ */
 export const PAUSE_ISSUES: AIAccessIssue[] = [
   'RATE_LIMITED',
   'PROVIDER_BUSY',
@@ -42,6 +44,42 @@ export function nextUtcMidnight(now: Date): Date {
   const next = new Date(now);
   next.setUTCHours(24, 0, 0, 0);
   return next;
+}
+
+/** Google resets a daily quota at midnight Pacific time. */
+const GOOGLE_QUOTA_ZONE = 'America/Los_Angeles';
+
+/** How far the time zone's clock is ahead of UTC at that moment (negative west of UTC). */
+function zoneOffsetMs(at: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+  }).formatToParts(at);
+  const part = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  const clock = Date.UTC(
+    part('year'),
+    part('month') - 1,
+    part('day'),
+    part('hour'),
+    part('minute'),
+    part('second'),
+  );
+  return clock - Math.floor(at.getTime() / 1000) * 1000;
+}
+
+/** The next midnight in Los Angeles, when Google's daily quotas reset. */
+export function nextPacificMidnight(now: Date): Date {
+  const today = new Date(now.getTime() + zoneOffsetMs(now, GOOGLE_QUOTA_ZONE));
+  const midnight = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1);
+  // The clocks may change before that midnight, so the offset is read again at it.
+  const guess = midnight - zoneOffsetMs(new Date(midnight), GOOGLE_QUOTA_ZONE);
+  return new Date(midnight - zoneOffsetMs(new Date(guess), GOOGLE_QUOTA_ZONE));
 }
 
 /**
@@ -93,31 +131,33 @@ export interface AccessIdentity {
   revision: number;
 }
 
-type PauseKind = (typeof PAUSE_FAILURE_KINDS)[number] | 'OUTCOME_UNKNOWN';
-
-function cooldownMs(kind: PauseKind, failures: number, retryAfterMs?: number) {
-  if (kind !== 'OUTCOME_UNKNOWN' && retryAfterMs !== undefined)
-    return Math.min(Math.max(retryAfterMs, RETRY_AFTER_MIN_MS), RETRY_AFTER_MAX_MS);
-  const base = kind === 'OUTCOME_UNKNOWN' ? UNKNOWN_OUTCOME_BASE_MS : RATE_LIMIT_BASE_MS;
-  return Math.min(base * 2 ** failures, MAX_COOLDOWN_MS);
+/**
+ * The wait the provider asked for (bounded to 10 s–1 h), else 1 minute; doubled for each failure
+ * in a row, up to 30 minutes, but never shorter than the provider asked.
+ */
+function cooldownMs(failures: number, retryAfterMs?: number) {
+  const base =
+    retryAfterMs === undefined
+      ? RATE_LIMIT_BASE_MS
+      : Math.min(Math.max(retryAfterMs, RETRY_AFTER_MIN_MS), RETRY_AFTER_MAX_MS);
+  return Math.max(base, Math.min(base * 2 ** failures, MAX_COOLDOWN_MS));
 }
 
 /**
- * Records a provider refusal or an unknown outcome on the user's configuration and returns when
- * a cooldown ends (null when the problem needs the user's attention instead).
+ * Records a provider refusal or a call with no answer in time on the user's configuration and
+ * returns when a cooldown ends (null when the problem needs the user's attention instead).
  *
  * - Key, account/billing and model problems need the user's attention.
- * - A rate limit or a busy provider pauses this user only, with growth on consecutive failures,
- *   capped at 30 minutes.
- * - An unknown outcome pauses this user briefly too, so an outage holds at most one uncertain
- *   operation per window instead of one per email.
+ * - A rate limit, a busy provider or no answer in time pauses this user only, for the wait the
+ *   provider asked for or 1 minute, growing on consecutive failures up to 30 minutes.
+ * - A daily quota waits until the provider resets it: midnight Pacific time for Google.
  */
 export async function noteProviderFailure(
   tx: Prisma.TransactionClient,
   access: AccessIdentity,
   kind: Exclude<FailureKind, 'INVALID_OUTPUT' | 'INVALID_REQUEST'>,
   now: Date,
-  details: { modelId?: string; retryAfterMs?: number } = {},
+  details: { modelId?: string; retryAfterMs?: number; quotaScope?: QuotaScope } = {},
 ): Promise<Date | null> {
   const where = { userId: access.userId, revision: access.revision };
   if (kind === 'KEY_REJECTED' || kind === 'ACCOUNT_OR_BILLING' || kind === 'MODEL_UNAVAILABLE') {
@@ -135,9 +175,13 @@ export async function noteProviderFailure(
     select: { consecutiveFailures: true },
   });
   const failures = current?.consecutiveFailures ?? 0;
-  const pauseMs = cooldownMs(kind, failures, details.retryAfterMs);
-  const resumesAt = new Date(now.getTime() + pauseMs);
-  const reason = kind === 'OUTCOME_UNKNOWN' ? 'PROVIDER_UNAVAILABLE' : kind;
+  const resumesAt =
+    details.quotaScope === 'PER_DAY'
+      ? nextPacificMidnight(now)
+      : new Date(now.getTime() + cooldownMs(failures, details.retryAfterMs));
+  const pauseMs = resumesAt.getTime() - now.getTime();
+  // No answer in time pauses as for a busy provider.
+  const reason = kind === 'OUTCOME_UNKNOWN' ? 'PROVIDER_BUSY' : kind;
   const paused = await tx.aIConfiguration.updateMany({
     where,
     data: {

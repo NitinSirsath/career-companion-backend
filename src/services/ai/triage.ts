@@ -498,7 +498,9 @@ async function failBatch(
       return noteProviderFailure(tx, ctx.access, refusal, ctx.now, {
         modelId: ctx.modelId,
         retryAfterMs: failure?.retryAfterMs,
+        quotaScope: failure?.quotaScope,
       });
+    // The batch stays held; the pause keeps an outage from holding one batch after another.
     if (kind === 'OUTCOME_UNKNOWN')
       return noteProviderFailure(tx, ctx.access, 'OUTCOME_UNKNOWN', ctx.now, {
         modelId: ctx.modelId,
