@@ -306,6 +306,7 @@ describe('the real sync on sandbox mail', () => {
     expect(await read(job.threadId)).toEqual({
       state: 'JOB_MAIL',
       failure: null,
+      aiStatus: null,
       job: {
         category: 'RECRUITER',
         company: 'Northwind Robotics',
@@ -319,10 +320,18 @@ describe('the real sync on sandbox mail', () => {
         },
       },
     });
-    expect(await read(other.threadId)).toEqual({ state: 'NOT_JOB_MAIL', failure: null, job: null });
+    expect(await read(other.threadId)).toEqual({
+      state: 'NOT_JOB_MAIL',
+      failure: null,
+      aiStatus: null,
+      job: null,
+    });
+    // This mail has no AI step held and its stored category is not a kind the status knows, so
+    // the reason is a plain one and Manual Retry sends it again.
     expect(await read(broken.threadId)).toEqual({
       state: 'AI_FAILED',
       failure: 'KEY_REJECTED',
+      aiStatus: expect.objectContaining({ reason: 'INTERNAL_ERROR', nextStep: 'MANUAL_RETRY' }),
       job: null,
     });
   });
