@@ -33,7 +33,10 @@ export type VerifyResult =
   | { result: 'INCONCLUSIVE' };
 
 export interface ProviderClient {
-  /** Throws ProviderFailure only. */
+  /**
+   * Throws ProviderFailure for anything the provider or the connection did. An error in our own
+   * code, such as building the answer format, is thrown as it is.
+   */
   generateStructured(request: StructuredRequest): Promise<StructuredResponse>;
   /** Never throws. */
   verifyModels(modelIds: readonly string[]): Promise<VerifyResult>;
