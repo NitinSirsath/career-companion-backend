@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MailCategorySchema } from './conversation';
+import { EmailAIStatusSchema } from './email';
 import { splitMailAddresses } from './mailbox';
 
 // ─── Mail sandbox (dev mode only; 404 in prod) ───────────────────────────────
@@ -98,8 +99,10 @@ export type SandboxMailState = z.infer<typeof SandboxMailStateSchema>;
 
 export const SandboxMailResultSchema = z.object({
   state: SandboxMailStateSchema,
-  /** AI_FAILED only: the failure category the app keeps. */
+  /** AI_FAILED only: the failure category the app keeps. Screens show `aiStatus`. */
   failure: z.string().nullable(),
+  /** WAITING_FOR_AI, AI_KEY_MISSING and AI_FAILED: why, as on the Gmail Sync row. */
+  aiStatus: EmailAIStatusSchema.nullable(),
   /** JOB_MAIL only: what the AI read, and where the mail went. */
   job: z
     .object({
