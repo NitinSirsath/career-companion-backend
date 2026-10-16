@@ -1,11 +1,15 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AIModelPause } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { getCatalogProvider } from '../contracts/aiCatalog';
 import {
   ConfigurationState,
+  blockingPause,
   deriveAccess,
   getAccessState,
   resolveAIAccess,
+  runningPauses,
+  withPause,
 } from '../services/ai/access';
 import { sealApiKey } from '../services/ai/credentials';
 import { AIAccessError } from '../services/ai/errors';
@@ -24,9 +28,21 @@ const base: ConfigurationState = {
   detailedModel: null,
   accessIssue: null,
   accessIssueModel: null,
-  cooldownUntil: null,
   revision: 0,
 };
+const FAST = 'gemini-3.5-flash-lite';
+const DETAILED = 'gemini-3.8-flash';
+const pauseRow = (model: string, overrides: Partial<AIModelPause> = {}): AIModelPause => ({
+  userId: 'user-1',
+  model,
+  reason: 'PROVIDER_BUSY',
+  resumesAt: later,
+  consecutiveFailures: 1,
+  testEmailId: null,
+  testStartedAt: null,
+  testResult: null,
+  ...overrides,
+});
 
 describe('access state precedence (plan §3.7)', () => {
   beforeEach(() => {
@@ -61,44 +77,15 @@ describe('access state precedence (plan §3.7)', () => {
       { state: 'NEEDS_ATTENTION', reason: 'MODEL_UNAVAILABLE', modelId: 'gemini-2.5-flash' },
     ],
     [
-      'rate limited',
-      { ...base, accessIssue: 'RATE_LIMITED', cooldownUntil: later },
-      0,
-      { state: 'LIMITED', reason: 'RATE_LIMITED', resumesAt: later },
-    ],
-    [
-      'provider unavailable',
-      { ...base, accessIssue: 'PROVIDER_UNAVAILABLE', cooldownUntil: later },
-      0,
-      { state: 'LIMITED', reason: 'PROVIDER_UNAVAILABLE' },
-    ],
-    [
-      'provider busy',
-      { ...base, accessIssue: 'PROVIDER_BUSY', cooldownUntil: later },
-      0,
-      { state: 'LIMITED', reason: 'PROVIDER_BUSY', resumesAt: later },
-    ],
-    [
-      'busy pause that has passed',
-      { ...base, accessIssue: 'PROVIDER_BUSY', cooldownUntil: now },
-      0,
-      { state: 'READY' },
-    ],
-    [
-      'passed cooldown',
-      { ...base, accessIssue: 'RATE_LIMITED', cooldownUntil: now },
-      0,
-      { state: 'READY' },
-    ],
-    [
+
       'safety limit',
       base,
       10,
       { state: 'LIMITED', reason: 'SAFETY_LIMIT', resumesAt: nextUtcMidnight(now) },
     ],
     [
-      'needs attention outranks a cooldown and the limit',
-      { ...base, accessIssue: 'KEY_REJECTED', cooldownUntil: later },
+      'needs attention outranks the limit',
+      { ...base, accessIssue: 'KEY_REJECTED' },
       10,
       { state: 'NEEDS_ATTENTION' },
     ],
@@ -125,6 +112,60 @@ describe('access state precedence (plan §3.7)', () => {
       process.env.NODE_ENV = env;
     }
   });
+});
+
+describe("each model's own pause", () => {
+  beforeEach(() => {
+    process.env.AI_USER_DAILY_CALL_LIMIT = '10';
+  });
+
+  it('applies a running pause only to the roles whose model it is', () => {
+    const rows = [pauseRow(DETAILED), pauseRow('gemini-2.5-flash')];
+    const pauses = runningPauses(base, rows, now);
+    expect(pauses).toEqual([
+      {
+        model: DETAILED,
+        roles: ['detailed'],
+        reason: 'PROVIDER_BUSY',
+        resumesAt: later,
+        testEmailId: null,
+      },
+    ]);
+    expect(blockingPause(pauses, ['fast'])).toBeNull();
+    expect(blockingPause(pauses, ['detailed'])).toMatchObject({ model: DETAILED });
+    // One model in both roles pauses both.
+    const same = { ...base, fastModel: DETAILED };
+    expect(runningPauses(same, rows, now)[0].roles).toEqual(['fast', 'detailed']);
+  });
+
+  it('ignores a pause that has passed, and names the test mail only while it runs', () => {
+    expect(runningPauses(base, [pauseRow(DETAILED, { resumesAt: now })], now)).toEqual([]);
+    const testing = pauseRow(DETAILED, { testEmailId: 'mail-1', testStartedAt: now });
+    expect(runningPauses(base, [testing], now)[0].testEmailId).toBe('mail-1');
+    const answered = { ...testing, testResult: 'PROVIDER_BUSY' };
+    expect(runningPauses(base, [answered], now)[0].testEmailId).toBeNull();
+  });
+
+  it('shows the pause that ends last, after the user’s own problems and before the limit', () => {
+    const last = new Date(later.getTime() + 60_000);
+    const pauses = runningPauses(
+      base,
+      [pauseRow(FAST, { reason: 'RATE_LIMITED' }), pauseRow(DETAILED, { resumesAt: last })],
+      now,
+    );
+    const pause = blockingPause(pauses, ['fast', 'detailed']);
+    expect(withPause(deriveAccess(base, 0, now), pause)).toMatchObject({
+      state: 'LIMITED',
+      reason: 'PROVIDER_BUSY',
+      resumesAt: last,
+    });
+    expect(withPause(deriveAccess(base, 10, now), pause)).toMatchObject({
+      reason: 'PROVIDER_BUSY',
+    });
+    expect(
+      withPause(deriveAccess({ ...base, accessIssue: 'KEY_REJECTED' }, 0, now), pause),
+    ).toMatchObject({ state: 'NEEDS_ATTENTION', reason: 'KEY_REJECTED' });
+    expect(withPause(deriveAccess(base, 0, now), null)).toMatchObject({ state: 'READY' });  });
 });
 
 describe('resolving a user’s own AI access', () => {
