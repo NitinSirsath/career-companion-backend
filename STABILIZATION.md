@@ -25,8 +25,10 @@ If a migration fails, keep workers stopped. Reconcile the identified records wit
 
 **What changes:** every AI call uses the job user's own provider key (Gemini, OpenAI or Claude) from the code catalog. There is no server key and no fallback.
 - Without usable AI, emails wait as `PENDING`. The job is acknowledged and its delivery withdrawn (pg-boss `cancelled`), so the email can be re-offered at once.
-- A provider refusal (key, billing, model, rate limit, busy provider) uses no email or operation attempt and pauses only that user. A rate limit pauses with a cooldown; a key, billing or model problem waits until the user fixes it. A daily Google quota waits until Google's reset at midnight Pacific time.
-- No answer in time (our own timer, Google's 504, or a connection that dropped after sending) uses 1 of 3 attempts: the email waits, that user's AI pauses as for a busy provider (1 minute, growing to 30), and the email is tried again by itself. After the 3rd attempt it waits for the user's OK. Batch triage still holds an unknown outcome (`UNKNOWN`).
+- A provider refusal (key, billing, model, rate limit, busy provider) uses no email or operation attempt and affects only that user. A rate limit or a busy provider pauses only the model that answered, counted from the failure; the user's other model keeps working. A key, billing or model problem waits until the user fixes it. A daily Google quota waits until Google's reset at midnight Pacific time; Career Companion's own daily limit continues by itself at midnight UTC.
+- No answer in time (our own timer, Google's 504, or a connection that dropped after sending) uses 1 of 3 attempts: the email waits, that model pauses as for a busy provider (1 minute, growing to 30), and the email is tried again by itself. After the 3rd attempt it waits for the user's OK. Batch triage still holds an unknown outcome (`UNKNOWN`).
+- "Read waiting mails now" during a pause sends one waiting mail as a test; the others follow only if it works. A test that is still busy starts the pause again from its answer, no longer than it was. One test runs at a time; a test mail that ends without a busy answer from the paused model (it did not need it, or its step was held) ends the test, and the pause shows again. Choosing another model ends that role's pause; "Check again" does not change a pause.
+- `20261014100000_ai_model_pauses` moves each user's pause and failure count onto the current Detailed model (`ai_model_pauses`) and drops `ai_configurations.cooldownUntil` and `.consecutiveFailures`.
 - Held operations are retried only after the user approves one more attempt ("Retry anyway").
 
 **Release steps:**
@@ -51,10 +53,10 @@ If a migration fails, keep workers stopped. Reconcile the identified records wit
 | Event | Meaning |
 | --- | --- |
 | `job_waiting_for_ai` (reason) | Email waits for AI access |
-| `ai_call_deferred` | Cooldown, safety limit or pause hit at claim time |
+| `ai_call_deferred` | A model's pause, the safety limit or Career Companion's pause hit at claim time |
 | `ai_call_failed` (kind, status, providerCode) | Provider refusal or failure. `PROVIDER_BUSY` = the provider answered 503 or 504: the mail waits, nothing is held |
 | `ai_resumed_after_pause` (offered) | A pause ended and the waiting mail was offered again by itself |
-| `ai_read_waiting_requested` (endedPause, offered) | The user chose "Read waiting mails now" |
+| `ai_read_waiting_requested` (testEmailId, pausedModels, alreadyTesting, or offered) | The user chose "Read waiting mails now": the test mail sent during a pause, the test mail still running (nothing sent), or the waiting mail offered |
 | `ai_resume_not_queued` | The automatic read could not be queued; the next sync offers the mail |
 | `ai_access_checked` (result, kind) | Verification on save or "Check again" |
 | `ai_settings_saved` / `ai_settings_removed` | Configuration changes |
@@ -62,7 +64,7 @@ If a migration fails, keep workers stopped. Reconcile the identified records wit
 | `ai_retry_approved` | User approved one more attempt |
 | `ai_credential_unreadable` | Stored key cannot be decrypted (check the encryption key) |
 
-Per-user state lives in `ai_configurations` (access issue, cooldown, revision) and `ai_usage_days` (calls, tokens, verifications).
+Per-user state lives in `ai_configurations` (access issue, revision), `ai_model_pauses` (each model's pause, failure count and "Read waiting mails now" test) and `ai_usage_days` (calls, tokens, verifications).
 
 ## Automation submissions through MCP (ADR-0002)
 
@@ -136,7 +138,7 @@ Keep OAuth, database, encryption and webhook credentials server-side. No new inf
 
 - AI identity is `(emailId, operation, contract version)`; logical email identity remains `(userId, gmailMessageId)`. Changing the connected mailbox is rejected to preserve that identity. Changing a model or deploying code is not consent to reprocess historical mail.
 - `COMPLETED` operations reuse schema-validated results. Completed legacy results are adopted without calling Gemini; legacy partial results without a ledger are held for review. New versions do not automatically reprocess a completed email; intentional replay needs an explicit, separately reviewed operation.
-- `PENDING`/`RETRYABLE` operations resume only when the user's AI access is ready: their own key, no cooldown, under the per-user safety limit. **BYO AI:** a provider refusal releases the claim and restores the attempt, so refusals never exhaust attempts; the per-user cooldown and safety limit bound the loop. SDK retries are off; timeouts come from the catalog (30–60 s): Google is told the model's time limit (`X-Server-Timeout`) and we stop waiting 15 s later, so Google's own 504 normally comes first; OpenAI and Anthropic stop at the limit. Output limit 2048 tokens, body input 8000 characters.
+- `PENDING`/`RETRYABLE` operations resume only when the user's AI access is ready: their own key, no pause on the model the step uses, under the per-user safety limit. **BYO AI:** a provider refusal releases the claim and restores the attempt, so refusals never exhaust attempts; the model's pause and the per-user safety limit bound the loop. SDK retries are off; timeouts come from the catalog (30–60 s): Google is told the model's time limit (`X-Server-Timeout`) and we stop waiting 15 s later, so Google's own 504 normally comes first; OpenAI and Anthropic stop at the limit. Output limit 2048 tokens, body input 8000 characters.
 - **Stale per-email claims:** a per-email `PROCESSING` claim older than the longest model time limit plus 1 minute, or found when the email worker starts, goes back to `RETRYABLE` with its attempt used, and is tried again like any waiting operation.
 - **User-approved retry (BYO AI):** for `UNKNOWN`, unusable output (`FAILED` with `INVALID_OUTPUT`), a stale batch `PROCESSING` claim (over 15 minutes) or exhausted attempts (for example 3 tries with no answer in time), the owner may approve exactly one more call (`approvedRetries`). This is the supported path; operators should not reset claims by hand. `INVALID_REQUEST`, our own errors (`FAILED` with `UNCLASSIFIED`) and legacy partial results remain operator-only.
 - A batch `PROCESSING` claim after a crash, `UNKNOWN`, terminal `FAILED`, and exhausted attempts require reconciliation. Do not clear these claims, reset all email states, or blindly resubmit jobs: the provider may have succeeded or charged before persistence failed. Inspect operation IDs, versions, timestamps, provider records and the stored result first. Restoring a verified completed checkpoint avoids a new call; authorizing a new call requires recording that the duplicate-cost risk was considered. No blanket reset command is provided.
