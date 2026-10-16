@@ -244,23 +244,32 @@ describe('Anthropic adapter', () => {
   });
 
   it.each([
-    ['truncated output', toolReply({ decision: 'RELEVANT' }, { stop_reason: 'max_tokens' })],
-    ['a refusal', textReply(SENTINEL, { stop_reason: 'refusal' })],
-    ['no tool call', textReply(`no tool ${SENTINEL}`)],
-    ['schema-invalid input', toolReply({ decision: 'MAYBE', reasoning: SENTINEL })],
-  ])('reports %s as INVALID_OUTPUT with usage and no provider text', async (_label, reply) => {
-    create.mockResolvedValue(reply);
-    const error = await failure(
-      bindCapabilities(client(), { fast: haiku, detailed: haiku }).classifier.classifyRelevance({
-        subject: 's',
-      }),
-    );
-    expect(error).toMatchObject({
-      kind: 'INVALID_OUTPUT',
-      usage: { inputTokens: 30, outputTokens: 12 },
-    });
-    expect(`${JSON.stringify(error)} ${inspect(error)}`).not.toContain('SENTINEL');
-  });
+    [
+      'truncated output',
+      toolReply({ decision: 'RELEVANT' }, { stop_reason: 'max_tokens' }),
+      'max_tokens',
+    ],
+    ['a refusal', textReply(SENTINEL, { stop_reason: 'refusal' }), 'refusal'],
+    ['no tool call', textReply(`no tool ${SENTINEL}`), undefined],
+    ['schema-invalid input', toolReply({ decision: 'MAYBE', reasoning: SENTINEL }), undefined],
+  ])(
+    'reports %s as INVALID_OUTPUT with usage and no provider text',
+    async (_label, reply, stopReason) => {
+      create.mockResolvedValue(reply);
+      const error = await failure(
+        bindCapabilities(client(), { fast: haiku, detailed: haiku }).classifier.classifyRelevance({
+          subject: 's',
+        }),
+      );
+      expect(error).toMatchObject({
+        kind: 'INVALID_OUTPUT',
+        usage: { inputTokens: 30, outputTokens: 12 },
+      });
+      // Why it stopped early, or that the model refused: a token, never its text.
+      expect(error.stopReason).toBe(stopReason);
+      expect(`${JSON.stringify(error)} ${inspect(error)}`).not.toContain('SENTINEL');
+    },
+  );
 
   it('reports non-JSON native output as INVALID_OUTPUT', async () => {
     create.mockResolvedValue(textReply(`not json ${SENTINEL}`));
@@ -305,11 +314,22 @@ describe('Anthropic content-free verification', () => {
       apiError(404, 'not_found_error'),
       { result: 'REJECTED', kind: 'MODEL_UNAVAILABLE', modelId: 'claude-sonnet-5-5' },
     ],
-    [apiError(529, 'overloaded_error'), { result: 'INCONCLUSIVE' }],
-    [new APIConnectionTimeoutError(), { result: 'INCONCLUSIVE' }],
-  ])('maps a lookup failure (%#) without throwing', async (err, expected) => {
+    [
+      apiError(529, 'overloaded_error'),
+      { result: 'INCONCLUSIVE', failure: { httpStatus: 529, providerCode: 'overloaded_error' } },
+    ],
+    [
+      new APIConnectionTimeoutError(),
+      { result: 'INCONCLUSIVE', failure: { kind: 'NO_ANSWER_IN_TIME', cause: 'TIMEOUT' } },
+    ],
+  ])('maps a lookup failure (%#) without throwing, and says why', async (err, expected) => {
     retrieve.mockRejectedValue(err);
-    expect(await client().verifyModels(['claude-sonnet-5-5'])).toEqual(expected);
+    const result = await client().verifyModels(['claude-sonnet-5-5']);
+    expect(result).toMatchObject(expected);
+    expect(result).toMatchObject({
+      failure: { provider: 'anthropic', model: 'claude-sonnet-5-5', timeoutMs: 10_000 },
+    });
+    expect(JSON.stringify(result)).not.toContain('SENTINEL');
   });
 });
 
