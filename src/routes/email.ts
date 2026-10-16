@@ -152,11 +152,12 @@ router.post('/:id/resolve', async (req: Request, res: Response, next: NextFuncti
  * results and user match decisions are never reset here. Acknowledgment does not write processing
  * state: the worker alone moves the email into PROCESSING and its final outcome.
  *
- * Held operations are never replayed automatically (ADR-0001 decision 10). When the outcome was
- * uncertain or unusable, the user may approve exactly one more call by resending with
- * `{ acceptPossibleDuplicateCharge: true }`; without it the response explains the hold
- * (409 AI_RETRY_NEEDS_APPROVAL). Engineering failures and legacy partial results stay with the
- * operator (409 AI_OPERATION_REQUIRES_REVIEW).
+ * A held operation is not tried again by itself (ADR-0001 decision 10): after its last automatic
+ * try got no answer in time, or its answer could not be used. The user may approve exactly one
+ * more call by resending with `{ acceptPossibleDuplicateCharge: true }`; without it the response
+ * explains the hold, with the time of each try and the last failure (409
+ * AI_RETRY_NEEDS_APPROVAL). Engineering failures and legacy partial results stay with the operator
+ * (409 AI_OPERATION_REQUIRES_REVIEW).
  */
 router.post('/:id/retry', async (req: Request, res: Response, next: NextFunction) => {
   try {
