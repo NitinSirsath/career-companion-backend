@@ -165,7 +165,8 @@ describe("each model's own pause", () => {
     expect(
       withPause(deriveAccess({ ...base, accessIssue: 'KEY_REJECTED' }, 0, now), pause),
     ).toMatchObject({ state: 'NEEDS_ATTENTION', reason: 'KEY_REJECTED' });
-    expect(withPause(deriveAccess(base, 0, now), null)).toMatchObject({ state: 'READY' });  });
+    expect(withPause(deriveAccess(base, 0, now), null)).toMatchObject({ state: 'READY' });
+  });
 });
 
 describe('resolving a user’s own AI access', () => {
