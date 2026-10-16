@@ -1,10 +1,11 @@
 import OpenAI, { APIConnectionError, APIConnectionTimeoutError, APIError } from 'openai';
 import type { CatalogProvider } from '../../../contracts/aiCatalog';
-import { ACCESS_FAILURE_KINDS, ProviderFailure } from '../errors';
+import { ProviderFailure } from '../errors';
 import { retryAfterMs } from './headers';
 import { nullsToAbsent, strictJsonSchema } from './jsonSchema';
 import { droppedConnection, libraryConnectionFailure, unansweredFailure } from './network';
-import { ProviderClient, VERIFY_TIMEOUT_MS, VerifyResult } from './types';
+import { ProviderClient, VERIFY_TIMEOUT_MS } from './types';
+import { checkModels } from './verify';
 
 /**
  * OpenAI-compatible error mapping (plan §3.6). Starting table; each row must be confirmed with a
@@ -36,6 +37,12 @@ export function classifyOpenAIError(err: unknown): ProviderFailure {
   if (status === 429 || status === 503) return new ProviderFailure('RATE_LIMITED', details);
   if (status === 408 || status >= 500) return new ProviderFailure('OUTCOME_UNKNOWN', details);
   return new ProviderFailure('INVALID_REQUEST', details);
+}
+
+/** Why an unusable answer stopped early (for example `length`), or that the model refused. */
+function stoppedEarly(choice: OpenAI.ChatCompletion.Choice | undefined): string | undefined {
+  if (choice?.message.refusal) return 'refusal';
+  return choice?.finish_reason === 'stop' ? undefined : choice?.finish_reason;
 }
 
 export function createOpenAIClient(provider: CatalogProvider, apiKey: string): ProviderClient {
@@ -89,7 +96,7 @@ export function createOpenAIClient(provider: CatalogProvider, apiKey: string): P
       const choice = completion.choices[0];
       const text = choice?.message?.content;
       if (!choice || choice.finish_reason !== 'stop' || choice.message.refusal || !text)
-        throw new ProviderFailure('INVALID_OUTPUT', { usage });
+        throw new ProviderFailure('INVALID_OUTPUT', { usage, stopReason: stoppedEarly(choice) });
       try {
         return { data: nullsToAbsent(JSON.parse(text), contract.schema), usage };
       } catch {
@@ -100,18 +107,12 @@ export function createOpenAIClient(provider: CatalogProvider, apiKey: string): P
       }
     },
 
-    async verifyModels(modelIds): Promise<VerifyResult> {
-      for (const modelId of new Set(modelIds)) {
-        try {
-          await client.models.retrieve(modelId, { timeout: VERIFY_TIMEOUT_MS });
-        } catch (err) {
-          const { kind } = classifyOpenAIError(err);
-          return (ACCESS_FAILURE_KINDS as readonly string[]).includes(kind)
-            ? { result: 'REJECTED', kind: kind as (typeof ACCESS_FAILURE_KINDS)[number], modelId }
-            : { result: 'INCONCLUSIVE' };
-        }
-      }
-      return { result: 'VERIFIED' };
-    },
+    verifyModels: (modelIds) =>
+      checkModels(
+        provider.id,
+        modelIds,
+        (modelId) => client.models.retrieve(modelId, { timeout: VERIFY_TIMEOUT_MS }),
+        classifyOpenAIError,
+      ),
   };
 }
