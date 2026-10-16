@@ -20,6 +20,9 @@ function errorBody(err: APIError): { type?: string; message?: string } {
   };
 }
 
+/** Anthropic's short server errors, overloaded (529) and a conflict (409): busy, no try used. */
+const BUSY_STATUSES = [409, 500, 503, 504, 529];
+
 /**
  * Anthropic error mapping (plan §3.6). Starting table; each row must be confirmed with a real key
  * before Claude is offered in production. Unrecognized → no answer in time.
@@ -36,7 +39,12 @@ export function classifyAnthropicError(err: unknown): ProviderFailure {
     return new ProviderFailure('OUTCOME_UNKNOWN', { failureCause: 'UNCLASSIFIED' });
   const status = err.status;
   const { type, message } = errorBody(err);
-  const details = { status, providerCode: type, retryAfterMs: retryAfterMs(err.headers) };
+  const details = {
+    status,
+    providerCode: type,
+    retryAfterMs: retryAfterMs(err.headers),
+    providerRequestId: err.requestID ?? undefined,
+  };
   if (type === 'authentication_error' || status === 401)
     return new ProviderFailure('KEY_REJECTED', details);
   // An empty credit balance has been reported as a 400 invalid_request_error; the text is only
@@ -51,14 +59,10 @@ export function classifyAnthropicError(err: unknown): ProviderFailure {
     return new ProviderFailure('ACCOUNT_OR_BILLING', details);
   if (type === 'not_found_error' || status === 404)
     return new ProviderFailure('MODEL_UNAVAILABLE', details);
-  if (
-    type === 'rate_limit_error' ||
-    type === 'overloaded_error' ||
-    status === 429 ||
-    status === 529 ||
-    status === 503
-  )
+  if (type === 'rate_limit_error' || status === 429)
     return new ProviderFailure('RATE_LIMITED', details);
+  if (type === 'overloaded_error' || BUSY_STATUSES.includes(status))
+    return new ProviderFailure('PROVIDER_BUSY', details);
   if (status === 408 || status >= 500) return new ProviderFailure('OUTCOME_UNKNOWN', details);
   return new ProviderFailure('INVALID_REQUEST', details);
 }
