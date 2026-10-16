@@ -299,6 +299,7 @@ function logFailure(
     networkCode: failure?.networkCode,
     status: failure?.status,
     providerCode: failure?.providerCode,
+    providerRequestId: failure?.providerRequestId,
     quotaScope: failure?.quotaScope,
     retryAfterMs: failure?.retryAfterMs,
     stopReason: failure?.stopReason,
