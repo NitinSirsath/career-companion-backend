@@ -145,7 +145,8 @@ export const AISettingsResponseSchema = z.object({
     /** The model a MODEL_UNAVAILABLE problem or a pause refers to. */
     modelId: z.string().nullable(),
     resumesAt: IsoDateTime.nullable(),
-    /** The exact failure behind `reason`: the pause's, or the key, billing or model problem's. A
+    /**
+     * The exact failure behind `reason`: the pause's, or the key, billing or model problem's. A
      * pause after no answer in time has reason PROVIDER_BUSY and failure kind NO_ANSWER_IN_TIME.
      */
     failure: AIFailureSchema.nullable(),
