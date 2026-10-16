@@ -30,7 +30,8 @@ beforeEach(async () => {
   process.env.AI_USER_DAILY_CALL_LIMIT = '100';
   await prisma.email.deleteMany({ where: { userId } });
   await prisma.aIUsageDay.deleteMany({ where: { userId } });
-  await configureAI(userId, { cooldownUntil: null, accessIssue: null, consecutiveFailures: 0 });
+  await configureAI(userId, { accessIssue: null });
+  await prisma.aIModelPause.deleteMany({ where: { userId } });
   emailId = (await prisma.email.create({ data: { userId, gmailMessageId: 'logical-message' } })).id;
 });
 afterAll(async () => {
@@ -100,7 +101,7 @@ describe('Durable AI external-effect boundary', () => {
   it('never charges an attempt for an explicit provider refusal (ADR-0001 decision 9)', async () => {
     const call = vi.fn().mockRejectedValue(new ProviderFailure('RATE_LIMITED'));
     for (let i = 0; i < 4; i++) {
-      await prisma.aIConfiguration.update({ where: { userId }, data: { cooldownUntil: null } });
+      await prisma.aIModelPause.updateMany({ where: { userId }, data: { resumesAt: null } });
       await expect(run(call)).rejects.toBeInstanceOf(AIAccessError);
       expect(await prisma.aIOperation.findFirstOrThrow({ where: { emailId } })).toMatchObject({
         status: 'PENDING',
@@ -108,7 +109,7 @@ describe('Durable AI external-effect boundary', () => {
         errorCode: 'RATE_LIMITED',
       });
     }
-    // Four refusals, no attempt used: the per-user cooldown and safety limit bound the loop instead.
+    // Four refusals, no attempt used: the model's pause and the safety limit bound the loop instead.
     expect(call).toHaveBeenCalledTimes(4);
   });
   it('enforces the application safety limit and rolls back claims when paused', async () => {
