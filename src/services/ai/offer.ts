@@ -2,9 +2,11 @@
  * Offers emails to AI processing. Gmail sync and AI settings both call this module, so neither
  * imports the other.
  */
+import type { AIOperationStatus } from '@prisma/client';
+import type { AIRole } from '../../contracts/aiCatalog';
 import { prisma } from '../../db/prisma';
 import { enqueueEmailProcessingJob, enqueueRelevanceTriage } from '../enqueue';
-import { getAccessState, isProviderPause } from './access';
+import { ModelPause, getAccessState } from './access';
 import { triageBatchEnabled } from './triage';
 import { resumeAfterPause } from './usage';
 import { logEvent } from '../../utils/log';
@@ -24,17 +26,14 @@ async function offerEmail(userId: string, emailId: string) {
 }
 
 /**
- * Re-offers up to 100 of the user's PENDING emails to the worker, newest first, so fresh mail is
- * not stuck behind a backlog. Covers the DB-insert / queue-send gap and emails that waited for AI
- * access. Does nothing while the user's AI access is not ready: those emails wait and are
- * re-offered when a pause ends (`resumeWaitingEmails`), by the next sync, or after the user fixes
- * access. Enqueueing is idempotent per email (singleton key).
+ * The model role a waiting email needs next: the fast model until its relevance is decided, then
+ * the detailed one.
  */
-export async function reofferPendingEmails(
-  userId: string,
-  guard?: () => Promise<void>,
-): Promise<number> {
-  if ((await getAccessState(userId)).state !== 'READY') return 0;
+const nextRole = (email: { aiOperations: { status: AIOperationStatus }[] }): AIRole =>
+  email.aiOperations.some((op) => op.status === 'COMPLETED') ? 'detailed' : 'fast';
+
+/** Up to 100 of the user's PENDING emails, newest first, with the model role each needs next. */
+async function waitingEmails(userId: string) {
   const pending = await prisma.email.findMany({
     where: { userId, processingState: 'PENDING' },
     orderBy: [{ receivedAt: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
@@ -42,11 +41,39 @@ export async function reofferPendingEmails(
     select: {
       id: true,
       aiProcessingResult: { select: { id: true } },
-      aiOperations: { where: { operation: 'classification' }, select: { id: true } },
+      aiOperations: { where: { operation: 'classification' }, select: { status: true } },
     },
   });
+  return pending.map((email) => ({ ...email, role: nextRole(email) }));
+}
+
+/** True while the email waits for a paused model; only that pause's test mail may go. */
+const waitsForPause = (pauses: readonly ModelPause[], email: { id: string; role: AIRole }) =>
+  pauses.some((pause) => pause.roles.includes(email.role) && pause.testEmailId !== email.id);
+
+/**
+ * Re-offers up to 100 of the user's PENDING emails to the worker, newest first, so fresh mail is
+ * not stuck behind a backlog. Covers the DB-insert / queue-send gap and emails that waited for AI
+ * access. Offers nothing while the user's AI access is not ready (at Career Companion's daily limit
+ * it queues the read for midnight UTC), and skips an email whose next step needs a paused model:
+ * those emails wait and are re-offered when the pause ends (`resumeWaitingEmails`), by the next
+ * sync, or after the user fixes access. Enqueueing is idempotent per email (singleton key).
+ * Returns how many emails were offered.
+ */
+export async function reofferPendingEmails(
+  userId: string,
+  guard?: () => Promise<void>,
+): Promise<number> {
+  const access = await getAccessState(userId);
+  if (access.state !== 'READY') {
+    if (access.reason === 'SAFETY_LIMIT') await resumeAfterPause(userId, access.resumesAt);
+    return 0;
+  }
+  const waiting = (await waitingEmails(userId)).filter(
+    (email) => !waitsForPause(access.pauses, email),
+  );
   let triageQueued = false;
-  for (const email of pending) {
+  for (const email of waiting) {
     await guard?.();
     // With batching on, an email with no result and no classification row goes to the batched
     // check; every other email continues on the per-email job, which reuses or resumes its row.
@@ -59,23 +86,44 @@ export async function reofferPendingEmails(
     }
     await offerEmail(userId, email.id);
   }
-  return pending.length;
+  return waiting.length;
 }
 
 /**
- * Runs when a pause ends (the job queued when the pause started). If a newer pause is running,
- * the read waits for that one. Otherwise the waiting mail is offered again; if the provider is
- * still busy, the first call starts the next, longer pause and queues the next try. Problems that
- * need the user (key, billing, model) and the daily safety limit get no automatic try.
+ * "Read waiting mails now" while models are paused: the newest waiting email whose next step needs
+ * a paused model goes first, alone, as the test. Until such a model answers, only the test mail
+ * may use it; the others follow when it works (`noteProviderSuccess`). A test the mail's job leaves
+ * without an answer from that model ends with the job (`endTest`). Returns the test mail's ID, or
+ * null when no waiting mail needs a paused model.
+ */
+export async function offerTestMail(
+  userId: string,
+  pauses: readonly ModelPause[],
+): Promise<string | null> {
+  const test = (await waitingEmails(userId)).find((email) =>
+    pauses.some((pause) => pause.roles.includes(email.role)),
+  );
+  if (!test) return null;
+  // The steps the test mail still has: sorting, then the details; or the details only.
+  const steps: AIRole[] = test.role === 'fast' ? ['fast', 'detailed'] : ['detailed'];
+  const tested = pauses.filter((pause) => pause.roles.some((role) => steps.includes(role)));
+  await prisma.aIModelPause.updateMany({
+    where: { userId, model: { in: tested.map((pause) => pause.model) } },
+    data: { testEmailId: test.id, testStartedAt: new Date(), testResult: null },
+  });
+  await offerEmail(userId, test.id);
+  return test.id;
+}
+
+/**
+ * Runs when a pause or Career Companion's daily limit ends (the job queued then). The waiting mail
+ * whose next step can run now is offered again; mail for a model that is still paused waits for
+ * that pause's own job. If the provider is still busy, the first call starts the next, longer
+ * pause and queues the next try. Problems that need the user (key, billing, model) get no
+ * automatic try; while the daily limit is reached, the read waits until midnight UTC.
  */
 export async function resumeWaitingEmails(userId: string): Promise<void> {
   const access = await getAccessState(userId);
-  if (isProviderPause(access)) {
-    // A failure after this read was queued made the pause longer.
-    logEvent('ai_pause_extended', { userId, reason: access.reason, resumesAt: access.resumesAt });
-    await resumeAfterPause(userId, access.resumesAt);
-    return;
-  }
   const offered = await reofferPendingEmails(userId);
   logEvent('ai_resumed_after_pause', { userId, offered, access: access.state });
 }
