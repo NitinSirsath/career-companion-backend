@@ -215,6 +215,10 @@ describe('no key or email content leaks anywhere', () => {
     await call('get', '/api/ai/settings');
     await call('get', '/api/gmail/messages');
 
+    // The failure lines were written, so the scan below covers them.
+    for (const event of ['ai_call_failed', 'ai_paused', 'job_failed', 'job_waiting_for_ai'])
+      expect(logs.join('\n')).toContain(`"event":"${event}"`);
+
     const everything = [logs.join('\n'), responses.join('\n'), await storedText()];
     for (const text of everything) {
       expect(text).not.toContain('KEYSENTINEL');
