@@ -7,6 +7,12 @@ import { droppedConnection, libraryConnectionFailure, unansweredFailure } from '
 import { ProviderClient, VERIFY_TIMEOUT_MS } from './types';
 import { checkModels } from './verify';
 
+/** An account with no credit or no active billing. */
+const BILLING_CODES = ['insufficient_quota', 'billing_not_active', 'billing_hard_limit_reached'];
+
+/** OpenAI's short server errors and a conflict (409): busy, so the mail waits and uses no try. */
+const BUSY_STATUSES = [409, 500, 502, 503, 504];
+
 /**
  * OpenAI-compatible error mapping (plan §3.6). Starting table; each row must be confirmed with a
  * real key before the provider is offered in production. Unrecognized → no answer in time.
@@ -27,14 +33,15 @@ export function classifyOpenAIError(err: unknown): ProviderFailure {
     status,
     providerCode: code ?? undefined,
     retryAfterMs: retryAfterMs(err.headers),
+    providerRequestId: err.requestID ?? undefined,
   };
   if (status === 401) return new ProviderFailure('KEY_REJECTED', details);
-  if (status === 429 && code === 'insufficient_quota')
+  if (status === 403 || (code && BILLING_CODES.includes(code)))
     return new ProviderFailure('ACCOUNT_OR_BILLING', details);
-  if (status === 403) return new ProviderFailure('ACCOUNT_OR_BILLING', details);
   if (status === 404 || code === 'model_not_found')
     return new ProviderFailure('MODEL_UNAVAILABLE', details);
-  if (status === 429 || status === 503) return new ProviderFailure('RATE_LIMITED', details);
+  if (status === 429) return new ProviderFailure('RATE_LIMITED', details);
+  if (BUSY_STATUSES.includes(status)) return new ProviderFailure('PROVIDER_BUSY', details);
   if (status === 408 || status >= 500) return new ProviderFailure('OUTCOME_UNKNOWN', details);
   return new ProviderFailure('INVALID_REQUEST', details);
 }

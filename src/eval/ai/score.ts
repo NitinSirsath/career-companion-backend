@@ -1,4 +1,4 @@
-import { ACCESS_FAILURE_KINDS } from '../../services/ai/errors';
+import { isRefusal } from '../../services/ai/errors';
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
@@ -180,8 +180,7 @@ export interface Metrics {
   outputTokens: number;
 }
 
-export const isRefused = (call: Pick<CallOutcome, 'error'>) =>
-  call.error === 'RATE_LIMITED' || ACCESS_FAILURE_KINDS.some((kind) => kind === call.error);
+export const isRefused = (call: Pick<CallOutcome, 'error'>) => isRefusal(call.error);
 
 /** Same confidence threshold as production (RELEVANCE_CONFIDENCE_THRESHOLD default). */
 export const CONFIDENCE_THRESHOLD = 0.7;

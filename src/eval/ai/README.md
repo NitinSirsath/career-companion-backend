@@ -14,9 +14,9 @@ AI_EVAL_API_KEY=<key> npm run ai:eval -- --provider <gemini|openai|anthropic> --
 Never put a real key in a file. Results and the certification checklist live in the docs repo: `docs/ai/provider-evaluation.md`.
 
 Evaluation reports distinguish `PASS`, `FAIL` and `INCONCLUSIVE` (exit 0/1/2).
-Quota/access refusals are counted separately and excluded from quality and latency;
+Quota, busy and access refusals are counted separately and excluded from quality and latency;
 invalid output and unknown outcomes still fail quality. An unanswered call ends
-the run after at most three rate-limit waits (each no longer than 120 seconds).
+the run after at most three rate-limit or busy waits (each no longer than 120 seconds).
 `--delay-ms 0..120000` paces calls. Unknown/invalid paid outcomes are never repeated.
 Only a valid PASS report with zero refused calls can be a baseline. Reports have
 unique timestamp filenames and cannot overwrite prior evidence.

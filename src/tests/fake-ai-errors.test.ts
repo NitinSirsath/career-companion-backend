@@ -87,9 +87,10 @@ async function failureOf(fault: FakeAiError, providerId: string) {
 
 /** The kind each fault gets from today's real error handling: Gemini, OpenAI, Anthropic. */
 const KINDS_TODAY: Record<FakeAiError, [string, string, string]> = {
-  busy: ['PROVIDER_BUSY', 'RATE_LIMITED', 'RATE_LIMITED'],
+  busy: ['PROVIDER_BUSY', 'PROVIDER_BUSY', 'PROVIDER_BUSY'],
   'no-answer': ['OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
-  deadline: ['OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
+  // A 504 is Google's own deadline; for OpenAI and Anthropic it is busy.
+  deadline: ['OUTCOME_UNKNOWN', 'PROVIDER_BUSY', 'PROVIDER_BUSY'],
   'rate-minute': ['RATE_LIMITED', 'RATE_LIMITED', 'RATE_LIMITED'],
   'rate-day': ['RATE_LIMITED', 'RATE_LIMITED', 'RATE_LIMITED'],
   key: ['KEY_REJECTED', 'KEY_REJECTED', 'KEY_REJECTED'],
@@ -98,7 +99,7 @@ const KINDS_TODAY: Record<FakeAiError, [string, string, string]> = {
   unusable: ['INVALID_OUTPUT', 'INVALID_OUTPUT', 'INVALID_OUTPUT'],
   'no-connection': ['PROVIDER_BUSY', 'PROVIDER_BUSY', 'PROVIDER_BUSY'],
   'line-dropped': ['OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
-  'server-error': ['PROVIDER_BUSY', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
+  'server-error': ['PROVIDER_BUSY', 'PROVIDER_BUSY', 'PROVIDER_BUSY'],
 };
 const answer = ['PROVIDER_ANSWER', 'PROVIDER_ANSWER', 'PROVIDER_ANSWER'] as const;
 /** Where each fault failed, as the adapters sort it: Gemini, OpenAI, Anthropic. */
@@ -356,8 +357,8 @@ describe('the fake-error command never runs outside dev mode and sends nothing',
     expect(JSON.parse(line?.slice('RESULT '.length) ?? '{}')).toEqual({
       results: {
         gemini: { call: 'PROVIDER_BUSY', check: 'INCONCLUSIVE' },
-        openai: { call: 'RATE_LIMITED', check: 'INCONCLUSIVE' },
-        anthropic: { call: 'RATE_LIMITED', check: 'INCONCLUSIVE' },
+        openai: { call: 'PROVIDER_BUSY', check: 'INCONCLUSIVE' },
+        anthropic: { call: 'PROVIDER_BUSY', check: 'INCONCLUSIVE' },
       },
       sent: [],
     });

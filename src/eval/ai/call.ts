@@ -1,4 +1,4 @@
-import { ProviderFailure } from '../../services/ai/errors';
+import { PAUSE_FAILURE_KINDS, ProviderFailure } from '../../services/ai/errors';
 import type { CallOutcome } from './score';
 
 /** Evaluation-only pacing. Never retries an ambiguous or malformed paid-call outcome. */
@@ -22,7 +22,11 @@ export async function evaluateCall<T>(
       const requested = error.retryAfterMs;
       const delay =
         requested !== undefined && Number.isFinite(requested) && requested >= 0 ? requested : 30000;
-      if (error.kind === 'RATE_LIMITED' && waits < 3 && delay <= 120000) {
+      if (
+        (PAUSE_FAILURE_KINDS as readonly string[]).includes(error.kind) &&
+        waits < 3 &&
+        delay <= 120000
+      ) {
         await sleep(delay);
         continue;
       }

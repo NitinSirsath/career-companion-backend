@@ -497,7 +497,13 @@ export async function runSampleTest(userId: string): Promise<AISampleTestRespons
         failedAt,
         timeoutMs: model.timeoutMs,
       });
-      logEvent('ai_sample_test', { userId, provider: access.provider, outcome: kind, ...usage });
+      logEvent('ai_sample_test', {
+        userId,
+        provider: access.provider,
+        outcome: kind,
+        providerRequestId: err instanceof ProviderFailure ? err.providerRequestId : undefined,
+        ...usage,
+      });
       if (isRefusal(kind)) {
         const resumesAt = await prisma.$transaction((tx) =>
           noteProviderFailure(tx, access, kind, failedAt, {

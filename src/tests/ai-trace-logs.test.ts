@@ -6,6 +6,8 @@
 import type { JobWithMetadata } from 'pg-boss';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@google/genai';
+import { APIError as AnthropicError } from '@anthropic-ai/sdk';
+import { APIError as OpenAIError } from 'openai';
 import { z } from 'zod';
 import { prisma } from '../db/prisma';
 import { getCatalogProvider, recommendedModel } from '../contracts/aiCatalog';
@@ -13,6 +15,9 @@ import { processEmailJob } from '../jobs/emailProcessingJob';
 import * as aiPipeline from '../services/ai/pipeline';
 import { TerminalAIError } from '../services/ai/errors';
 import { runOperation } from '../services/ai/operations';
+import { classifyAnthropicError } from '../services/ai/providers/anthropic';
+import { classifyOpenAIError } from '../services/ai/providers/openai';
+import { classifyBatch } from '../services/ai/triage';
 import { EmailProcessingJobData } from '../services/enqueue';
 import { fetchMessageBody, fetchMessageMetadata } from '../services/gmailFetcher';
 import { configureAI, fakeAccess } from './helpers/aiAccess';
@@ -235,6 +240,92 @@ describe("one mail's AI tries in the log", () => {
     expect(failed).not.toHaveProperty('status');
     expect(JSON.stringify(lines)).not.toContain(SENTINEL);
   });
+
+  /** The provider's busy answer as its library throws it, sorted by the real adapter mapping. */
+  const busyAnswers = {
+    openai: () =>
+      classifyOpenAIError(
+        OpenAIError.generate(
+          503,
+          { error: { message: SENTINEL, type: 'server_error', code: null } },
+          undefined,
+          new Headers({ 'x-request-id': 'req_7f3a9c2e41b8d6' }),
+        ),
+      ),
+    anthropic: () =>
+      classifyAnthropicError(
+        AnthropicError.generate(
+          529,
+          { type: 'error', error: { type: 'overloaded_error', message: SENTINEL } },
+          undefined,
+          new Headers({ 'request-id': 'req_011CSHoEeqs5C35K2UUqR7Fy' }),
+        ),
+      ),
+  };
+  it.each([
+    ['openai', 'req_7f3a9c2e41b8d6'],
+    ['anthropic', 'req_011CSHoEeqs5C35K2UUqR7Fy'],
+  ] as const)(
+    "logs %s's request ID with its failure, so the failure can be found with the provider",
+    async (providerId, providerRequestId) => {
+      const fast = recommendedModel(getCatalogProvider(providerId)!, 'fast');
+      const emailId = await newEmail();
+      const failed = runOperation({
+        userId,
+        emailId,
+        operation: 'classification',
+        contract: { version: 'v1', schema: z.object({}), role: 'fast' },
+        access: async () => ({
+          ...fakeAccess(userId),
+          provider: providerId,
+          models: { fast, detailed: fast },
+        }),
+        call: async () => {
+          throw busyAnswers[providerId]();
+        },
+      });
+      await expect(failed).rejects.toThrow();
+      expect(only('ai_call_failed')).toMatchObject({
+        level: 'warn',
+        emailId,
+        provider: providerId,
+        model: fast.id,
+        kind: 'PROVIDER_BUSY',
+        failureCause: 'PROVIDER_ANSWER',
+        providerRequestId,
+        result: 'paused',
+      });
+      expect(JSON.stringify(lines)).not.toContain(SENTINEL);
+    },
+  );
+
+  it.each([
+    ['openai', 'req_7f3a9c2e41b8d6'],
+    ['anthropic', 'req_011CSHoEeqs5C35K2UUqR7Fy'],
+  ] as const)(
+    "logs %s's request ID when a batch fails, so batch sorting can be found with the provider too",
+    async (providerId, providerRequestId) => {
+      const fast = recommendedModel(getCatalogProvider(providerId)!, 'fast');
+      const emailId = await newEmail();
+      const access = {
+        ...fakeAccess(userId),
+        provider: providerId,
+        models: { fast, detailed: fast },
+      };
+      vi.mocked(access.classifier.classifyRelevanceBatch).mockImplementation(async () => {
+        throw busyAnswers[providerId]();
+      });
+      const input = { sender: null, subject: SENTINEL, labels: [], snippet: SENTINEL };
+      await expect(classifyBatch(userId, [{ emailId, input }], access)).rejects.toThrow();
+      expect(only('ai_batch_failed')).toMatchObject({
+        level: 'warn',
+        userId,
+        kind: 'PROVIDER_BUSY',
+        providerRequestId,
+      });
+      expect(JSON.stringify(lines)).not.toContain(SENTINEL);
+    },
+  );
 
   it('logs an error we cannot sort as our own bug: an error with where it broke, never its text', async () => {
     const emailId = await newEmail();

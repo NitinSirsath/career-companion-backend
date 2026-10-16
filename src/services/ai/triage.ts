@@ -542,6 +542,7 @@ async function failBatch(
     userId: ctx.userId,
     itemCount: ctx.claimed.length,
     kind: kind ?? 'OutcomeUnknown',
+    providerRequestId: failure?.providerRequestId,
   });
   return refusal ? new AIAccessError(refusal, resumesAt) : thrown;
 }

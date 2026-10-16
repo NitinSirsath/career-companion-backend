@@ -166,7 +166,7 @@ Every AI call uses the session or job user's own provider key, from a curated co
 | `POST /api/ai/settings/check` | Re-verify the saved key ("Check again"). |
 | `POST /api/ai/settings/sample-test` | Run both capabilities on a built-in synthetic email. |
 | `DELETE /api/ai/settings` | Remove the configuration and its key. |
-| `POST /api/ai/waiting/read` | "Read waiting mails now": end a running pause and offer the waiting mail again. Answers with the AI settings. |
+| `POST /api/ai/waiting/read` | "Read waiting mails now". During a pause it sends one waiting mail as a test; the others follow only if it works. With no pause it offers the waiting mail again. Answers with the AI settings. |
 | `POST /api/emails/:id/retry` | Gains `{ acceptPossibleDuplicateCharge: true }` for approving one more attempt after 409 `AI_RETRY_NEEDS_APPROVAL`. |
 
 **The exact error.** A failed AI call is kept as `AIFailure` (`src/contracts/ai.ts`): the kind, where it failed, the provider and model, the HTTP status, the provider's short code, the quota scope, the network code, why an unusable answer stopped (for example `MAX_TOKENS`), when, how long Career Companion waited and the model's time limit. Never the provider's message text.
@@ -186,7 +186,7 @@ See [STABILIZATION.md](STABILIZATION.md) for rollout and support.
   - `providers/`: one adapter per protocol behind `createProviderClient`;
   - `access.ts`: per-user access resolution;
   - `operations.ts`: the ledger;
-  - `usage.ts`: safety limit, counts, cooldown;
+  - `usage.ts`: safety limit, counts, each model's pause;
   - `failures.ts` and `mailStatus.ts`: the exact error, and a mail's AI status;
   - `offer.ts`: offers waiting mail to the worker, also by itself when a pause ends (`ai-resume-job`);
   - `waiting.ts`: "Read waiting mails now";
@@ -322,6 +322,6 @@ In dev mode every user has a **sandbox mailbox** that stands in for their Gmail 
 
 Fake errors leave their states in the dev database: pauses, a rejected key, failed mails. Use a separate dev-mode user for these runs. Or afterwards, in `npm run devmode`, save the key again and reset the sandbox ("Reset dev data", `POST /api/sandbox/reset`).
 
-**Times.** `no-answer` stops after 5 seconds instead of the model's 30 or 60. `rate-minute` asks for a 10-second wait. The app's own pause lengths are not shortened, because that would need a change to the app. "Read waiting mails now" ends a pause at once.
+**Times.** `no-answer` stops after 5 seconds instead of the model's 30 or 60. `rate-minute` asks for a 10-second wait. The app's own pause lengths are not shortened, because that would need a change to the app. "Read waiting mails now" does not end a pause at once: it sends one waiting mail as a test, and the others follow only if it works. While the fault runs, the test gets the same error: the pause starts again from that answer, no longer than it was.
 
 

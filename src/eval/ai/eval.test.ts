@@ -264,7 +264,13 @@ describe('refusal accounting and safe evaluation retries', () => {
     expect(metrics.fieldAccuracy).toBe(1);
   });
   it('excludes access refusals and never treats invalid output as refused', () => {
-    for (const error of ['KEY_REJECTED', 'ACCOUNT_OR_BILLING', 'MODEL_UNAVAILABLE'])
+    for (const error of [
+      'KEY_REJECTED',
+      'ACCOUNT_OR_BILLING',
+      'MODEL_UNAVAILABLE',
+      'RATE_LIMITED',
+      'PROVIDER_BUSY',
+    ])
       expect(isRefused({ error })).toBe(true);
     for (const error of ['OUTCOME_UNKNOWN', 'INVALID_OUTPUT', 'INVALID_REQUEST']) {
       const metrics = score(
@@ -312,6 +318,13 @@ describe('refusal accounting and safe evaluation retries', () => {
       .mockResolvedValue('ok');
     expect((await evaluateCall(retry, { delayMs: 20, sleep })).value).toBe('ok');
     expect(sleep.mock.calls).toEqual([[20], [30000]]);
+    sleep.mockClear();
+    const busy = vi
+      .fn()
+      .mockRejectedValueOnce(new ProviderFailure('PROVIDER_BUSY', { status: 529 }))
+      .mockResolvedValue('ok');
+    expect((await evaluateCall(busy, { sleep })).value).toBe('ok');
+    expect(sleep.mock.calls).toEqual([[30000]]);
     for (const failure of [
       new ProviderFailure('RATE_LIMITED', { retryAfterMs: 120001 }),
       new ProviderFailure('OUTCOME_UNKNOWN'),
