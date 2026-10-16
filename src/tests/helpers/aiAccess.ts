@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { getCatalogProvider, recommendedModel } from '../../contracts/aiCatalog';
 import type { AIAccess } from '../../services/ai/access';
@@ -37,3 +38,19 @@ export function fakeAccess(userId: string, revision = 0): AIAccess {
     analyzer: { extractJobData: vi.fn() },
   };
 }
+
+type PauseFields = Omit<Prisma.AIModelPauseUncheckedCreateInput, 'userId' | 'model'>;
+
+/** Sets one model's pause for a configured user, as a failure on that model leaves it. */
+export function setPause(userId: string, model: string, fields: Partial<PauseFields> = {}) {
+  const data = { reason: 'PROVIDER_BUSY' as const, ...fields };
+  return prisma.aIModelPause.upsert({
+    where: { userId_model: { userId, model } },
+    create: { userId, model, ...data },
+    update: data,
+  });
+}
+
+/** The model's pause row, or null when the model is not paused. */
+export const pauseOf = (userId: string, model: string) =>
+  prisma.aIModelPause.findUnique({ where: { userId_model: { userId, model } } });
