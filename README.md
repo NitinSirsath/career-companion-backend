@@ -169,6 +169,11 @@ Every AI call uses the session or job user's own provider key, from a curated co
 | `POST /api/ai/waiting/read` | "Read waiting mails now": end a running pause and offer the waiting mail again. Answers with the AI settings. |
 | `POST /api/emails/:id/retry` | Gains `{ acceptPossibleDuplicateCharge: true }` for approving one more attempt after 409 `AI_RETRY_NEEDS_APPROVAL`. |
 
+**The exact error.** A failed AI call is kept as `AIFailure` (`src/contracts/ai.ts`): the kind, where it failed, the provider and model, the HTTP status, the provider's short code, the quota scope, the network code, why an unusable answer stopped (for example `MAX_TOKENS`), when, how long Career Companion waited and the model's time limit. Never the provider's message text.
+- `GET /api/gmail/messages`: each waiting or stopped mail has `aiStatus`: why it waits or stopped, its own last failure, its tries and when each was sent, the next try and the next step, and whether it is the test mail of "Read waiting mails now" or waits for it. It comes from the stored kind and the live pauses, never from `processingErrorDetails`, which stays only for older screens. The sandbox mail results carry the same `aiStatus`.
+- `GET /api/ai/settings`: `access.failure` behind the reason, `access.pauses` (each model's pause with its failure and test mail), `lastFailure` and `needsYourOk`. A key check that could not decide answers `verificationFailure`.
+- 409 `AI_RETRY_NEEDS_APPROVAL` lists the time of each try and the last failure; 502 `AI_SAMPLE_FAILED` names the model and the wait.
+
 **Configuration**
 - New: `AI_CREDENTIAL_ENCRYPTION_KEY` (64 hex, different from the Gmail key) and `AI_USER_DAILY_CALL_LIMIT` (per user per day, default 500, 0 = pause).
 - Removed: `GEMINI_*` and `AI_DAILY_CALL_LIMIT`.
@@ -182,6 +187,7 @@ See [STABILIZATION.md](STABILIZATION.md) for rollout and support.
   - `access.ts`: per-user access resolution;
   - `operations.ts`: the ledger;
   - `usage.ts`: safety limit, counts, cooldown;
+  - `failures.ts` and `mailStatus.ts`: the exact error, and a mail's AI status;
   - `offer.ts`: offers waiting mail to the worker, also by itself when a pause ends (`ai-resume-job`);
   - `waiting.ts`: "Read waiting mails now";
   - `credentials.ts`: key sealing;

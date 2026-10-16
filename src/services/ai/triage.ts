@@ -1,6 +1,7 @@
+import type { CatalogModel } from '../../contracts/aiCatalog';
 import type { AIAccess } from './access';
 import { blockingPause, getAccessState, resolveAIAccess, withPause } from './access';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { fetchMessageMetadata } from '../gmailFetcher';
 import { enqueueEmailProcessingJob } from '../enqueue';
@@ -12,6 +13,7 @@ import {
   aiSetting,
   isRefusal,
 } from './errors';
+import { failureRecord } from './failures';
 import {
   AI_CONTRACT_VERSIONS,
   CLASSIFICATION_VERSIONS,
@@ -190,7 +192,8 @@ export async function classifyBatch(
       access,
       batchId,
       claimed,
-      modelId: access.models.fast.id,
+      model: access.models.fast,
+      startedAt: run.now,
       updateEmails,
       version,
     });
@@ -304,6 +307,7 @@ async function claimBatch(run: BatchRun, items: Candidate[]) {
           status: 'PROCESSING',
           attempts: { increment: 1 },
           startedAt: now,
+          triedAt: { push: now },
           errorCode: null,
           retryAfter: null,
           provider: access.provider,
@@ -348,9 +352,15 @@ async function saveMissingAnswer(tx: Prisma.TransactionClient, run: BatchRun, em
     where: classificationKey(emailId, run.version),
   });
   // Stays RETRYABLE even when its attempts are used up: holdOf then offers the user an approval.
+  // The provider answered, so an earlier try's failure is no longer this step's last one.
   await tx.aIOperation.update({
     where: { id: op.id },
-    data: { status: 'RETRYABLE', errorCode: 'BATCH_ITEM_MISSING', retryAfter: null },
+    data: {
+      status: 'RETRYABLE',
+      errorCode: 'BATCH_ITEM_MISSING',
+      lastFailure: Prisma.DbNull,
+      retryAfter: null,
+    },
   });
   if (!run.updateEmails) return;
   const exhausted = op.attempts >= MAX_ATTEMPTS + op.approvedRetries;
@@ -419,7 +429,8 @@ function batchFailureStatus(kind: string | undefined) {
 /**
  * Records a failed batch call on every claimed row (and, from the triage job, on the emails) and
  * returns the error to throw. Same rules as runOperation: a refusal releases the claim; invalid
- * output or request is FAILED; anything else may have been charged and is held as UNKNOWN.
+ * output or request is FAILED; anything else may have been charged and is held as UNKNOWN. Each
+ * row keeps the exact failure, so a mail that failed here shows why.
  */
 async function failBatch(
   err: unknown,
@@ -428,13 +439,21 @@ async function failBatch(
     access: AIAccess;
     batchId: string;
     claimed: Candidate[];
-    modelId: string;
+    model: CatalogModel;
+    startedAt: Date;
     updateEmails: boolean;
     version: string;
   },
 ): Promise<unknown> {
   // A pause is counted from the failure, not from the start of the call.
   const failedAt = new Date();
+  const record = failureRecord(err, {
+    provider: ctx.access.provider,
+    model: ctx.model.id,
+    startedAt: ctx.startedAt,
+    failedAt,
+    timeoutMs: ctx.model.timeoutMs,
+  });
   const failure = failureKind(err);
   const kind = failure?.kind;
   const refusal = isRefusal(kind) ? kind : null;
@@ -458,23 +477,28 @@ async function failBatch(
           version: ctx.version,
         },
       };
-      if (refusal)
+      if (refusal) {
+        // The refused try is given back, with the time it was sent.
+        const { triedAt } = await tx.aIOperation.findUniqueOrThrow({ where });
         await tx.aIOperation.update({
           where,
           data: {
             status: 'PENDING',
             attempts: { decrement: 1 },
+            triedAt: triedAt.slice(0, -1),
             errorCode: refusal,
+            lastFailure: record,
             batchId: null,
             startedAt: null,
           },
         });
-      else
+      } else
         await tx.aIOperation.update({
           where,
           data: {
             status: status === 'UNKNOWN' ? 'UNKNOWN' : 'FAILED',
             errorCode: kind ?? 'OutcomeUnknown',
+            lastFailure: record,
           },
         });
       if (!ctx.updateEmails) continue;
@@ -500,7 +524,7 @@ async function failBatch(
             },
       });
     }
-    const pause = { modelId: ctx.modelId, emailId: onlyEmail(ctx.claimed) };
+    const pause = { modelId: ctx.model.id, emailId: onlyEmail(ctx.claimed), failure: record };
     if (refusal)
       return noteProviderFailure(tx, ctx.access, refusal, failedAt, {
         ...pause,

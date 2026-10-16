@@ -5,8 +5,81 @@
  * returned, masked, hinted or echoed, including in the save response and in validation errors.
  */
 import { z } from 'zod';
+import { AI_ROLES } from './aiCatalog';
 
 const IsoDateTime = z.iso.datetime({ offset: true });
+
+// ─── The exact error ────────────────────────────────────────────────────────
+
+/**
+ * What a failed AI call was, in the words the screens use:
+ * - PROVIDER_BUSY: a short server error, overloaded, or a request that never left. No try used.
+ * - NO_ANSWER_IN_TIME: our timer, the provider's deadline (504), or a line that dropped after
+ *   sending. Uses one try; the provider may have charged it.
+ * - RATE_LIMITED: 429, per minute or per day (`quotaScope`).
+ * - KEY_REJECTED, ACCOUNT_OR_BILLING, MODEL_UNAVAILABLE: the user's key, account or model.
+ * - INVALID_OUTPUT: an answer Career Companion could not use (`stopReason` when it stopped early).
+ * - INVALID_REQUEST: the provider refused Career Companion's request (another 400): our problem.
+ * - INTERNAL_ERROR: an error in Career Companion's own code.
+ */
+export const AIFailureKindSchema = z.enum([
+  'PROVIDER_BUSY',
+  'NO_ANSWER_IN_TIME',
+  'RATE_LIMITED',
+  'KEY_REJECTED',
+  'ACCOUNT_OR_BILLING',
+  'MODEL_UNAVAILABLE',
+  'INVALID_OUTPUT',
+  'INVALID_REQUEST',
+  'INTERNAL_ERROR',
+]);
+export type AIFailureKind = z.infer<typeof AIFailureKindSchema>;
+
+/**
+ * One failed AI call as Career Companion measured it: the status, the provider's short code, the
+ * model and our own times. Never the provider's message text: it can echo the key or mail content.
+ */
+export const AIFailureSchema = z.object({
+  kind: AIFailureKindSchema,
+  /**
+   * Where it failed: our own timer (TIMEOUT), the provider's deadline (PROVIDER_DEADLINE), no
+   * connection before sending (NETWORK), the line dropped after sending (NETWORK_AFTER_SEND), the
+   * provider's answer (PROVIDER_ANSWER), or Career Companion's own code (UNCLASSIFIED).
+   */
+  cause: z.enum([
+    'TIMEOUT',
+    'PROVIDER_DEADLINE',
+    'NETWORK',
+    'NETWORK_AFTER_SEND',
+    'PROVIDER_ANSWER',
+    'UNCLASSIFIED',
+  ]),
+  provider: z.string(),
+  model: z.string(),
+  httpStatus: z.number().int().nullable(),
+  /** The provider's short code, for example UNAVAILABLE or API_KEY_INVALID. */
+  providerCode: z.string().nullable(),
+  /** Which quota a 429 hit. */
+  quotaScope: z.enum(['PER_DAY', 'PER_MINUTE']).nullable(),
+  /** The quota was the provider's free tier. */
+  freeTier: z.boolean(),
+  /** A failed connection's code, for example ENOTFOUND or ECONNRESET. */
+  networkCode: z.string().nullable(),
+  /** Why the provider stopped an answer that could not be used, for example MAX_TOKENS or SAFETY. */
+  stopReason: z.string().nullable(),
+  at: IsoDateTime,
+  /** How long Career Companion waited for the answer. */
+  waitedMs: z.number().int(),
+  /**
+   * The time limit the provider got: the model's own (60 seconds for Gemini 3.8 Flash), or the key
+   * check's. Career Companion stops waiting 15 seconds after a model's limit.
+   */
+  timeoutMs: z.number().int(),
+  /** The try this call used, of `maxAttempts`; null when it used none (it was refused). */
+  attempt: z.number().int().nullable(),
+  maxAttempts: z.number().int().nullable(),
+});
+export type AIFailure = z.infer<typeof AIFailureSchema>;
 
 export const AIAccessStateSchema = z.enum(['NOT_SET_UP', 'READY', 'NEEDS_ATTENTION', 'LIMITED']);
 export type AIAccessState = z.infer<typeof AIAccessStateSchema>;
@@ -31,6 +104,33 @@ export const ModelInUseSchema = z.object({
   source: z.enum(['RECOMMENDED', 'SELECTED', 'REPLACED_RETIRED']),
 });
 
+/** A model the setup uses now is paused. A model with no pause is working. */
+export const AIModelPauseSchema = z.object({
+  model: z.string(),
+  /** The roles that use the model now. */
+  roles: z.array(z.enum(AI_ROLES)),
+  /**
+   * RATE_LIMITED, PROVIDER_BUSY, or PROVIDER_UNAVAILABLE (older pauses). No answer in time pauses
+   * as PROVIDER_BUSY: `failure.kind` says NO_ANSWER_IN_TIME.
+   */
+  reason: AIAccessReasonSchema,
+  resumesAt: IsoDateTime,
+  /** The failure that started or last extended the pause; null for a pause from before it was kept. */
+  failure: AIFailureSchema.nullable(),
+  /**
+   * The test mail of "Read waiting mails now": which mail, when it was sent, and how it failed.
+   * `result` is null while it waits for the answer. Other mail that needs this model waits for it.
+   */
+  test: z
+    .object({
+      emailId: z.uuid(),
+      startedAt: IsoDateTime.nullable(),
+      result: AIFailureKindSchema.nullable(),
+    })
+    .nullable(),
+});
+export type AIModelPause = z.infer<typeof AIModelPauseSchema>;
+
 // ─── GET /api/ai/settings ───────────────────────────────────────────────────
 
 export const AISettingsResponseSchema = z.object({
@@ -42,12 +142,21 @@ export const AISettingsResponseSchema = z.object({
   access: z.object({
     state: AIAccessStateSchema,
     reason: AIAccessReasonSchema.nullable(),
-    /** The model a MODEL_UNAVAILABLE problem refers to. */
+    /** The model a MODEL_UNAVAILABLE problem or a pause refers to. */
     modelId: z.string().nullable(),
     resumesAt: IsoDateTime.nullable(),
+    /**
+     * The exact failure behind `reason`: the pause's, or the key, billing or model problem's. A
+     * pause after no answer in time has reason PROVIDER_BUSY and failure kind NO_ANSWER_IN_TIME.
+     */
+    failure: AIFailureSchema.nullable(),
+    /** Each running pause of a model the setup uses now. */
+    pauses: z.array(AIModelPauseSchema),
     verified: z.boolean(),
     lastCheckedAt: IsoDateTime.nullable(),
   }),
+  /** The latest failure kept for the account: a model's pause (also one that ended) or access. */
+  lastFailure: AIFailureSchema.nullable(),
   /** Career Companion's own counts for today (UTC). Not provider billing data. */
   usageToday: z.object({
     day: z.string(),
@@ -58,6 +167,17 @@ export const AISettingsResponseSchema = z.object({
   /** Career Companion's safeguard, not the provider's quota. */
   safetyLimit: z.object({ callsPerDay: z.number().int(), resetsAt: IsoDateTime }),
   waitingEmails: z.number().int(),
+  /**
+   * Mails that got no answer in time on their last automatic try: they wait for the user's OK
+   * (Manual Retry). `model`, `lastTriedAt` and `tries` are those of the one tried last; a mail
+   * held after a failed batch or from before tries were kept can have fewer than 3 tries.
+   */
+  needsYourOk: z.object({
+    emails: z.number().int(),
+    model: z.string().nullable(),
+    lastTriedAt: IsoDateTime.nullable(),
+    tries: z.number().int(),
+  }),
   consent: z
     .object({ disclosure: z.string(), consentedAt: IsoDateTime, current: z.boolean() })
     .nullable(),
@@ -84,6 +204,8 @@ export type SaveAISettingsRequest = z.infer<typeof SaveAISettingsRequestSchema>;
 
 export const SaveAISettingsResponseSchema = AISettingsResponseSchema.extend({
   verification: z.enum(['VERIFIED', 'INCONCLUSIVE']),
+  /** INCONCLUSIVE only: why the provider did not confirm the key, for example no answer in time. */
+  verificationFailure: AIFailureSchema.nullable(),
 });
 export type SaveAISettingsResponse = z.infer<typeof SaveAISettingsResponseSchema>;
 
@@ -91,6 +213,8 @@ export type SaveAISettingsResponse = z.infer<typeof SaveAISettingsResponseSchema
 
 export const CheckAISettingsResponseSchema = AISettingsResponseSchema.extend({
   verification: z.enum(['VERIFIED', 'REJECTED', 'INCONCLUSIVE']),
+  /** INCONCLUSIVE only: why the provider did not confirm the key, for example no answer in time. */
+  verificationFailure: AIFailureSchema.nullable(),
 });
 export type CheckAISettingsResponse = z.infer<typeof CheckAISettingsResponseSchema>;
 
@@ -149,4 +273,14 @@ export const AIAccessUnavailableDetailsSchema = z.object({
   state: AIAccessStateSchema,
   reason: AIAccessReasonSchema.nullable(),
   resumesAt: IsoDateTime.nullable(),
+  /** The paused model, when a model's pause is the reason. */
+  modelId: z.string().nullable(),
+  /** The failure behind the reason, when it is known. */
+  failure: AIFailureSchema.nullable(),
+});
+
+/** 502 AI_SAMPLE_FAILED: the sample test got no usable result. */
+export const AISampleFailedDetailsSchema = z.object({
+  /** Which model did not answer or answered unusably, how, and how long Career Companion waited. */
+  failure: AIFailureSchema,
 });

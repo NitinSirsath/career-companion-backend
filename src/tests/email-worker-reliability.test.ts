@@ -361,6 +361,9 @@ describe('manual email retry preserves paid claims and user decisions', () => {
             provider: 'gemini',
             model: 'gemini-2.5-flash',
             attemptedAt: attemptedAt.toISOString(),
+            // A step from before each try and the failure were kept.
+            triedAt: [],
+            failure: null,
           },
         ],
         currentProvider: 'gemini',

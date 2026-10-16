@@ -1,4 +1,5 @@
 import { AIOperation, Prisma } from '@prisma/client';
+import type { AIFailure } from '../../contracts/ai';
 import { prisma } from '../../db/prisma';
 import { AI_CATALOG } from '../../contracts/aiCatalog';
 import type { AIAccess } from './access';
@@ -13,6 +14,7 @@ import {
   TerminalAIError,
   isRefusal,
 } from './errors';
+import { failureRecord } from './failures';
 import {
   noteProviderFailure,
   noteProviderSuccess,
@@ -161,9 +163,10 @@ async function openOperation(
  * Returns the row as it is now.
  */
 async function releaseClaim(op: AIOperation): Promise<AIOperation> {
+  // No answer came for that try; what an earlier try answered is no longer its last failure.
   const released = await prisma.aIOperation.updateMany({
     where: { id: op.id, status: 'PROCESSING', startedAt: op.startedAt },
-    data: { status: 'RETRYABLE' },
+    data: { status: 'RETRYABLE', errorCode: 'OUTCOME_UNKNOWN', lastFailure: Prisma.DbNull },
   });
   if (released.count)
     logWarn('ai_claim_released', {
@@ -221,6 +224,7 @@ async function claimAttempt(
           status: 'PROCESSING',
           attempts: { increment: 1 },
           startedAt: now,
+          triedAt: { push: now },
           errorCode: null,
           provider: call.provider,
           model: call.model,
@@ -256,7 +260,7 @@ interface FailedCall {
   access: AIAccess;
   existing: Pick<
     AIOperation,
-    'id' | 'status' | 'emailId' | 'version' | 'attempts' | 'approvedRetries'
+    'id' | 'status' | 'emailId' | 'version' | 'attempts' | 'approvedRetries' | 'triedAt'
   >;
   operation: string;
   now: Date;
@@ -297,6 +301,7 @@ function logFailure(
     providerCode: failure?.providerCode,
     quotaScope: failure?.quotaScope,
     retryAfterMs: failure?.retryAfterMs,
+    stopReason: failure?.stopReason,
     durationMs: outcome.durationMs,
     timeoutMs: call.timeoutMs,
     result: outcome.result,
@@ -316,8 +321,21 @@ async function recordFailure(err: unknown, call: FailedCall): Promise<unknown> {
   const durationMs = failedAt.getTime() - call.now.getTime();
   if (err instanceof ProviderFailure && err.usage)
     await recordTokens(call.access.userId, call.now, err.usage);
+  const failure = sortedFailure(err);
+  const { existing } = call;
+  const record = failureRecord(err, {
+    provider: call.access.provider,
+    model: call.modelId,
+    startedAt: call.now,
+    failedAt,
+    timeoutMs: call.timeoutMs,
+    // A refusal gives its try back.
+    attempt: isRefusal(failure?.kind)
+      ? undefined
+      : { used: existing.attempts + 1, max: MAX_ATTEMPTS + existing.approvedRetries },
+  });
   const outcome = await prisma.$transaction((tx) =>
-    recordOutcome(tx, sortedFailure(err), call, failedAt),
+    recordOutcome(tx, failure, call, { failedAt, record }),
   );
   await resumeAfterPause(call.access.userId, outcome.resumesAt);
   if (outcome.thrown instanceof AIProviderError) outcome.thrown.operationStage = call.operation;
@@ -337,7 +355,7 @@ async function recordOutcome(
   tx: Prisma.TransactionClient,
   failure: ProviderFailure | null,
   call: FailedCall,
-  failedAt: Date,
+  { failedAt, record }: { failedAt: Date; record: AIFailure },
 ): Promise<FailureOutcome> {
   const { access, existing, modelId } = call;
   const kind = failure?.kind;
@@ -348,7 +366,9 @@ async function recordOutcome(
       data: {
         status: existing.status,
         attempts: { decrement: 1 },
+        triedAt: existing.triedAt,
         errorCode: kind,
+        lastFailure: record,
         retryAfter: null,
       },
     });
@@ -357,14 +377,15 @@ async function recordOutcome(
       emailId: existing.emailId,
       retryAfterMs: failure.retryAfterMs,
       quotaScope: failure.quotaScope,
+      failure: record,
     });
     const next = resumesAt ? 'paused' : 'waiting_for_user';
-    return { thrown: new AIAccessError(kind, resumesAt), resumesAt, next };
+    return { thrown: new AIAccessError(kind, resumesAt, record), resumesAt, next };
   }
   if (failure && (kind === 'INVALID_OUTPUT' || kind === 'INVALID_REQUEST')) {
     await tx.aIOperation.update({
       where: { id: existing.id },
-      data: { status: 'FAILED', errorCode: kind },
+      data: { status: 'FAILED', errorCode: kind, lastFailure: record },
     });
     const thrown =
       kind === 'INVALID_OUTPUT'
@@ -372,10 +393,10 @@ async function recordOutcome(
         : new TerminalAIError(failure.message);
     return { thrown, resumesAt: null, next: 'held' };
   }
-  if (kind === 'OUTCOME_UNKNOWN') return noAnswerInTime(tx, call, failedAt);
+  if (kind === 'OUTCOME_UNKNOWN') return noAnswerInTime(tx, call, { failedAt, record });
   await tx.aIOperation.update({
     where: { id: existing.id },
-    data: { status: 'FAILED', errorCode: 'UNCLASSIFIED' },
+    data: { status: 'FAILED', errorCode: 'UNCLASSIFIED', lastFailure: record },
   });
   return { thrown: new TerminalAIError(OWN_ERROR_MESSAGE), resumesAt: null, next: 'held' };
 }
@@ -388,21 +409,22 @@ async function recordOutcome(
 async function noAnswerInTime(
   tx: Prisma.TransactionClient,
   call: FailedCall,
-  failedAt: Date,
+  { failedAt, record }: { failedAt: Date; record: AIFailure },
 ): Promise<FailureOutcome> {
   const { access, existing, modelId } = call;
   await tx.aIOperation.update({
     where: { id: existing.id },
-    data: { status: 'RETRYABLE', errorCode: 'OUTCOME_UNKNOWN' },
+    data: { status: 'RETRYABLE', errorCode: 'OUTCOME_UNKNOWN', lastFailure: record },
   });
   const resumesAt = await noteProviderFailure(tx, access, 'OUTCOME_UNKNOWN', failedAt, {
     modelId,
     emailId: existing.emailId,
+    failure: record,
   });
   if (existing.attempts + 1 >= MAX_ATTEMPTS + existing.approvedRetries)
     return { thrown: new AIOutcomeUnknownError(), resumesAt, next: 'held' };
   return {
-    thrown: new AIAccessError('PROVIDER_BUSY', resumesAt),
+    thrown: new AIAccessError('PROVIDER_BUSY', resumesAt, record),
     resumesAt,
     next: 'retry_scheduled',
   };

@@ -4,11 +4,12 @@ import Anthropic, {
   APIError,
 } from '@anthropic-ai/sdk';
 import type { CatalogProvider } from '../../../contracts/aiCatalog';
-import { ACCESS_FAILURE_KINDS, ProviderFailure } from '../errors';
+import { ProviderFailure } from '../errors';
 import { nullsToAbsent, strictJsonSchema } from './jsonSchema';
 import { retryAfterMs } from './headers';
 import { droppedConnection, libraryConnectionFailure, unansweredFailure } from './network';
-import { ProviderClient, VERIFY_TIMEOUT_MS, VerifyResult } from './types';
+import { ProviderClient, VERIFY_TIMEOUT_MS } from './types';
+import { checkModels } from './verify';
 
 /** Anthropic error bodies: `{ type: 'error', error: { type, message } }`. Read in memory only. */
 function errorBody(err: APIError): { type?: string; message?: string } {
@@ -109,7 +110,7 @@ export function createAnthropicClient(provider: CatalogProvider, apiKey: string)
         outputTokens: message.usage?.output_tokens ?? null,
       };
       if (message.stop_reason === 'max_tokens' || message.stop_reason === 'refusal')
-        throw new ProviderFailure('INVALID_OUTPUT', { usage });
+        throw new ProviderFailure('INVALID_OUTPUT', { usage, stopReason: message.stop_reason });
       let data: unknown;
       if (native) {
         const text = message.content.find((block) => block.type === 'text');
@@ -133,18 +134,12 @@ export function createAnthropicClient(provider: CatalogProvider, apiKey: string)
       return { data: nullsToAbsent(data, contract.schema), usage };
     },
 
-    async verifyModels(modelIds): Promise<VerifyResult> {
-      for (const modelId of new Set(modelIds)) {
-        try {
-          await client.models.retrieve(modelId, {}, { timeout: VERIFY_TIMEOUT_MS });
-        } catch (err) {
-          const { kind } = classifyAnthropicError(err);
-          return (ACCESS_FAILURE_KINDS as readonly string[]).includes(kind)
-            ? { result: 'REJECTED', kind: kind as (typeof ACCESS_FAILURE_KINDS)[number], modelId }
-            : { result: 'INCONCLUSIVE' };
-        }
-      }
-      return { result: 'VERIFIED' };
-    },
+    verifyModels: (modelIds) =>
+      checkModels(
+        provider.id,
+        modelIds,
+        (modelId) => client.models.retrieve(modelId, {}, { timeout: VERIFY_TIMEOUT_MS }),
+        classifyAnthropicError,
+      ),
   };
 }

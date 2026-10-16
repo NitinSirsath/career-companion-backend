@@ -26,10 +26,10 @@ async function offerEmail(userId: string, emailId: string) {
 }
 
 /**
- * The model role a waiting email needs next: the fast model until its relevance is decided, then
- * the detailed one.
+ * The model role a waiting email needs next, from its classification rows: the fast model until
+ * its relevance is decided, then the detailed one.
  */
-const nextRole = (email: { aiOperations: { status: AIOperationStatus }[] }): AIRole =>
+export const nextRole = (email: { aiOperations: { status: AIOperationStatus }[] }): AIRole =>
   email.aiOperations.some((op) => op.status === 'COMPLETED') ? 'detailed' : 'fast';
 
 /** Up to 100 of the user's PENDING emails, newest first, with the model role each needs next. */

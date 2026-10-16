@@ -497,6 +497,11 @@ model AIOperation {
   batchId         String?           @db.Uuid
   result          Json?
   errorCode       String?
+  /// The exact last failure of this step: status, the provider's short code, the model and our own
+  /// times (contract AIFailure). Allowlisted tokens only, never the provider's message text.
+  lastFailure     Json?
+  /// When each counted try was sent, oldest first. A refusal gives its try back and is not kept.
+  triedAt         DateTime[]        @default([])
   retryAfter      DateTime?
   startedAt       DateTime?
   completedAt     DateTime?
@@ -548,6 +553,8 @@ model AIConfiguration {
   detailedModel     String?
   accessIssue       AIAccessIssue?
   accessIssueModel  String?
+  /// The exact failure behind a key, billing or model problem (contract AIFailure).
+  accessFailure     Json?
   verifiedAt        DateTime?
   lastCheckedAt     DateTime?
   /// Catalog disclosure version the user agreed to, and when.
@@ -580,6 +587,8 @@ model AIModelPause {
   testEmailId         String?         @db.Uuid
   testStartedAt       DateTime?
   testResult          String?
+  /// The exact failure that started or last extended the pause (contract AIFailure).
+  lastFailure         Json?
   configuration       AIConfiguration @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
   @@id([userId, model])

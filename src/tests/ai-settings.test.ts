@@ -753,7 +753,14 @@ describe('sample-email test', () => {
     expect(res.status).toBe(502);
     expect(res.body.error).toMatchObject({
       code: 'AI_SAMPLE_FAILED',
-      details: { kind: 'INVALID_OUTPUT' },
+      details: {
+        failure: {
+          kind: 'INVALID_OUTPUT',
+          model: FAST,
+          timeoutMs: 30_000,
+          waitedMs: expect.any(Number),
+        },
+      },
     });
     expect((await config())!.accessIssue).toBeNull();
   });

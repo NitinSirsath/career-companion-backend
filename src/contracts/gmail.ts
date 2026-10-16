@@ -1,4 +1,5 @@
 import { createPaginatedResponseSchema } from './pagination';
+import { EmailAIStatusSchema } from './email';
 /**
  * Zod contracts for Gmail OAuth routes.
  * These types are shared via the sync-contracts script with the frontend.
@@ -71,11 +72,14 @@ export const EmailMessageSchema = z.object({
   // Server-derived inactivity signal; timestamps remain private.
   processingStuck: z.boolean().optional(),
   processingState: z.enum(['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED']).optional(),
+  // Kept for older screens only: the stored category and text. Screens show `aiStatus`.
   processingErrorCategory: z.string().nullable().optional(),
   processingErrorDetails: z.string().nullable().optional(),
   processingErrorStage: z.string().nullable().optional(),
   processingRetryable: z.boolean().nullable().optional(),
   processingFailedAt: z.union([z.string(), z.date()]).nullable().optional(),
+  /** Why a waiting or stopped mail is not read yet, and what happens next. */
+  aiStatus: EmailAIStatusSchema.nullable().optional(),
   /** Provenance of the AI result: which provider and model produced it (ADR-0001). */
   aiProcessingResult: z.object({ provider: z.string(), model: z.string() }).nullable().optional(),
 });

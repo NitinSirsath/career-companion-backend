@@ -727,6 +727,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       // Should strictly match EmailMessageSchema
       expect(keys).toEqual([
         'aiProcessingResult', // provenance only: { provider, model } or null (ADR-0001)
+        'aiStatus',
         'application',
         'applicationId',
         'gmailMessageId',

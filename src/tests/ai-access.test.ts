@@ -41,6 +41,7 @@ const pauseRow = (model: string, overrides: Partial<AIModelPause> = {}): AIModel
   testEmailId: null,
   testStartedAt: null,
   testResult: null,
+  lastFailure: null,
   ...overrides,
 });
 
@@ -128,6 +129,8 @@ describe("each model's own pause", () => {
         reason: 'PROVIDER_BUSY',
         resumesAt: later,
         testEmailId: null,
+        test: null,
+        failure: null,
       },
     ]);
     expect(blockingPause(pauses, ['fast'])).toBeNull();
@@ -143,6 +146,12 @@ describe("each model's own pause", () => {
     expect(runningPauses(base, [testing], now)[0].testEmailId).toBe('mail-1');
     const answered = { ...testing, testResult: 'PROVIDER_BUSY' };
     expect(runningPauses(base, [answered], now)[0].testEmailId).toBeNull();
+    // The test and its result are still shown: the other waiting mail waits for it.
+    expect(runningPauses(base, [answered], now)[0].test).toEqual({
+      emailId: 'mail-1',
+      startedAt: now,
+      result: 'PROVIDER_BUSY',
+    });
   });
 
   it('shows the pause that ends last, after the user’s own problems and before the limit', () => {

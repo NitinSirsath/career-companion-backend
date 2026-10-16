@@ -7,10 +7,12 @@
  * what Career Companion sent, not provider billing data.
  */
 import { AIModelPause, Prisma } from '@prisma/client';
+import type { AIFailure } from '../../contracts/ai';
 import { prisma } from '../../db/prisma';
 import { enqueueAiResume } from '../enqueue';
 import type { AIUsage } from './contracts';
 import { AIAccessError, FailureKind, QuotaScope, aiSetting } from './errors';
+import { readFailure } from './failures';
 import * as config from '../../utils/config';
 import { logEvent, logWarn } from '../../utils/log';
 
@@ -95,7 +97,7 @@ export async function reserveUserCall(
     where: { userId_model: { userId, model: call.model } },
   });
   if (pause?.resumesAt && pause.resumesAt > now && !isRunningTest(pause, call.emailId))
-    throw new AIAccessError(pause.reason, pause.resumesAt);
+    throw new AIAccessError(pause.reason, pause.resumesAt, readFailure(pause.lastFailure));
   const day = utcDay(now);
   await tx.aIUsageDay.upsert({
     where: { userId_day: { userId, day } },
@@ -149,6 +151,8 @@ interface PauseDetails {
   emailId?: string;
   retryAfterMs?: number;
   quotaScope?: QuotaScope;
+  /** The exact failure, kept with the problem or the pause it leads to. */
+  failure: AIFailure;
 }
 
 type PauseKind = Extract<FailureKind, 'RATE_LIMITED' | 'PROVIDER_BUSY' | 'OUTCOME_UNKNOWN'>;
@@ -179,6 +183,7 @@ export async function noteProviderFailure(
       data: {
         accessIssue: kind,
         accessIssueModel: kind === 'MODEL_UNAVAILABLE' ? details.modelId : null,
+        accessFailure: details.failure,
       },
     });
     return null;
@@ -208,8 +213,12 @@ async function pauseModel(
   // A job holding an older configuration never changes the saved state.
   const saved = { userId: access.userId, revision: access.revision };
   if (!(await tx.aIConfiguration.count({ where: saved }))) return resumesAt;
-  // No answer in time pauses as for a busy provider.
-  const pause = { reason: kind === 'OUTCOME_UNKNOWN' ? 'PROVIDER_BUSY' : kind, resumesAt } as const;
+  // No answer in time pauses as for a busy provider; the failure kept with it says what happened.
+  const pause = {
+    reason: kind === 'OUTCOME_UNKNOWN' ? 'PROVIDER_BUSY' : kind,
+    resumesAt,
+    lastFailure: failure.failure,
+  } as const;
   await tx.aIModelPause.upsert({
     where: key,
     create: { userId: access.userId, model: failure.modelId, ...pause, consecutiveFailures: 1 },

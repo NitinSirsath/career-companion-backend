@@ -1,14 +1,16 @@
-import { GoogleGenAI, Schema, ThinkingLevel, Type } from '@google/genai';
+import {
+  type GenerateContentResponse,
+  GoogleGenAI,
+  Schema,
+  ThinkingLevel,
+  Type,
+} from '@google/genai';
 import { z } from 'zod';
 import type { CatalogModel, CatalogProvider } from '../../../contracts/aiCatalog';
-import {
-  ACCESS_FAILURE_KINDS,
-  ProviderFailure,
-  ProviderFailureDetails,
-  QuotaScope,
-} from '../errors';
+import { ProviderFailure, ProviderFailureDetails, QuotaScope } from '../errors';
 import { droppedConnection, unansweredFailure } from './network';
-import { ProviderClient, VERIFY_TIMEOUT_MS, VerifyResult } from './types';
+import { ProviderClient, VERIFY_TIMEOUT_MS } from './types';
+import { checkModels } from './verify';
 
 const THINKING_LEVELS = { minimal: ThinkingLevel.MINIMAL, low: ThinkingLevel.LOW } as const;
 
@@ -79,6 +81,7 @@ function googleErrorBody(err: unknown): {
   reason?: string;
   retryAfterMs?: number;
   quotaScope?: QuotaScope;
+  freeTier?: boolean;
 } {
   try {
     const message = err instanceof Error ? err.message : '';
@@ -99,6 +102,7 @@ function googleErrorBody(err: unknown): {
       reason,
       retryAfterMs: Number.isFinite(seconds) ? Math.round(seconds * 1000) : undefined,
       quotaScope: quotaScope(quotaIds),
+      freeTier: quotaIds.some((id) => id.includes('FreeTier')),
     };
   } catch {
     return {};
@@ -139,6 +143,7 @@ export function classifyGeminiError(err: unknown): ProviderFailure {
     providerCode: body.reason ?? body.status,
     retryAfterMs: body.retryAfterMs,
     quotaScope: body.quotaScope,
+    freeTier: body.freeTier,
     failureCause: status === 504 ? 'PROVIDER_DEADLINE' : 'PROVIDER_ANSWER',
   };
   if (body.reason === 'API_KEY_INVALID' || status === 401)
@@ -160,6 +165,15 @@ function thinkingConfig(model: CatalogModel | undefined) {
   if (reasoning && 'thinkingLevel' in reasoning)
     return { thinkingConfig: { thinkingLevel: THINKING_LEVELS[reasoning.thinkingLevel] } };
   return {};
+}
+
+/**
+ * Why Google stopped or blocked an answer that cannot be used (for example MAX_TOKENS or SAFETY).
+ * A normal stop says nothing about the problem, so it is left out.
+ */
+function stoppedEarly(response: GenerateContentResponse): string | undefined {
+  const finish = response.candidates?.[0]?.finishReason;
+  return response.promptFeedback?.blockReason ?? (finish === 'STOP' ? undefined : finish);
 }
 
 /**
@@ -219,6 +233,7 @@ export function createGeminiClient(provider: CatalogProvider, apiKey: string): P
         throw new ProviderFailure('INVALID_OUTPUT', {
           message: 'AI provider returned empty response',
           usage,
+          stopReason: stoppedEarly(response),
         });
       try {
         return { data: JSON.parse(text), usage };
@@ -226,6 +241,7 @@ export function createGeminiClient(provider: CatalogProvider, apiKey: string): P
         throw new ProviderFailure('INVALID_OUTPUT', {
           message: 'AI provider returned invalid JSON',
           usage,
+          stopReason: stoppedEarly(response),
         });
       }
     },
@@ -235,10 +251,12 @@ export function createGeminiClient(provider: CatalogProvider, apiKey: string): P
      * describes a model to every key, also to a key it refuses every real request from. The
      * answer is not read, kept or logged.
      */
-    async verifyModels(modelIds): Promise<VerifyResult> {
-      for (const modelId of new Set(modelIds)) {
-        try {
-          await client.models.generateContent({
+    verifyModels: (modelIds) =>
+      checkModels(
+        provider.id,
+        modelIds,
+        (modelId) =>
+          client.models.generateContent({
             model: modelId,
             contents: VERIFY_INPUT,
             config: {
@@ -246,15 +264,8 @@ export function createGeminiClient(provider: CatalogProvider, apiKey: string): P
               ...thinkingConfig(provider.models.find((model) => model.id === modelId)),
               httpOptions: { timeout: VERIFY_TIMEOUT_MS },
             },
-          });
-        } catch (err) {
-          const { kind } = classifyGeminiError(err);
-          return (ACCESS_FAILURE_KINDS as readonly string[]).includes(kind)
-            ? { result: 'REJECTED', kind: kind as (typeof ACCESS_FAILURE_KINDS)[number], modelId }
-            : { result: 'INCONCLUSIVE' };
-        }
-      }
-      return { result: 'VERIFIED' };
-    },
+          }),
+        classifyGeminiError,
+      ),
   };
 }

@@ -7,14 +7,19 @@ import { prisma } from '../db/prisma';
 import { AppError } from '../errors';
 import { logEvent } from '../utils/log';
 import { blockingPause, getAccessState, withPause } from './ai/access';
-import { HoldReason, holdOf } from './ai/heldOperations';
+import { readFailure } from './ai/failures';
+import { HoldReason, heldOperations } from './ai/heldOperations';
+import { STATUS_STEP_SELECT, aiStatusOf } from './ai/mailStatus';
 import { enqueueEmailProcessingJob } from './enqueue';
 
 // 300s expiry + ~120s detection + 60 * 2^3 backoff; also clears the
 // uncertain AI claim thresholds (15 minutes for a batch) by five minutes.
 export const EMAIL_PROCESSING_STUCK_MS = 20 * 60_000;
 
-/** One page of emails, newest first, plus one extra row so the caller can tell if more exist. */
+/**
+ * One page of emails, newest first, plus one extra row so the caller can tell if more exist. A
+ * waiting or stopped email says why and what happens next (`aiStatus`).
+ */
 export async function listEmails(
   userId: string,
   relevance: string | undefined,
@@ -28,38 +33,48 @@ export async function listEmails(
     where.relevanceState = 'IRRELEVANT';
   }
 
-  const messages = await prisma.email.findMany({
-    where,
-    take: limit + 1,
-    skip: offset,
-    orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
-    select: {
-      id: true,
-      gmailMessageId: true,
-      threadId: true,
-      subject: true,
-      sender: true,
-      receivedAt: true,
-      relevanceState: true,
-      matchState: true,
-      applicationId: true,
-      matchConfirmedBy: true,
-      application: { select: { id: true, companyName: true, jobTitle: true } },
-      processingState: true,
-      updatedAt: true,
-      processingErrorCategory: true,
-      processingErrorDetails: true,
-      processingErrorStage: true,
-      processingRetryable: true,
-      processingFailedAt: true,
-      aiProcessingResult: { select: { provider: true, model: true } },
-    },
-  });
+  const [messages, access] = await Promise.all([
+    prisma.email.findMany({
+      where,
+      take: limit + 1,
+      skip: offset,
+      orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        gmailMessageId: true,
+        threadId: true,
+        subject: true,
+        sender: true,
+        receivedAt: true,
+        relevanceState: true,
+        matchState: true,
+        applicationId: true,
+        matchConfirmedBy: true,
+        application: { select: { id: true, companyName: true, jobTitle: true } },
+        processingState: true,
+        updatedAt: true,
+        processingErrorCategory: true,
+        processingErrorDetails: true,
+        processingErrorStage: true,
+        processingRetryable: true,
+        processingFailedAt: true,
+        aiProcessingResult: { select: { provider: true, model: true, processingStatus: true } },
+        aiOperations: { select: STATUS_STEP_SELECT },
+      },
+    }),
+    getAccessState(userId),
+  ]);
 
-  const cutoff = Date.now() - EMAIL_PROCESSING_STUCK_MS;
-  return messages.map(({ updatedAt, ...message }) => ({
+  const now = new Date();
+  const cutoff = now.getTime() - EMAIL_PROCESSING_STUCK_MS;
+  return messages.map(({ updatedAt, aiOperations, aiProcessingResult, ...message }) => ({
     ...message,
+    aiProcessingResult: aiProcessingResult && {
+      provider: aiProcessingResult.provider,
+      model: aiProcessingResult.model,
+    },
     processingStuck: message.processingState === 'PROCESSING' && updatedAt.getTime() < cutoff,
+    aiStatus: aiStatusOf({ ...message, aiProcessingResult, aiOperations }, access, now),
   }));
 }
 
@@ -78,6 +93,8 @@ const RETRY_STATE = {
       startedAt: true,
       provider: true,
       model: true,
+      lastFailure: true,
+      triedAt: true,
     },
   },
 } satisfies Prisma.EmailSelect;
@@ -128,16 +145,8 @@ async function prepareRetry(
   if (email.processingState === 'COMPLETED')
     throw new AppError(400, 'BAD_REQUEST', 'Email is already completed.');
 
-  const now = new Date();
-  const holds = email.aiOperations.flatMap((op) => {
-    const hold = holdOf(op, now);
-    return hold ? [{ op, approvable: hold.approvable }] : [];
-  });
+  const { holds, legacyPartial } = heldOperations(email, new Date());
   const held = holds.filter((hold): hold is HeldOperation => hold.approvable !== null);
-  const legacyPartial =
-    !!email.aiProcessingResult &&
-    email.aiProcessingResult.processingStatus !== 'COMPLETED' &&
-    email.aiOperations.length === 0;
   if (legacyPartial || held.length < holds.length)
     throw new AppError(
       409,
@@ -172,6 +181,8 @@ async function approveHeldOperations(
           provider: op.provider,
           model: op.model,
           attemptedAt: op.startedAt ? op.startedAt.toISOString() : null,
+          triedAt: op.triedAt.map((at) => at.toISOString()),
+          failure: readFailure(op.lastFailure),
         })),
         currentProvider: config?.provider ?? null,
       },
@@ -181,12 +192,16 @@ async function approveHeldOperations(
   const user = await getAccessState(userId);
   const roles = held.map(({ op }) => (op.operation === 'extraction' ? 'detailed' : 'fast'));
   const access = withPause(user, blockingPause(user.pauses, roles));
-  if (access.state !== 'READY')
+  if (access.state !== 'READY') {
+    const failure = access.pause?.failure ?? null;
     throw new AppError(409, 'AI_ACCESS_UNAVAILABLE', 'Fix AI access before approving a retry.', {
       state: access.state,
       reason: access.reason,
       resumesAt: access.resumesAt ? access.resumesAt.toISOString() : null,
+      modelId: access.pause?.model ?? null,
+      failure,
     });
+  }
 
   // Compare-and-set on what the user saw: a concurrent approval or claim changes the row.
   await prisma.$transaction(async (tx) => {

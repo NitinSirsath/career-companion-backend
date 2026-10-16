@@ -6,7 +6,8 @@
  *   POST   /api/ai/settings/check  re-verify the saved key ("Check again")
  *   POST   /api/ai/settings/sample-test  run both capabilities on a built-in synthetic email
  *   DELETE /api/ai/settings        remove the configuration and its key
- *   POST   /api/ai/waiting/read    end a running pause and offer the waiting mail again
+ *   POST   /api/ai/waiting/read    during a pause, send one waiting mail first as a test;
+ *                                   otherwise offer the waiting mail again
  *
  * The user always comes from the session; no route takes a user or configuration ID. Request
  * bodies are never logged, and validation errors never include submitted values.

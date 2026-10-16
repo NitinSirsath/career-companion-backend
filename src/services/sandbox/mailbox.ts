@@ -245,7 +245,12 @@ export async function readSandboxThread(
       date: message.internalDate.toISOString(),
       sentByUser: sentByUser(message),
       text: message.body,
-      result: results.get(message.id) ?? { state: 'NOT_SYNCED', failure: null, job: null },
+      result: results.get(message.id) ?? {
+        state: 'NOT_SYNCED',
+        failure: null,
+        aiStatus: null,
+        job: null,
+      },
     })),
   };
 }
