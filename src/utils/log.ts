@@ -1,6 +1,6 @@
 /**
- * The one way to write a log line. Production and tests get one JSON line per event; a developer's
- * terminal gets a short readable line. Lines below LOG_LEVEL are skipped.
+ * The one way to write a log line. Production and tests get one JSON line per event, with its ISO
+ * UTC time; a developer's terminal gets a short readable line. Lines below LOG_LEVEL are skipped.
  *
  * Log events, not data: IDs, counts and outcomes. Fields named like secrets or email content are
  * replaced with "[redacted]" whatever the caller passes.
@@ -17,8 +17,23 @@ const RANK: Record<Level, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 
 /** Keys, tokens and credentials, whatever their prefix (`apiKey`, `refreshToken`, …). */
 const SECRET_NAME = /(apikey|token|password|secret|authorization|cookie)$/i;
-/** Email content. */
-const CONTENT_FIELDS = new Set(['body', 'html', 'text', 'snippet', 'subject']);
+/** Email content and addresses, and what goes to or comes back from an AI provider. */
+const CONTENT_FIELDS = new Set([
+  'body',
+  'html',
+  'text',
+  'snippet',
+  'subject',
+  'sender',
+  'from',
+  'to',
+  'cc',
+  'address',
+  'input',
+  'prompt',
+  'response',
+  'raw',
+]);
 
 const requestIds = new AsyncLocalStorage<string>();
 
@@ -48,7 +63,9 @@ function write(level: Level, event: string, fields: Fields = {}): void {
   if (RANK[level] < RANK[logLevel()]) return;
   const requestId = requestIds.getStore();
   const record = { event, level, ...(requestId ? { requestId } : {}), ...redact(fields) };
-  const line = readableLogs() ? readable(record) : JSON.stringify(record);
+  const line = readableLogs()
+    ? readable(record)
+    : JSON.stringify({ time: new Date().toISOString(), ...record });
   // Looked up on every call, so tests that spy on console see every line.
   if (level === 'error') console.error(line);
   else if (level === 'warn') console.warn(line);
