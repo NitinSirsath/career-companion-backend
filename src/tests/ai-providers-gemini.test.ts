@@ -65,10 +65,12 @@ describe('Gemini error mapping (plan §3.6)', () => {
     ['404 model', googleError(404, { status: 'NOT_FOUND' }), 'MODEL_UNAVAILABLE'],
     ['429', googleError(429, { status: 'RESOURCE_EXHAUSTED' }), 'RATE_LIMITED'],
     ['503 high demand', googleError(503, { status: 'UNAVAILABLE' }), 'PROVIDER_BUSY'],
-    ['504 deadline expired', googleError(504, { status: 'DEADLINE_EXCEEDED' }), 'PROVIDER_BUSY'],
-    ['500', googleError(500, { status: 'INTERNAL' }), 'OUTCOME_UNKNOWN'],
-    ['502', googleError(502), 'OUTCOME_UNKNOWN'],
+    ['500', googleError(500, { status: 'INTERNAL' }), 'PROVIDER_BUSY'],
+    ['502', googleError(502), 'PROVIDER_BUSY'],
+    // No answer in time: Google's own deadline passed.
+    ['504 deadline expired', googleError(504, { status: 'DEADLINE_EXCEEDED' }), 'OUTCOME_UNKNOWN'],
     ['408', googleError(408), 'OUTCOME_UNKNOWN'],
+    ['501', googleError(501), 'OUTCOME_UNKNOWN'],
     ['other 400', googleError(400, { status: 'INVALID_ARGUMENT' }), 'INVALID_REQUEST'],
     [
       'timeout (no status)',
@@ -115,17 +117,16 @@ describe('Gemini error mapping (plan §3.6)', () => {
     ['a code with text', fetchFailed(`ECONNRESET ${SENTINEL}`), 'NETWORK_AFTER_SEND'],
     ['our own bug', new RangeError(SENTINEL), 'UNCLASSIFIED'],
     ['fetch failed with no cause', new TypeError(`fetch failed ${SENTINEL}`), 'UNCLASSIFIED'],
-  ])(
-    '%s with no answer → OUTCOME_UNKNOWN, cause %s',
-    (_label, err, failureCause, networkCode?: string) => {
-      const mapped = classifyGeminiError(err);
-      expect(mapped).toMatchObject({ kind: 'OUTCOME_UNKNOWN', failureCause, networkCode });
-      expect(mapped.status).toBeUndefined();
-      expect(`${JSON.stringify(mapped)} ${inspect(mapped)} ${mapped.stack}`).not.toContain(
-        'SENTINEL',
-      );
-    },
-  );
+  ])('%s with no answer: cause %s', (_label, err, failureCause, networkCode?: string) => {
+    const mapped = classifyGeminiError(err);
+    // A request that never left is busy (no try used); anything else is no answer in time.
+    const kind = failureCause === 'NETWORK' ? 'PROVIDER_BUSY' : 'OUTCOME_UNKNOWN';
+    expect(mapped).toMatchObject({ kind, failureCause, networkCode });
+    expect(mapped.status).toBeUndefined();
+    expect(`${JSON.stringify(mapped)} ${inspect(mapped)} ${mapped.stack}`).not.toContain(
+      'SENTINEL',
+    );
+  });
 
   it.each([
     [
@@ -155,6 +156,27 @@ describe('Gemini error mapping (plan §3.6)', () => {
     });
     const unsafe = classifyGeminiError(googleError(400, { status: 'not a token: <script>' }));
     expect(unsafe.providerCode).toBeUndefined();
+  });
+
+  const quotaFailure = (...quotaIds: string[]) => ({
+    '@type': 'type.googleapis.com/google.rpc.QuotaFailure',
+    violations: quotaIds.map((quotaId) => ({ quotaMetric: SENTINEL, quotaId })),
+  });
+  it.each([
+    ['a daily free-tier limit', ['GenerateRequestsPerDayPerProjectPerModel-FreeTier'], 'PER_DAY'],
+    ['a per-minute limit', ['GenerateRequestsPerMinutePerProjectPerModel'], 'PER_MINUTE'],
+    [
+      'per-minute and daily limits at once',
+      ['GenerateContentInputTokensPerModelPerMinute', 'GenerateRequestsPerDayPerProjectPerModel'],
+      'PER_DAY',
+    ],
+    ['no quota named', [], undefined],
+  ])('reads which quota a 429 hit: %s → %s', (_label, quotaIds, quotaScope) => {
+    const mapped = classifyGeminiError(
+      googleError(429, { status: 'RESOURCE_EXHAUSTED', details: [quotaFailure(...quotaIds)] }),
+    );
+    expect(mapped).toMatchObject({ kind: 'RATE_LIMITED', quotaScope });
+    expect(`${JSON.stringify(mapped)} ${inspect(mapped)}`).not.toContain('SENTINEL');
   });
 });
 
