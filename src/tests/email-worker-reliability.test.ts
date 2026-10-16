@@ -152,7 +152,10 @@ describe('email worker attributable outcomes', () => {
 
   it('stores an outcome-unknown provider error as not retryable; retry semantics unchanged (S6-R06)', async () => {
     vi.spyOn(aiPipeline, 'processEmail').mockRejectedValue(
-      new AIProviderError('AI provider outcome unknown; reconciliation required', false),
+      new AIProviderError(
+        'No clear answer from the AI provider; it is not tried again by itself',
+        false,
+      ),
     );
     await expect(processEmailJob(job(1))).rejects.toThrow('AIProviderError');
     const row = await email();
