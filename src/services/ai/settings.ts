@@ -422,6 +422,7 @@ export async function runSampleTest(userId: string): Promise<AISampleTestRespons
           noteProviderFailure(tx, access, kind, now, {
             modelId: model,
             retryAfterMs: (err as ProviderFailure).retryAfterMs,
+            quotaScope: (err as ProviderFailure).quotaScope,
           }),
         );
         await resumeAfterPause(userId, resumesAt);
