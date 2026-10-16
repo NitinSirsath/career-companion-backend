@@ -357,6 +357,7 @@ function verification<R extends VerifyResult>(result: R) {
     verification: result.result as R['result'],
     verificationFailure: checked.result === 'INCONCLUSIVE' ? (checked.failure ?? null) : null,
   };
+}
 
 export async function checkSettings(userId: string): Promise<CheckAISettingsResponse> {
   const now = new Date();
