@@ -5,7 +5,8 @@
 import type { SandboxMessage } from '@prisma/client';
 import type { SandboxMailResult } from '../../contracts/sandbox';
 import { prisma } from '../../db/prisma';
-import { getAccessState } from '../ai/access';
+import { UserAccess, getAccessState } from '../ai/access';
+import { STATUS_STEP_SELECT, aiStatusOf } from '../ai/mailStatus';
 import { SENT_LABELS } from './message';
 
 type Mail = Pick<SandboxMessage, 'id' | 'labelIds'>;
@@ -16,12 +17,13 @@ export const sentByUser = (message: Pick<SandboxMessage, 'labelIds'>) =>
 const result = (
   state: SandboxMailResult['state'],
   extra: Partial<SandboxMailResult> = {},
-): SandboxMailResult => ({ state, failure: null, job: null, ...extra });
+): SandboxMailResult => ({ state, failure: null, aiStatus: null, job: null, ...extra });
 
 const synced = (userId: string, ids: string[]) =>
   prisma.email.findMany({
     where: { userId, gmailMessageId: { in: ids } },
     select: {
+      id: true,
       gmailMessageId: true,
       threadId: true,
       relevanceState: true,
@@ -29,18 +31,29 @@ const synced = (userId: string, ids: string[]) =>
       processingErrorCategory: true,
       application: { select: { id: true, companyName: true, jobTitle: true } },
       aiProcessingResult: {
-        select: { category: true, companyName: true, jobTitle: true, requestedAction: true },
+        select: {
+          category: true,
+          companyName: true,
+          jobTitle: true,
+          requestedAction: true,
+          processingStatus: true,
+        },
       },
+      aiOperations: { select: STATUS_STEP_SELECT },
     },
   });
 type SyncedMail = Awaited<ReturnType<typeof synced>>[number];
 
-function receivedResult(mail: SyncedMail | undefined, aiKeyMissing: boolean): SandboxMailResult {
+function receivedResult(mail: SyncedMail | undefined, access: UserAccess): SandboxMailResult {
   if (!mail) return result('NOT_SYNCED');
+  // Why it is not read yet, as on the Gmail Sync row.
+  const aiStatus = aiStatusOf(mail, access, new Date());
   if (mail.processingState === 'FAILED')
-    return result('AI_FAILED', { failure: mail.processingErrorCategory });
+    return result('AI_FAILED', { failure: mail.processingErrorCategory, aiStatus });
   if (mail.processingState !== 'COMPLETED')
-    return result(aiKeyMissing ? 'AI_KEY_MISSING' : 'WAITING_FOR_AI');
+    return result(access.state === 'NOT_SET_UP' ? 'AI_KEY_MISSING' : 'WAITING_FOR_AI', {
+      aiStatus,
+    });
   if (mail.relevanceState !== 'RELEVANT') return result('NOT_JOB_MAIL');
   return result('JOB_MAIL', {
     job: {
@@ -70,11 +83,9 @@ export async function sandboxMailResults(
   ]);
   const mails = new Map(received.map((mail) => [mail.gmailMessageId, mail]));
   const recorded = new Set(replies.map((reply) => reply.gmailMessageId));
-  const aiKeyMissing = access.state === 'NOT_SET_UP';
   return new Map(
     messages.map((message) => {
-      if (!sentByUser(message))
-        return [message.id, receivedResult(mails.get(message.id), aiKeyMissing)];
+      if (!sentByUser(message)) return [message.id, receivedResult(mails.get(message.id), access)];
       return [message.id, result(recorded.has(message.id) ? 'REPLY_RECORDED' : 'NOT_SYNCED')];
     }),
   );
