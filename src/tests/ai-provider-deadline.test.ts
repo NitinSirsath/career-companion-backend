@@ -97,7 +97,7 @@ describe("Google's deadline and our timer", () => {
     );
     const failure = await pending;
     expect(failure).toMatchObject({
-      kind: 'PROVIDER_BUSY',
+      kind: 'OUTCOME_UNKNOWN',
       status: 504,
       providerCode: 'DEADLINE_EXCEEDED',
       failureCause: 'PROVIDER_DEADLINE',
