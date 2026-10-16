@@ -217,7 +217,6 @@ async function pauseModel(
       ? { ...pause, testResult: kind }
       : { ...pause, consecutiveFailures: { increment: 1 }, ...NO_TEST },
   });
-  });
   // A failure while the model's pause still runs (a call already under way) makes it longer.
   const extended = !test && !!before?.resumesAt && before.resumesAt > failedAt;
   logEvent(extended ? 'ai_pause_extended' : 'ai_paused', {
@@ -228,7 +227,6 @@ async function pauseModel(
     resumesAt,
     consecutiveFailures: test ? failures : failures + 1,
     testEmailId: test ? failure.emailId : undefined,
-    },
   });
   return resumesAt;
 }
