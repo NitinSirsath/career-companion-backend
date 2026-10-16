@@ -13,9 +13,10 @@ const IsoDateTime = z.iso.datetime({ offset: true });
 
 /**
  * What a failed AI call was, in the words the screens use:
- * - PROVIDER_BUSY: a short server error, overloaded, or a request that never left. No try used.
- * - NO_ANSWER_IN_TIME: our timer, the provider's deadline (504), or a line that dropped after
- *   sending. Uses one try; the provider may have charged it.
+ * - PROVIDER_BUSY: a short server error, overloaded, a conflict (409, OpenAI or Anthropic), or a
+ *   request that never left. No try used.
+ * - NO_ANSWER_IN_TIME: our timer, Google's deadline (504), or a line that dropped after sending.
+ *   Uses one try; the provider may have charged it.
  * - RATE_LIMITED: 429, per minute or per day (`quotaScope`).
  * - KEY_REJECTED, ACCOUNT_OR_BILLING, MODEL_UNAVAILABLE: the user's key, account or model.
  * - INVALID_OUTPUT: an answer Career Companion could not use (`stopReason` when it stopped early).
