@@ -59,6 +59,7 @@ Run `npm run dev` to start the development server.
 
 - `npm run dev` - Start dev server with nodemon/ts-node-dev
 - `npm run devmode` - Set up and start dev mode (see "Dev mode" below)
+- `npm run fake-ai-errors -- <fault>` - Dev mode with one fake AI error, to test the error screens (see "Testing AI error screens" below)
 - `npm run build` - Build for production using tsc
 - `npm run lint` - Run ESLint
 - `npm run format` - Run Prettier
@@ -283,5 +284,38 @@ In dev mode every user has a **sandbox mailbox** that stands in for their Gmail 
 - **API** (`/api/sandbox`, 404 before login in prod mode): `GET /threads?folder=inbox|sent`, `GET /threads/:id` (both sides with text and what the app did with each mail), `POST /messages` (new mail to the user; an optional `cc` line puts up to 10 other people on it, so a reply to all can be tried), `POST /threads/:id/replies` (`as: "me" | "them"`; when the other person writes again, the people in Cc stay on the mail), `GET /senders` (addresses used before), `POST /reset` (`{ "confirm": "RESET" }`: empties the mailbox and what the app made from it, keeps the user, the AI settings and the connection).
 - **What the app did** with a mail is one of: `NOT_SYNCED`, `WAITING_FOR_AI`, `AI_KEY_MISSING`, `AI_FAILED`, `NOT_JOB_MAIL`, `JOB_MAIL`, and for the user's own mail `REPLY_RECORDED`. Nothing is ever filled in for the AI: with no AI key a synced mail waits and says `AI_KEY_MISSING`.
 - Of the user's own sandbox mail the app keeps what it keeps in prod: message ID, thread ID and sent time. The text stays in the sandbox.
+
+#### Testing AI error screens
+
+`npm run fake-ai-errors -- <fault>` starts dev mode like `npm run devmode`, but every AI call gets one chosen error instead of an answer. Nothing is sent to any AI provider, so no real key is needed. It is its own command: `npm run devmode` stays real AI only.
+
+- **How it works:** the command starts the dev-mode server with `scripts/fake-ai-errors-preload.cjs` loaded before the app. The preload swaps the AI libraries' calls (Gemini `models.generateContent`; OpenAI `chat.completions.create` and `models.retrieve`; Anthropic `messages.create` and `models.retrieve`) for the fakes in `src/tests/helpers/fakeAiErrors.ts`, and blocks every request to an AI provider's address. Each fake is what the library itself gives the app for that problem, built with the library's own error classes and the provider's own error body (for Google: an `ApiError` with Google's JSON body). So the app's real error handling runs. The app's code is not changed.
+- **Never in prod:** it starts only when `.env.dev` says `APP_MODE=dev` on the dev database (the dev-mode rules above), and it stops when `NODE_ENV=production`. The server checks the app mode again before it loads the fakes, and refuses to start otherwise.
+- **One fault per run.** Stop with Ctrl+C and start again with another fault. Without a fault it lists them all.
+
+| Fault | What the AI library gives the app |
+| --- | --- |
+| `busy` | Google 503 `UNAVAILABLE`; OpenAI 503; Anthropic 529 `overloaded_error` |
+| `no-answer` | The wait ends with no answer: the request is stopped after 5 seconds |
+| `deadline` | Google 504 `DEADLINE_EXCEEDED`; OpenAI and Anthropic 504 |
+| `rate-minute` | 429 per-minute limit; the provider asks to wait 10 seconds |
+| `rate-day` | Google 429 free-tier limit per day (it also asks to wait 10 seconds); OpenAI and Anthropic 429 with no wait time |
+| `key` | Google 400 `API_KEY_INVALID`; OpenAI and Anthropic 401 |
+| `billing` | Google 403 `SERVICE_DISABLED`; OpenAI 429 `insufficient_quota`; Anthropic 400 "credit balance is too low" |
+| `model-gone` | 404: the key cannot use the model |
+| `unusable` | An answer cut off at the token limit (`MAX_TOKENS`) |
+| `no-connection` | No connection, nothing was sent (`ENOTFOUND`) |
+| `line-dropped` | The connection dropped after the request was sent (`ECONNRESET`) |
+| `server-error` | 500 |
+
+**Steps**
+1. `npm run fake-ai-errors -- busy`, and start the frontend as usual.
+2. The fakes ignore the key. If this dev-mode user has no AI key yet, choose Google Gemini on the AI provider page and enter any text as the key, during a fault other than `key`, `billing` or `model-gone` (those refuse a new key). A user who already has a real key keeps it: do not enter another one.
+3. In the mail sandbox send a mail, then press Sync. Check the Gmail Sync and Mails pages, the row's (i) and the AI provider page against the approved mock. Search the server log for the mail's ID.
+4. Stop with Ctrl+C and start again with the next fault.
+
+Fake errors leave their states in the dev database: pauses, a rejected key, failed mails. Use a separate dev-mode user for these runs. Or afterwards, in `npm run devmode`, save the key again and reset the sandbox ("Reset dev data", `POST /api/sandbox/reset`).
+
+**Times.** `no-answer` stops after 5 seconds instead of the model's 30 or 60. `rate-minute` asks for a 10-second wait. The app's own pause lengths are not shortened, because that would need a change to the app. "Read waiting mails now" ends a pause at once.
 
 
