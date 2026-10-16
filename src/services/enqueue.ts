@@ -72,7 +72,7 @@ export interface AiResumeJobData {
 
 export const aiResumeJobOptions = (userId: string, pauseEndsAt: Date) => ({
   // One job per user and end time: a job queued for a later end never holds back an earlier one.
-  singletonKey: `resume:${userId}:${pauseEndsAt.toISOString()}`, 
+  singletonKey: `resume:${userId}:${pauseEndsAt.toISOString()}`,
   startAfter: new Date(pauseEndsAt.getTime() + AI_RESUME_MARGIN_MS),
   retryLimit: 3,
   retryDelay: 60,
