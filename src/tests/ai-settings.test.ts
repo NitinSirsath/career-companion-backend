@@ -746,6 +746,23 @@ describe('sample-email test', () => {
     expect(await pauseOf(userId, DETAILED)).toEqual(paused);
   });
 
+  it("logs the provider's request ID with a failed sample test, so it can be found with them", async () => {
+    await configureAI(userId);
+    client.generateStructured.mockRejectedValue(
+      new ProviderFailure('PROVIDER_BUSY', { providerRequestId: 'req_7f3a9c2e41b8d6' }),
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    expect((await sample()).status).toBe(409);
+    expect(log.mock.calls.map(([line]) => JSON.parse(String(line)))).toContainEqual(
+      expect.objectContaining({
+        event: 'ai_sample_test',
+        outcome: 'PROVIDER_BUSY',
+        providerRequestId: 'req_7f3a9c2e41b8d6',
+      }),
+    );
+    log.mockRestore();
+  });
+
   it('reports unusable output without holding anything', async () => {
     await configureAI(userId);
     client.generateStructured.mockRejectedValue(new ProviderFailure('INVALID_OUTPUT'));
