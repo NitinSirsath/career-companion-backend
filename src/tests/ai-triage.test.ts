@@ -839,6 +839,8 @@ describe('COM-125 relevance batch pure behavior', () => {
       reason: 'PROVIDER_BUSY' as const,
       resumesAt: new Date(Date.now() + 60_000),
       testEmailId: null,
+      test: null,
+      failure: null,
     });
     const access = { state: 'READY', reason: null, modelId: null, resumesAt: null } as const;
     vi.mocked(fetchMessageMetadata).mockClear();
