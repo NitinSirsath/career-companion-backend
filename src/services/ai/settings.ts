@@ -9,7 +9,13 @@
 import { AIAccessIssue, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { AppError } from '../../errors';
-import { AI_CATALOG, AIRole, CatalogProvider, modelsForRole } from '../../contracts/aiCatalog';
+import {
+  AI_CATALOG,
+  AI_ROLES,
+  AIRole,
+  CatalogProvider,
+  modelsForRole,
+} from '../../contracts/aiCatalog';
 import type {
   AISampleTestResponse,
   AISettingsResponse,
@@ -22,12 +28,15 @@ import {
   AIAccess,
   CONFIGURATION_STATE,
   NEEDS_ATTENTION_ISSUES,
+  blockingPause,
   deriveAccess,
   isOffered,
   modelsFor,
   offeredProvider,
   resolveAIAccess,
+  runningPauses,
   stateOf,
+  withPause,
 } from './access';
 import { CLASSIFICATION_INPUT_LIMITS as LIMITS, EXTRACTION_BODY_LIMIT } from './contracts';
 import { AIAccessError, ProviderFailure, isRefusal } from './errors';
@@ -54,12 +63,18 @@ const iso = (date: Date | null | undefined) => (date ? date.toISOString() : null
 
 export async function readSettings(userId: string): Promise<AISettingsResponse> {
   const now = new Date();
-  const [config, usage, waitingEmails] = await Promise.all([
+  const [config, pauseRows, usage, waitingEmails] = await Promise.all([
     prisma.aIConfiguration.findUnique({ where: { userId }, select: CONFIGURATION_STATE }),
+    prisma.aIModelPause.findMany({ where: { userId } }),
     prisma.aIUsageDay.findUnique({ where: { userId_day: { userId, day: utcDay(now) } } }),
     prisma.email.count({ where: { userId, processingState: 'PENDING' } }),
   ]);
-  const access = deriveAccess(config, usage?.calls ?? 0, now);
+  // The pause that ends last shows; one whose test mail is being tried shows as a new try.
+  const pauses = runningPauses(config, pauseRows, now).filter((pause) => !pause.testEmailId);
+  const access = withPause(
+    deriveAccess(config, usage?.calls ?? 0, now),
+    blockingPause(pauses, AI_ROLES),
+  );
   const provider = config ? AI_CATALOG.find((p) => p.id === config.provider) : undefined;
   const models = config && provider ? modelsFor(provider, config) : null;
   return {
@@ -196,13 +211,7 @@ function accessStateAfterSave(
   now: Date,
 ): Prisma.AIConfigurationUncheckedUpdateInput {
   if (keyChanged)
-    return {
-      accessIssue: null,
-      accessIssueModel: null,
-      cooldownUntil: null,
-      consecutiveFailures: 0,
-      verifiedAt: verified ? now : null,
-    };
+    return { accessIssue: null, accessIssueModel: null, verifiedAt: verified ? now : null };
   if (!verified) return {};
   if (accessIssue && NEEDS_ATTENTION_ISSUES.includes(accessIssue))
     return { accessIssue: null, accessIssueModel: null, verifiedAt: now };
@@ -273,10 +282,19 @@ export async function saveSettings(
   };
   if (existing) {
     // Overwrites the row in place: a replaced key's ciphertext is gone from the live record.
-    await prisma.aIConfiguration.update({
-      where: { userId },
-      data: { ...fields, ...state, ...consent, revision: { increment: 1 } },
-    });
+    // A new key starts with no pause. Choosing another model ends that role's pause: a model no
+    // role uses any more keeps none. A paused model the save keeps stays paused.
+    await prisma.$transaction([
+      prisma.aIConfiguration.update({
+        where: { userId },
+        data: { ...fields, ...state, ...consent, revision: { increment: 1 } },
+      }),
+      prisma.aIModelPause.deleteMany({
+        where: keyChanged
+          ? { userId }
+          : { userId, model: { notIn: [models.fast.id, models.detailed.id] } },
+      }),
+    ]);
   } else {
     await prisma.aIConfiguration.create({
       data: {
@@ -336,7 +354,7 @@ export async function checkSettings(userId: string): Promise<CheckAISettingsResp
   ]);
   logAccessCheck(userId, provider, 'check', result);
   if (result.result === 'VERIFIED') {
-    // A key check proves access, not that a rate limit has cleared: a cooldown stays.
+    // A key check proves access, not that a model's pause has passed: pauses stay as they are.
     const clears = config.accessIssue && NEEDS_ATTENTION_ISSUES.includes(config.accessIssue);
     await prisma.aIConfiguration.updateMany({
       where: guarded,
@@ -402,7 +420,7 @@ export async function runSampleTest(userId: string): Promise<AISampleTestRespons
     }>,
   ) => {
     try {
-      await prisma.$transaction((tx) => reserveUserCall(tx, userId, now));
+      await prisma.$transaction((tx) => reserveUserCall(tx, { userId, model }, now));
     } catch (err) {
       if (err instanceof AIAccessError) throw unavailable(err);
       throw err;
@@ -411,15 +429,17 @@ export async function runSampleTest(userId: string): Promise<AISampleTestRespons
     try {
       const result = await invoke();
       await recordTokens(userId, now, result.usage);
+      await noteProviderSuccess(access, model);
       usage.inputTokens += result.usage.inputTokens ?? 0;
       usage.outputTokens += result.usage.outputTokens ?? 0;
       return result.data;
     } catch (err) {
+      const failedAt = new Date();
       const kind = err instanceof ProviderFailure ? err.kind : 'OUTCOME_UNKNOWN';
       logEvent('ai_sample_test', { userId, provider: access.provider, outcome: kind, ...usage });
       if (isRefusal(kind)) {
         const resumesAt = await prisma.$transaction((tx) =>
-          noteProviderFailure(tx, access, kind, now, {
+          noteProviderFailure(tx, access, kind, failedAt, {
             modelId: model,
             retryAfterMs: (err as ProviderFailure).retryAfterMs,
             quotaScope: (err as ProviderFailure).quotaScope,
@@ -454,7 +474,6 @@ export async function runSampleTest(userId: string): Promise<AISampleTestRespons
   const extraction = await call(access.models.detailed.id, () =>
     access.analyzer.extractJobData(SAMPLE_EMAIL.body.slice(0, EXTRACTION_BODY_LIMIT)),
   );
-  await noteProviderSuccess(access);
   logEvent('ai_sample_test', { userId, provider: access.provider, outcome: 'COMPLETED', ...usage });
   return {
     provider: access.provider,
