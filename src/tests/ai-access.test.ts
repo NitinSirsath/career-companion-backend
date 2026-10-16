@@ -225,6 +225,19 @@ describe('resolving a user’s own AI access', () => {
     expect(createProviderClient).not.toHaveBeenCalled();
   });
 
+  it("resolves access while one model is paused: the pause stops only that model's calls", async () => {
+    await configureAI(userId);
+    const resumesAt = new Date(Date.now() + 60_000);
+    await prisma.aIModelPause.create({
+      data: { userId, model: DETAILED, reason: 'PROVIDER_BUSY', resumesAt },
+    });
+    expect(await reason(resolveAIAccess(userId))).toBe('READY');
+    expect(await getAccessState(userId)).toMatchObject({
+      state: 'READY',
+      pauses: [{ model: DETAILED, roles: ['detailed'], resumesAt }],
+    });
+  });
+
   it('reports state without decrypting the key', async () => {
     await configureAI(userId, { encryptedApiKey: 'v1:not:decryptable' });
     expect(await getAccessState(userId)).toMatchObject({ state: 'READY' });
