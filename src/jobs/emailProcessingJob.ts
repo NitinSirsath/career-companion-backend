@@ -2,6 +2,7 @@ import type { JobWithMetadata } from 'pg-boss';
 import { EMAIL_PROCESSING_JOB, EmailProcessingJobData } from '../services/enqueue';
 import { getQueue } from '../services/queue';
 import { AIAccessError, AIProviderError, TerminalAIError } from '../services/ai/errors';
+import { releaseClaimsAtStart } from '../services/ai/operations';
 import { processEmail } from '../services/ai/pipeline';
 import { markEmailProcessing, recordEmailFailure, returnEmailToPending } from '../services/email';
 import { logDebug, logEvent, logWarn, logError } from '../utils/log';
@@ -82,8 +83,9 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
   } catch (err) {
     if (err instanceof AIAccessError) {
       // Waiting for the user's AI access is not a processing failure (ADR-0001 decision 8): the
-      // email returns to PENDING with no error fields, the job is acknowledged, and no email or
-      // operation attempt is used. The reason lives once, on the user's AI configuration.
+      // email returns to PENDING with no error fields, the job is acknowledged, and no email
+      // attempt is used. The reason lives once, on the user's AI configuration. A call with no
+      // answer in time comes here too, so its next try after the pause is not dropped.
       await returnEmailToPending(userId, emailId);
       await withdrawDelivery(job.id);
       logEvent('job_waiting_for_ai', {
@@ -142,6 +144,7 @@ export async function handleEmailJobs(jobs: JobWithMetadata<EmailProcessingJobDa
 
 export async function startEmailProcessingWorker() {
   const queue = await getQueue();
+  await releaseClaimsAtStart();
   await queue.work(EMAIL_PROCESSING_JOB, EMAIL_WORKER_OPTIONS, handleEmailJobs);
   logDebug('worker_registered', { queue: EMAIL_PROCESSING_JOB, batchSize: 1 });
 }
