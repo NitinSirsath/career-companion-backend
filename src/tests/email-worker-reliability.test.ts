@@ -12,7 +12,8 @@ import {
   TerminalAIError,
 } from '../services/ai/errors';
 import { createProviderClient } from '../services/ai/providers';
-import { configureAI } from './helpers/aiAccess';
+import { nextUtcMidnight } from '../services/ai/usage';
+import { configureAI, setPause } from './helpers/aiAccess';
 import { getQueue, stopQueue } from '../services/queue';
 import {
   EmailJobFailure,
@@ -24,6 +25,7 @@ import {
   EMAIL_PROCESSING_JOB,
   EmailProcessingJobData,
   emailJobOptions,
+  enqueueAiResume,
   enqueueEmailProcessingJob,
 } from '../services/enqueue';
 
@@ -31,6 +33,7 @@ vi.mock('../services/ai/providers', () => ({ createProviderClient: vi.fn() }));
 vi.mock('../services/enqueue', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/enqueue')>()),
   enqueueEmailProcessingJob: vi.fn(),
+  enqueueAiResume: vi.fn(),
 }));
 
 const OWNER = 'worker-owner@reliability.test';
@@ -191,6 +194,17 @@ describe('email worker attributable outcomes', () => {
     },
   );
 
+  it("waits for midnight UTC at Career Companion's daily limit: the mail is read then by itself", async () => {
+    const midnight = nextUtcMidnight(new Date());
+    vi.mocked(enqueueAiResume).mockClear();
+    vi.spyOn(aiPipeline, 'processEmail').mockRejectedValue(
+      new AIAccessError('SAFETY_LIMIT', midnight),
+    );
+    await expect(processEmailJob(job(0))).resolves.toBeUndefined();
+    expect((await email()).processingState).toBe('PENDING');
+    expect(enqueueAiResume).toHaveBeenCalledWith(userId, midnight);
+  });
+
   it("fails the last try with no answer in time at once, held for the user's OK, without a queue retry", async () => {
     vi.spyOn(aiPipeline, 'processEmail').mockRejectedValue(new AIOutcomeUnknownError());
     await expect(processEmailJob(job(0))).resolves.toBeUndefined();
@@ -306,7 +320,28 @@ describe('manual email retry preserves paid claims and user decisions', () => {
       request(app).post(`/api/emails/${emailId}/retry`).set('X-Development-User', OWNER).send(body);
     const op = () => prisma.aIOperation.findFirstOrThrow({ where: { emailId } });
     beforeEach(async () => {
-      await configureAI(userId, { provider: 'gemini', accessIssue: null, cooldownUntil: null });
+      await configureAI(userId, { provider: 'gemini', accessIssue: null });
+      await prisma.aIModelPause.deleteMany({ where: { userId } });
+    });
+
+    it("answers with the pause of the model the held step uses; another model's pause does not stop it", async () => {
+      await failedWithOperation('UNKNOWN');
+      vi.mocked(enqueueEmailProcessingJob).mockResolvedValue('job-id');
+      // Sorting uses the fast model (Gemini 3.5 Flash-Lite).
+      await setPause(userId, 'gemini-3.8-flash', { resumesAt: new Date(Date.now() + 60_000) });
+      expect((await approve()).status).toBe(200);
+      expect(await op()).toMatchObject({ approvedRetries: 1 });
+
+      await prisma.aIOperation.updateMany({ where: { emailId }, data: { status: 'UNKNOWN' } });
+      const resumesAt = new Date(Date.now() + 120_000);
+      await setPause(userId, 'gemini-3.5-flash-lite', { resumesAt });
+      const res = await approve();
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatchObject({
+        code: 'AI_ACCESS_UNAVAILABLE',
+        details: { state: 'LIMITED', reason: 'PROVIDER_BUSY', resumesAt: resumesAt.toISOString() },
+      });
+      expect(await op()).toMatchObject({ approvedRetries: 1 });
     });
 
     it('explains where the uncertain attempt went and which provider a retry would use', async () => {
