@@ -65,9 +65,10 @@ export class AIOutcomeUnknownError extends TerminalAIError {
 
 /**
  * Career Companion's classification of any provider failure. Access kinds are refusals made
- * before any work was done, and so are RATE_LIMITED and PROVIDER_BUSY (a short server error, or a
- * request that never left). OUTCOME_UNKNOWN is no answer in time (our timer, Google's 504, or a
- * connection that dropped after sending): it may have been processed and charged.
+ * before any work was done, and so are RATE_LIMITED and PROVIDER_BUSY (a short server error, a
+ * conflict, or a request that never left). OUTCOME_UNKNOWN is no answer in time (our timer,
+ * Google's 504, or a connection that dropped after sending): it may have been processed and
+ * charged.
  */
 export type FailureKind =
   | 'KEY_REJECTED'
@@ -126,6 +127,7 @@ export type QuotaScope = 'PER_DAY' | 'PER_MINUTE';
 const PROVIDER_CODE = /^[A-Za-z_]{2,64}$/;
 const NETWORK_CODE =
   /^(ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|UND_ERR_[A-Z_]{1,40})$/;
+const REQUEST_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 export interface ProviderFailureDetails {
   message?: string;
@@ -139,6 +141,7 @@ export interface ProviderFailureDetails {
   /** Where the call failed. The provider's answer, unless the adapter says otherwise. */
   failureCause?: FailureCause;
   networkCode?: string;
+  providerRequestId?: string;
 }
 
 /**
@@ -160,6 +163,8 @@ export class ProviderFailure extends AIProviderError {
   readonly failureCause: FailureCause;
   /** The failed connection's system or undici code, from a fixed list; never free text. */
   readonly networkCode?: string;
+  /** The provider's own ID of the request (OpenAI, Anthropic), to find the failure with them. */
+  readonly providerRequestId?: string;
 
   constructor(
     readonly kind: FailureKind,
@@ -185,6 +190,10 @@ export class ProviderFailure extends AIProviderError {
     this.networkCode =
       details.networkCode && NETWORK_CODE.test(details.networkCode)
         ? details.networkCode
+        : undefined;
+    this.providerRequestId =
+      details.providerRequestId && REQUEST_ID.test(details.providerRequestId)
+        ? details.providerRequestId
         : undefined;
   }
 }
