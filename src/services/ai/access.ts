@@ -3,11 +3,11 @@
  * run now, and with what?". It reads by the userId of the job or session only; keys never travel
  * through the queue. There is no Career Companion key and no fallback to another provider.
  */
-import {
-  AI_ROLES,
-  AIRole, AIAccessIssue, AIModelPause } from '@prisma/client';
+import { AIAccessIssue, AIModelPause } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import {
+  AI_ROLES,
+  AIRole,
   CatalogProvider,
   ModelSource,
   getCatalogProvider,
