@@ -1,6 +1,7 @@
 // One command for dev mode (`npm run devmode`). On first run it makes .env.dev from
 // .env.dev.example with fresh secrets. Every run it creates the dev database when it is missing,
-// brings it to the latest structure and starts the backend. It never deletes data.
+// rebuilds the Prisma client, brings the database to the latest structure and starts the backend.
+// It never deletes data.
 const { randomBytes } = require('node:crypto');
 const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
@@ -77,13 +78,22 @@ async function ensureDatabase(url) {
   }
 }
 
+function runPrisma(env, args, failure) {
+  const result = spawnSync(process.execPath, [require.resolve('prisma/build/index.js'), ...args], {
+    cwd: root,
+    env,
+    stdio: 'inherit',
+  });
+  if (result.error || result.status !== 0) stop(failure);
+}
+
+/**
+ * Brings the Prisma client and the database up to date with the code. After a pull the client in
+ * node_modules can be older than the schema, and the server then fails on the new fields.
+ */
 function migrate(env) {
-  const result = spawnSync(
-    process.execPath,
-    [require.resolve('prisma/build/index.js'), 'migrate', 'deploy'],
-    { cwd: root, env, stdio: 'inherit' },
-  );
-  if (result.error || result.status !== 0) stop('the database could not be brought up to date');
+  runPrisma(env, ['generate'], 'the Prisma client could not be generated');
+  runPrisma(env, ['migrate', 'deploy'], 'the database could not be brought up to date');
 }
 
 function start(env, preload) {
