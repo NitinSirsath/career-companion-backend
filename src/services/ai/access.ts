@@ -234,6 +234,11 @@ export interface AIAccess extends AICapabilities {
   models: BoundModels;
   /** The saved configuration this access came from; job-side state writes are guarded by it. */
   revision: number;
+  /**
+   * The same key with the fast model in the detailed role, used while the detailed model is paused.
+   * None when both roles use one model.
+   */
+  fallback?: AIAccess;
 }
 
 /**
@@ -265,11 +270,19 @@ export async function resolveAIAccess(userId: string): Promise<AIAccess> {
     throw new AIAccessError('KEY_UNREADABLE');
   }
   const { models } = modelsFor(provider, config);
-  return {
+  const client = createProviderClient(provider, apiKey);
+  const accessWith = (bound: BoundModels): AIAccess => ({
     userId,
     provider: provider.id,
-    models,
+    models: bound,
     revision: config.revision,
-    ...bindCapabilities(createProviderClient(provider, apiKey), models),
+    ...bindCapabilities(client, bound),
+  });
+  return {
+    ...accessWith(models),
+    fallback:
+      models.fast.id === models.detailed.id
+        ? undefined
+        : accessWith({ fast: models.fast, detailed: models.fast }),
   };
 }

@@ -91,6 +91,11 @@ const statusOf = async (emailId: string): Promise<EmailAIStatus | null | undefin
 const settings = async () =>
   AISettingsResponseSchema.parse((await request(app).get('/api/ai/settings').set(as)).body);
 const iso = (date: Date | null | undefined) => date?.toISOString();
+/**
+ * One model for both steps, so no fast model can take a detailed step while Gemini 3.8 Flash is
+ * paused: the mail waits for it.
+ */
+const oneModel = () => configureAI(userId, { fastModel: DETAILED });
 
 beforeAll(async () => {
   await prisma.user.deleteMany({ where: { email: EMAIL } });
@@ -104,7 +109,7 @@ beforeEach(async () => {
   vi.mocked(fetchMessageBody).mockResolvedValue('Synthetic interview invitation body');
   await prisma.email.deleteMany({ where: { userId } });
   await prisma.aIUsageDay.deleteMany({ where: { userId } });
-  await configureAI(userId, { accessIssue: null, accessFailure: Prisma.DbNull });
+  await configureAI(userId, { accessIssue: null, accessFailure: Prisma.DbNull, fastModel: null });
   await prisma.aIModelPause.deleteMany({ where: { userId } });
 });
 afterAll(async () => {
@@ -114,6 +119,7 @@ afterAll(async () => {
 
 describe('a mail that waits for AI', () => {
   it('Google busy: the row and the AI provider page name the model, the code and the next try', async () => {
+    await oneModel();
     const emailId = await newEmail();
     await detailsFail(emailId, busy());
     const pause = await pauseOf(userId, DETAILED);
@@ -144,7 +150,7 @@ describe('a mail that waits for AI', () => {
       readNowTest: null,
     });
 
-    // AI provider page: 3.8 Flash paused with its reason and code; Flash-Lite is not affected.
+    // AI provider page: 3.8 Flash paused with its reason and code, for both steps it does here.
     const { access, waitingEmails, lastFailure } = await settings();
     expect(access).toMatchObject({
       state: 'LIMITED',
@@ -156,7 +162,7 @@ describe('a mail that waits for AI', () => {
     expect(access.pauses).toEqual([
       {
         model: DETAILED,
-        roles: ['detailed'],
+        roles: ['fast', 'detailed'],
         reason: 'PROVIDER_BUSY',
         resumesAt: iso(pause!.resumesAt),
         failure: access.failure,
@@ -168,6 +174,7 @@ describe('a mail that waits for AI', () => {
   });
 
   it('no answer in time: says so with the model’s time limit and the measured wait, though it pauses as busy', async () => {
+    await oneModel();
     const emailId = await newEmail();
     await detailsFail(emailId, noAnswer());
     // The pause is stored as for a busy provider; the API says what really happened.
@@ -212,6 +219,7 @@ describe('a mail that waits for AI', () => {
   });
 
   it('no connection: says where it failed and the connection’s code', async () => {
+    await oneModel();
     const emailId = await newEmail();
     const fetchFailed = (code: string) =>
       new TypeError('fetch failed', { cause: Object.assign(new Error('connect'), { code }) });
@@ -236,6 +244,7 @@ describe('a mail that waits for AI', () => {
   });
 
   it('a daily free-tier limit gives the scope and waits until Google’s reset', async () => {
+    await oneModel();
     const emailId = await newEmail();
     await detailsFail(
       emailId,
@@ -263,6 +272,7 @@ describe('a mail that waits for AI', () => {
   });
 
   it('a newer pause of another kind is the reason, not the mail’s own older failure', async () => {
+    await oneModel();
     const older = await newEmail(14);
     const newer = await newEmail(13);
     await detailsFail(older, busy());
@@ -359,11 +369,11 @@ describe('a mail that waits for AI', () => {
 
 describe('"Read waiting mails now"', () => {
   it('names the test mail, its result, and the mail that waits for it', async () => {
+    await oneModel();
     const test = await newEmail(14);
     const other = await newEmail(13);
     await detailsFail(test, busy());
-    // Sorted by Flash-Lite, then held back by the 3.8 Flash pause before any call.
-    generateContent.mockResolvedValueOnce(relevant);
+    // Held back by the 3.8 Flash pause before any call.
     await processEmailJob(job(other));
     expect(await statusOf(other)).toMatchObject({
       reason: 'PROVIDER_BUSY',
@@ -412,6 +422,7 @@ describe('"Read waiting mails now"', () => {
 
 describe('a mail that stopped', () => {
   it('after 3 tries with no answer it needs the user’s OK, with the time of each try', async () => {
+    await oneModel();
     const emailId = await newEmail();
     await detailsFail(emailId, noAnswer());
     for (let i = 0; i < 2; i++) {
