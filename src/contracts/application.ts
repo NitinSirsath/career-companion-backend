@@ -194,7 +194,17 @@ export const ApplicationActionResponseSchema = z.object({
 });
 
 export type ApplicationActionResponse = z.infer<typeof ApplicationActionResponseSchema>;
-export type ListApplicationActionsResponse = PaginatedResponse<ApplicationActionResponse>;
+
+/** An action in an application's list. */
+export const ApplicationActionListItemSchema = ApplicationActionResponseSchema.extend({
+  /**
+   * When the user replied to the mail that asked for this pending action, as the mail list shows
+   * it; null otherwise. A reply never finishes the action by itself.
+   */
+  repliedAt: z.iso.datetime().nullable(),
+});
+export type ApplicationActionListItem = z.infer<typeof ApplicationActionListItemSchema>;
+export type ListApplicationActionsResponse = PaginatedResponse<ApplicationActionListItem>;
 
 export const ArchiveApplicationSchema = z.strictObject({
   archived: z.boolean(),
