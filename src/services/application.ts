@@ -6,13 +6,14 @@ import {
   ApplicationFilters,
   ApplicationResponse,
   ApplicationEventResponse,
-  ApplicationActionResponse,
+  ApplicationActionListItem,
   SourceEmail,
   SourceSubmission,
   UpdateApplicationStatusRequest,
   deriveStatus,
 } from '../contracts';
 import { logError } from '../utils/log';
+import { repliedRequests } from './conversationQuery';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -413,7 +414,7 @@ export async function getApplicationActions(
   applicationId: string,
   limit = 20,
   offset = 0,
-): Promise<ApplicationActionResponse[] | null> {
+): Promise<ApplicationActionListItem[] | null> {
   // Verify ownership
   const app = await prisma.application.findUnique({
     where: { id: applicationId },
@@ -447,8 +448,13 @@ export async function getApplicationActions(
       snoozedUntil: true,
       status: true,
       createdAt: true,
+      email: { select: { id: true, threadId: true } },
     },
   });
+  const pendingEmails = actions.flatMap((a) =>
+    a.status === 'PENDING' && a.email ? [a.email] : [],
+  );
+  const replied = await repliedRequests(prisma, userId, pendingEmails);
 
   return actions.map((a) => ({
     id: a.id,
@@ -464,6 +470,8 @@ export async function getApplicationActions(
     snoozedUntil: a.snoozedUntil?.toISOString() ?? null,
     status: a.status,
     createdAt: a.createdAt,
+    repliedAt:
+      a.status === 'PENDING' && a.emailId ? (replied.get(a.emailId)?.toISOString() ?? null) : null,
   }));
 }
 
