@@ -95,14 +95,21 @@ async function until(condition: () => Promise<boolean>) {
   throw new Error('condition not met in 30 seconds');
 }
 
-/** Mails sorted by Flash-Lite that now wait for Gemini 3.8 Flash, which is paused. */
+/**
+ * Mails sorted by Flash-Lite that now wait for Gemini 3.8 Flash, which is paused. Flash-Lite is
+ * busy too when it would take the details instead; its short pause is cleared after each mail.
+ */
 async function waitingForDetails(days: number[]) {
+  const answer = detail;
+  detail = busy;
   const ids: string[] = [];
   for (const day of days) {
     const emailId = await newEmail(day);
     await processEmailJob(job(emailId));
+    await prisma.aIModelPause.deleteMany({ where: { userId, model: FAST } });
     ids.push(emailId);
   }
+  detail = answer;
   return ids;
 }
 
@@ -123,7 +130,7 @@ beforeEach(async () => {
   vi.mocked(enqueueEmailProcessingJob).mockClear();
   await prisma.email.deleteMany({ where: { userId } });
   await prisma.aIUsageDay.deleteMany({ where: { userId } });
-  await configureAI(userId, { accessIssue: null });
+  await configureAI(userId, { accessIssue: null, fastModel: null });
   await prisma.aIModelPause.deleteMany({ where: { userId } });
   await clearJobs();
 });
@@ -134,36 +141,72 @@ afterAll(async () => {
 });
 
 describe('each model pauses on its own', () => {
-  it('with Gemini 3.8 Flash paused, Flash-Lite keeps reading mail and its success leaves that pause', async () => {
+  it('with Gemini 3.8 Flash paused, Flash-Lite reads the details too and leaves that pause', async () => {
     const paused = await setPause(userId, DETAILED, {
       resumesAt: new Date(Date.now() + 10 * 60_000),
       consecutiveFailures: 2,
     });
     const newsletter = await newEmail(1, 'Newsletter');
     await processEmailJob(job(newsletter));
-    const [interview] = await waitingForDetails([2]);
+    const interview = await newEmail(2);
+    await processEmailJob(job(interview));
 
-    // Flash-Lite read both: the newsletter is done, the interview waits only for its details.
+    // Flash-Lite read both: the newsletter is sorted out, the interview is read in full.
     expect(await mail(newsletter)).toMatchObject({
       processingState: 'COMPLETED',
       relevanceState: 'IRRELEVANT',
     });
-    expect(await mail(interview)).toMatchObject({ processingState: 'PENDING' });
+    expect(await mail(interview)).toMatchObject({ processingState: 'COMPLETED' });
     expect(
       await prisma.aIOperation.findMany({
         where: { emailId: interview },
         orderBy: { operation: 'asc' },
-        select: { operation: true, status: true, attempts: true },
+        select: { operation: true, status: true, attempts: true, model: true },
       }),
     ).toEqual([
-      { operation: 'classification', status: 'COMPLETED', attempts: 1 },
-      { operation: 'extraction', status: 'PENDING', attempts: 0 },
+      { operation: 'classification', status: 'COMPLETED', attempts: 1, model: FAST },
+      { operation: 'extraction', status: 'COMPLETED', attempts: 1, model: FAST },
     ]);
+    expect(
+      await prisma.aIProcessingResult.findUniqueOrThrow({ where: { emailId: interview } }),
+    ).toMatchObject({ model: FAST, companyName: 'Northwind Robotics' });
     expect(client.calls('email_relevance')).toHaveLength(2);
-    expect(client.calls('job_extraction')).toHaveLength(0);
-    // Two Flash-Lite successes leave the 3.8 Flash pause and its count as they were.
+    expect(client.calls('job_extraction')).toHaveLength(1);
+    // Flash-Lite's successes leave the 3.8 Flash pause and its count as they were.
     expect(await pauseOf(userId, DETAILED)).toEqual(paused);
     expect(await pauseOf(userId, FAST)).toBeNull();
+  });
+
+  it('when 3.8 Flash turns busy on a mail, Flash-Lite reads that mail at once', async () => {
+    let first = true;
+    detail = () => {
+      if (!first) return extraction;
+      first = false;
+      return busy();
+    };
+    const interview = await newEmail(2);
+    await processEmailJob(job(interview));
+
+    expect(await mail(interview)).toMatchObject({ processingState: 'COMPLETED' });
+    expect(client.calls('job_extraction').map(([call]) => call.model.id)).toEqual([DETAILED, FAST]);
+    // The busy answer used no try; 3.8 Flash pauses as usual.
+    expect(
+      await prisma.aIOperation.findFirstOrThrow({
+        where: { emailId: interview, operation: 'extraction' },
+        select: { status: true, attempts: true, model: true },
+      }),
+    ).toEqual({ status: 'COMPLETED', attempts: 1, model: FAST });
+    expect(await pauseOf(userId, DETAILED)).toMatchObject({ reason: 'PROVIDER_BUSY' });
+  });
+
+  it('with one model for both steps, a mail waits for it', async () => {
+    await configureAI(userId, { fastModel: DETAILED });
+    await setPause(userId, DETAILED, { resumesAt: new Date(Date.now() + 10 * 60_000) });
+    const interview = await newEmail(2);
+    await processEmailJob(job(interview));
+
+    expect(await mail(interview)).toMatchObject({ processingState: 'PENDING' });
+    expect(client.generateStructured).not.toHaveBeenCalled();
   });
 });
 
