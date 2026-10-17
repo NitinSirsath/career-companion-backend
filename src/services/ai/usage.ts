@@ -266,12 +266,17 @@ export async function resumeAfterPause(userId: string, resumesAt: Date | null): 
 }
 
 /**
- * A successful call on a model ends that model's pause and resets its growth; other models keep
- * theirs. When the success answers the test of "Read waiting mails now", the other waiting mail
- * follows now. Best effort.
+ * A successful call confirms the key, and ends that model's pause and resets its growth; other
+ * models keep theirs. When the success answers the test of "Read waiting mails now", the other
+ * waiting mail follows now. Best effort.
  */
 export async function noteProviderSuccess(access: AccessIdentity, modelId: string) {
   try {
+    // A call that works proves the key, also when the key check got no answer.
+    await prisma.aIConfiguration.updateMany({
+      where: { userId: access.userId, revision: access.revision, verifiedAt: null },
+      data: { verifiedAt: new Date() },
+    });
     const where = { userId: access.userId, model: modelId };
     const pause = await prisma.aIModelPause.findUnique({ where: { userId_model: where } });
     if (!pause) return;
