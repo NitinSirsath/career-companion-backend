@@ -503,12 +503,15 @@ export async function syncUser(userId: string, queuedClaim?: string, delivery: S
     if (superseded) outcome.checkpointCommitted = false;
     if (connectionId && !superseded)
       await markSyncFailed(userId, connectionId, claim, queuedClaim, error);
-    logError(superseded ? 'gmail_sync_superseded' : 'gmail_sync_failed', {
+    const fields = {
       ...context,
       durationMs: Date.now() - started,
       ...outcome,
       category: syncCategory(error),
-    });
+    };
+    // A newer sync taking over is a normal outcome, not a failure.
+    if (superseded) logEvent('gmail_sync_superseded', fields);
+    else logError('gmail_sync_failed', fields);
     if (googleAuthFailure(error)) throw new GmailAuthError();
     throw error;
   }
