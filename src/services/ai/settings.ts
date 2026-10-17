@@ -261,6 +261,7 @@ const logAccessCheck = (
     on,
     result: result.result,
     kind: result.result === 'REJECTED' ? result.kind : undefined,
+    providerMessage: result.result === 'VERIFIED' ? undefined : result.providerMessage,
   });
 
 export async function saveSettings(
@@ -502,6 +503,7 @@ export async function runSampleTest(userId: string): Promise<AISampleTestRespons
         provider: access.provider,
         outcome: kind,
         providerRequestId: err instanceof ProviderFailure ? err.providerRequestId : undefined,
+        providerMessage: err instanceof ProviderFailure ? err.providerMessage : undefined,
         ...usage,
       });
       if (isRefusal(kind)) {
