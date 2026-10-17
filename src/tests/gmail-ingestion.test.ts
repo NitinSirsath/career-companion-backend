@@ -374,7 +374,7 @@ describe('request ownership fencing', () => {
         });
         return original;
       });
-      const events = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const events = vi.spyOn(console, 'log').mockImplementation(() => {});
       try {
         await expect(syncUser(userId)).rejects.toThrow('superseded');
         expect(await prisma.email.count({ where: { userId } })).toBe(0);
@@ -387,7 +387,11 @@ describe('request ownership fencing', () => {
             .map(([value]) => JSON.parse(value))
             .filter((e) => e.event === 'gmail_sync_superseded'),
         ).toEqual([
-          expect.objectContaining({ checkpointCommitted: false, checkpointAdvanced: false }),
+          expect.objectContaining({
+            level: 'info',
+            checkpointCommitted: false,
+            checkpointAdvanced: false,
+          }),
         ]);
       } finally {
         events.mockRestore();
