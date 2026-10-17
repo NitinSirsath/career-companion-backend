@@ -361,6 +361,39 @@ describe('answering a request', () => {
     expect((await list())[0].request?.state).toBe('OPEN');
   });
 
+  it('shows the application action of a replied request as replied, still pending', async () => {
+    const mail = await jobMail('thread-r', at(1), {
+      actionRequired: true,
+      requestedAction: 'Send dates',
+    });
+    const offer = await jobMail('thread-o', at(2), {
+      category: 'OFFER',
+      actionRequired: true,
+      requestedAction: 'Accept or decline',
+    });
+    const applicationId = LinkConversationResponseSchema.parse((await link('thread-r')).body)
+      .application.id;
+    // Linking brings the company's other conversation, the offer, into the application too.
+    const actions = async () => {
+      const res = await request(app)
+        .get(`/api/applications/${applicationId}/actions`)
+        .set(as(OWNER));
+      expect(res.status).toBe(200);
+      return res.body.items as { emailId: string; status: string; repliedAt: string | null }[];
+    };
+    const of = async (emailId: string) => (await actions()).find((a) => a.emailId === emailId);
+    expect(await of(mail.id)).toMatchObject({ status: 'PENDING', repliedAt: null });
+
+    await sent('thread-r', at(3));
+    expect(await of(mail.id)).toMatchObject({ status: 'PENDING', repliedAt: at(3).toISOString() });
+    // Only the mail the user answered.
+    expect(await of(offer.id)).toMatchObject({ status: 'PENDING', repliedAt: null });
+
+    // Reopened by the user: it asks again.
+    await answer('thread-r', { emailId: mail.id, state: 'OPEN' });
+    expect(await of(mail.id)).toMatchObject({ repliedAt: null });
+  });
+
   it('follows an action finished elsewhere', async () => {
     const mail = await jobMail('thread-e', at(1), { actionRequired: true });
     await link('thread-e');
