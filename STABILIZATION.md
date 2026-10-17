@@ -48,7 +48,7 @@ If a migration fails, keep workers stopped. Reconcile the identified records wit
 
 **Rollback:** do not return to the hosted key. Keep the new tables and the stored configurations. To stop AI work, set `AI_USER_DAILY_CALL_LIMIT=0`. `ai_call_budgets` is no longer used; it is dropped only after one stable release.
 
-**Support diagnosis (no content or keys are ever logged):**
+**Support diagnosis (no content or keys are ever logged; in dev mode only, the provider's own error text, cleaned):**
 
 To follow one mail, search the log for its `emailId`: each try shows `ai_call_started`, then `ai_call_completed` or `ai_call_failed`, with the try number and how long it took.
 
@@ -56,7 +56,7 @@ To follow one mail, search the log for its `emailId`: each try shows `ai_call_st
 | --- | --- |
 | `job_waiting_for_ai` (reason) | Email waits for AI access. After no answer in time with tries left, the reason is `PROVIDER_BUSY` |
 | `ai_call_deferred` | A model's pause, the safety limit or Career Companion's pause hit at claim time |
-| `ai_call_failed` (attempt, kind, failureCause, networkCode, status, providerCode, providerRequestId, quotaScope, retryAfterMs, stopReason, durationMs, timeoutMs, result, resumesAt) | One failed try: a warning, or an error only for our own bug (`UNCLASSIFIED`). `failureCause`: `TIMEOUT` (our own timer), `PROVIDER_DEADLINE` (Google's 504), `NETWORK` (no connection, nothing sent), `NETWORK_AFTER_SEND` (the connection dropped after sending), `PROVIDER_ANSWER` or `UNCLASSIFIED`. `result`: `paused`, `retry_scheduled`, `waiting_for_user` or `held`. `PROVIDER_BUSY` = a short server error, a conflict or no connection (list under Recovery rules): the mail waits and uses no try. Google's 504 is no answer in time (`OUTCOME_UNKNOWN`), not busy. `providerRequestId` is OpenAI's or Anthropic's own ID of the request, to find it with them |
+| `ai_call_failed` (attempt, kind, failureCause, networkCode, status, providerCode, providerRequestId, providerMessage, quotaScope, retryAfterMs, stopReason, durationMs, timeoutMs, result, resumesAt) | One failed try: a warning, or an error only for our own bug (`UNCLASSIFIED`). `failureCause`: `TIMEOUT` (our own timer), `PROVIDER_DEADLINE` (Google's 504), `NETWORK` (no connection, nothing sent), `NETWORK_AFTER_SEND` (the connection dropped after sending), `PROVIDER_ANSWER` or `UNCLASSIFIED`. `result`: `paused`, `retry_scheduled`, `waiting_for_user` or `held`. `PROVIDER_BUSY` = a short server error, a conflict or no connection (list under Recovery rules): the mail waits and uses no try. Google's 504 is no answer in time (`OUTCOME_UNKNOWN`), not busy. `providerRequestId` is OpenAI's or Anthropic's own ID of the request, to find it with them. `providerMessage`, dev mode only: the provider's own error text (for example "The model is overloaded"), one line, quoted text and key-like runs masked, at most 300 characters; never in prod mode, because a provider can echo the key or the mail text |
 | `ai_paused` (model, reason, pauseMs, resumesAt, consecutiveFailures, testEmailId) | A model paused for this user: why and until when. No answer in time pauses as `PROVIDER_BUSY`. `testEmailId` when the test mail of "Read waiting mails now" was still busy |
 | `ai_pause_extended` (the same fields) | A failure while that model's pause still ran (a call already under way) made the pause longer |
 | `ai_claim_released` (emailId, attempt, startedAt) | A per-email try that no job holds any more went back to waiting, its attempt used |
@@ -64,9 +64,9 @@ To follow one mail, search the log for its `emailId`: each try shows `ai_call_st
 | `ai_resumed_after_pause` (offered) | A pause ended and the waiting mail was offered again by itself |
 | `ai_read_waiting_requested` (testEmailId, pausedModels, alreadyTesting, or offered) | The user chose "Read waiting mails now": the test mail sent during a pause, the test mail still running (nothing sent), or the waiting mail offered |
 | `ai_resume_not_queued` | The automatic read could not be queued; the next sync offers the mail |
-| `ai_access_checked` (result, kind) | Verification on save or "Check again" |
+| `ai_access_checked` (result, kind, providerMessage in dev mode) | Verification on save or "Check again" |
 | `ai_settings_saved` / `ai_settings_removed` | Configuration changes |
-| `ai_sample_test` (outcome, providerRequestId) | Sample test outcome and tokens |
+| `ai_sample_test` (outcome, providerRequestId, providerMessage in dev mode) | Sample test outcome and tokens |
 | `ai_retry_approved` | User approved one more attempt |
 | `ai_credential_unreadable` | Stored key cannot be decrypted (check the encryption key) |
 
