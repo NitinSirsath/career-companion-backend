@@ -1,10 +1,11 @@
 import { AIOperation, Prisma } from '@prisma/client';
 import type { AIFailure } from '../../contracts/ai';
 import { prisma } from '../../db/prisma';
-import { AI_CATALOG } from '../../contracts/aiCatalog';
+import { AI_CATALOG, AIRole } from '../../contracts/aiCatalog';
 import type { AIAccess } from './access';
 import { AIContract, AIResult, RELEVANCE_BATCH_VERSIONS } from './contracts';
 import {
+  AccessReason,
   AIAccessError,
   AIOutcomeUnknownError,
   AIProviderError,
@@ -16,6 +17,7 @@ import {
 } from './errors';
 import { failureRecord } from './failures';
 import {
+  blockingPause,
   noteProviderFailure,
   noteProviderSuccess,
   recordTokens,
@@ -72,8 +74,47 @@ export interface OperationResult<T> {
  *   waits.
  * - A claim no live job can hold goes back to waiting, its attempt used.
  * - Each user approval (`approvedRetries`) permits exactly one call beyond MAX_ATTEMPTS.
+ * - While the detailed model is paused, the fast model takes the detailed steps (same key). When
+ *   the detailed model pauses during this call, the fast model takes the step at once.
  */
 export async function runOperation<T>(request: OperationRequest<T>): Promise<OperationResult<T>> {
+  try {
+    return await runOnce(request);
+  } catch (err) {
+    if (!(await fallsBack(err, request))) throw err;
+    return runOnce(request);
+  }
+}
+
+const PAUSE_REASONS: readonly AccessReason[] = ['PROVIDER_BUSY', 'RATE_LIMITED'];
+
+/** True when the call just paused the detailed model and the fast model can take the step now. */
+async function fallsBack<T>(err: unknown, request: OperationRequest<T>): Promise<boolean> {
+  if (!(err instanceof AIAccessError) || !PAUSE_REASONS.includes(err.reason)) return false;
+  if (request.contract.role !== 'detailed') return false;
+  const access = await request.access();
+  // The test mail of "Read waiting mails now" tests the paused model itself.
+  const pause = await prisma.aIModelPause.findUnique({
+    where: { userId_model: { userId: access.userId, model: access.models.detailed.id } },
+    select: { testEmailId: true },
+  });
+  if (pause?.testEmailId === request.emailId) return false;
+  return (await accessForCall(access, 'detailed', request.emailId)) !== access;
+}
+
+/** The access for one call: while the detailed model is paused, the fallback with the fast one. */
+async function accessForCall(access: AIAccess, role: AIRole, emailId: string): Promise<AIAccess> {
+  const { fallback } = access;
+  if (role !== 'detailed' || !fallback) return access;
+  const now = new Date();
+  const paused = (model: string) =>
+    blockingPause(prisma, { userId: access.userId, model, emailId }, now);
+  if (!(await paused(access.models.detailed.id))) return access;
+  if (await paused(fallback.models.detailed.id)) return access;
+  return fallback;
+}
+
+async function runOnce<T>(request: OperationRequest<T>): Promise<OperationResult<T>> {
   const { userId, emailId, operation, contract } = request;
   const version = contract.version;
   const opened = await openOperation(userId, { emailId, operation, version });
@@ -88,8 +129,18 @@ export async function runOperation<T>(request: OperationRequest<T>): Promise<Ope
   const existing = isStaleClaim(opened, new Date()) ? await releaseClaim(opened) : opened;
   assertCallAllowed(existing);
 
-  const access = await request.access();
+  const resolved = await request.access();
+  const access = await accessForCall(resolved, contract.role, emailId);
   const model = access.models[contract.role];
+  if (access !== resolved)
+    logEvent('ai_fallback_used', {
+      userId,
+      emailId,
+      operation,
+      version,
+      pausedModel: resolved.models[contract.role].id,
+      model: model.id,
+    });
   const now = new Date();
   await claimAttempt(userId, existing, { provider: access.provider, model: model.id, now });
   logEvent('ai_call_started', {
