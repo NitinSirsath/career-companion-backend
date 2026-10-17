@@ -44,11 +44,12 @@ export function classifyAnthropicError(err: unknown): ProviderFailure {
     providerCode: type,
     retryAfterMs: retryAfterMs(err.headers),
     providerRequestId: err.requestID ?? undefined,
+    providerMessage: message,
   };
   if (type === 'authentication_error' || status === 401)
     return new ProviderFailure('KEY_REJECTED', details);
-  // An empty credit balance has been reported as a 400 invalid_request_error; the text is only
-  // inspected here, never kept.
+  // An empty credit balance has been reported as a 400 invalid_request_error; the text is
+  // inspected here and, in dev mode only, kept cleaned for the log.
   if (
     type === 'billing_error' ||
     status === 402 ||

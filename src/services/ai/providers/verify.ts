@@ -31,9 +31,10 @@ export async function checkModels(
         failedAt: new Date(),
         timeoutMs: VERIFY_TIMEOUT_MS,
       });
+      const { providerMessage } = error;
       return isAccessKind(error.kind)
-        ? { result: 'REJECTED', kind: error.kind, modelId, failure }
-        : { result: 'INCONCLUSIVE', failure };
+        ? { result: 'REJECTED', kind: error.kind, modelId, failure, providerMessage }
+        : { result: 'INCONCLUSIVE', failure, providerMessage };
     }
   }
   return { result: 'VERIFIED' };

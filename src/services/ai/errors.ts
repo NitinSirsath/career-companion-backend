@@ -1,4 +1,5 @@
 import type { AIFailure } from '../../contracts/ai';
+import { devMode } from '../../utils/config';
 
 /**
  * Base of every AI-layer error. Messages are application-written; there is deliberately no
@@ -128,6 +129,27 @@ const PROVIDER_CODE = /^[A-Za-z_]{2,64}$/;
 const NETWORK_CODE =
   /^(ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|UND_ERR_[A-Z_]{1,40})$/;
 const REQUEST_ID = /^[A-Za-z0-9_-]{1,128}$/;
+/** Quoted text, and long runs that look like a key or token: a provider can echo either. */
+const QUOTED = /"[^"]*"|'[^']*'|`[^`]*`/g;
+const LONG_RUN = /[A-Za-z0-9._-]{20,}/g;
+const looksLikeKey = (run: string) => /\d/.test(run) || (/[a-z]/.test(run) && /[A-Z]/.test(run));
+const PROVIDER_MESSAGE_MAX = 300;
+
+/**
+ * The provider's own error text, for the log in dev mode only: one line, quoted text and key-like
+ * runs masked, cut to 300 characters. Outside dev mode it is dropped, because a provider can echo
+ * the key or the mail text. It never goes into an API response or the database.
+ */
+export function providerMessageOf(text: string | undefined): string | undefined {
+  if (!devMode()) return undefined;
+  const line = (text ?? '')
+    .replace(/\s+/g, ' ')
+    .replace(QUOTED, '[…]')
+    .replace(LONG_RUN, (run) => (looksLikeKey(run) ? '[redacted]' : run))
+    .trim();
+  if (!line) return undefined;
+  return line.length > PROVIDER_MESSAGE_MAX ? `${line.slice(0, PROVIDER_MESSAGE_MAX - 1)}…` : line;
+}
 
 export interface ProviderFailureDetails {
   message?: string;
@@ -142,12 +164,15 @@ export interface ProviderFailureDetails {
   failureCause?: FailureCause;
   networkCode?: string;
   providerRequestId?: string;
+  /** The provider's own error text; kept only through providerMessageOf (dev mode, cleaned). */
+  providerMessage?: string;
 }
 
 /**
  * Thrown by provider adapters and the capability layer only, and converted at the operation
- * boundary. Carries a fixed application message, never provider text and never the original
- * error as a cause: provider messages can echo the key or email content.
+ * boundary. Carries a fixed application message and never the original error as a cause: provider
+ * messages can echo the key or email content. In dev mode only, the provider's text is kept cleaned
+ * and short in providerMessage, for the log.
  */
 export class ProviderFailure extends AIProviderError {
   readonly status?: number;
@@ -165,6 +190,8 @@ export class ProviderFailure extends AIProviderError {
   readonly networkCode?: string;
   /** The provider's own ID of the request (OpenAI, Anthropic), to find the failure with them. */
   readonly providerRequestId?: string;
+  /** Dev mode only: the provider's own error text, cleaned and short; for the log only. */
+  readonly providerMessage?: string;
 
   constructor(
     readonly kind: FailureKind,
@@ -195,6 +222,7 @@ export class ProviderFailure extends AIProviderError {
       details.providerRequestId && REQUEST_ID.test(details.providerRequestId)
         ? details.providerRequestId
         : undefined;
+    this.providerMessage = providerMessageOf(details.providerMessage);
   }
 }
 

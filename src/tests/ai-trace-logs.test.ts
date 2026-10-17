@@ -13,7 +13,7 @@ import { prisma } from '../db/prisma';
 import { getCatalogProvider, recommendedModel } from '../contracts/aiCatalog';
 import { processEmailJob } from '../jobs/emailProcessingJob';
 import * as aiPipeline from '../services/ai/pipeline';
-import { TerminalAIError } from '../services/ai/errors';
+import { providerMessageOf, TerminalAIError } from '../services/ai/errors';
 import { runOperation } from '../services/ai/operations';
 import { classifyAnthropicError } from '../services/ai/providers/anthropic';
 import { classifyOpenAIError } from '../services/ai/providers/openai';
@@ -98,6 +98,53 @@ afterAll(async () => {
   await prisma.user.deleteMany({ where: { email: EMAIL } });
 });
 
+describe("the provider's own error text, in dev mode only", () => {
+  const KEY = 'AIzaSyD4kQ9xLm2Pz7Rt8Vb3Nw6Yc1Hf5Gj0Ks';
+
+  it("logs Google's message on a failed try, with the key and quoted text masked", async () => {
+    vi.stubEnv('APP_MODE', 'dev');
+    try {
+      const emailId = await newEmail();
+      generateContent.mockRejectedValueOnce(
+        new ApiError({
+          status: 503,
+          message: JSON.stringify({
+            error: {
+              message: `The model is overloaded.\n Key ${KEY} got "${SENTINEL} quoted" back.`,
+              status: 'UNAVAILABLE',
+            },
+          }),
+        }),
+      );
+      await processEmailJob(job(emailId));
+      expect(only('ai_call_failed')).toMatchObject({
+        level: 'warn',
+        providerCode: 'UNAVAILABLE',
+        providerMessage: 'The model is overloaded. Key [redacted] got […] back.',
+      });
+      expect(JSON.stringify(lines)).not.toContain(KEY);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('keeps one short line and drops it outside dev mode', () => {
+    vi.stubEnv('APP_MODE', 'dev');
+    try {
+      expect(providerMessageOf('  ')).toBeUndefined();
+      expect(providerMessageOf('quota exceeded for generate_content_free_tier_requests')).toBe(
+        'quota exceeded for generate_content_free_tier_requests',
+      );
+      const long = providerMessageOf('word '.repeat(100)) ?? '';
+      expect(long).toHaveLength(300);
+      expect(long.endsWith('…')).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(providerMessageOf('The model is overloaded.')).toBeUndefined();
+  });
+});
+
 describe("one mail's AI tries in the log", () => {
   it('shows every try of a mail with its duration and result, and the pause it started', async () => {
     const emailId = await newEmail();
@@ -131,6 +178,8 @@ describe("one mail's AI tries in the log", () => {
       result: 'paused',
       resumesAt: expect.stringMatching(ISO_UTC),
     });
+    // Outside dev mode the provider's own text is never logged.
+    expect(failed).not.toHaveProperty('providerMessage');
     expect(trace[4]).toMatchObject({ durationMs: expect.any(Number) });
     expect(only('ai_paused')).toMatchObject({
       userId,

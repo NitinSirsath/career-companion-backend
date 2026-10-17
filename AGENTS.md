@@ -13,7 +13,7 @@ npm test   (runs `vitest run`)
 ## Logs
 
 - Use `logEvent`, `logWarn`, `logError` and `logDebug` from `src/utils/log.ts`. Raw `console.*` fails lint.
-- Log events, not data: IDs, counts and outcomes. Never API responses, request bodies, email content, keys or tokens.
+- Log events, not data: IDs, counts and outcomes. Never API responses, request bodies, email content, keys or tokens. One exception: in dev mode, a failed AI call logs the provider's error text cleaned by `providerMessageOf` (`src/services/ai/errors.ts`).
 - On a failure, pass the error as the third argument of `logError`, so the line shows what broke and where.
 - Temporary debugging: `logDebug` (shown only with `LOG_LEVEL=debug`) or a file in the git-ignored `scratch/` folder. Never commit a `console.log`.
 

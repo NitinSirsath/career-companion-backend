@@ -13,6 +13,12 @@ const BILLING_CODES = ['insufficient_quota', 'billing_not_active', 'billing_hard
 /** OpenAI's short server errors and a conflict (409): busy, so the mail waits and uses no try. */
 const BUSY_STATUSES = [409, 500, 502, 503, 504];
 
+/** The text of OpenAI's error body (`{ error: { message } }`); cleaned by ProviderFailure. */
+function errorText(err: APIError): string | undefined {
+  const body = err.error as { message?: unknown } | undefined;
+  return typeof body?.message === 'string' ? body.message : undefined;
+}
+
 /**
  * OpenAI-compatible error mapping (plan §3.6). Starting table; each row must be confirmed with a
  * real key before the provider is offered in production. Unrecognized → no answer in time.
@@ -34,6 +40,7 @@ export function classifyOpenAIError(err: unknown): ProviderFailure {
     providerCode: code ?? undefined,
     retryAfterMs: retryAfterMs(err.headers),
     providerRequestId: err.requestID ?? undefined,
+    providerMessage: errorText(err),
   };
   if (status === 401) return new ProviderFailure('KEY_REJECTED', details);
   if (status === 403 || (code && BILLING_CODES.includes(code)))
