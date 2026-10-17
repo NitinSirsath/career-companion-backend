@@ -37,6 +37,20 @@ const isRunningTest = (
   emailId: string | undefined,
 ) => emailId !== undefined && pause.testEmailId === emailId && pause.testResult === null;
 
+/** The running pause that stops a call of this model now (the running test mail passes its own). */
+export async function blockingPause(
+  db: Prisma.TransactionClient,
+  call: { userId: string; model: string; emailId?: string },
+  now: Date,
+): Promise<AIModelPause | null> {
+  const pause = await db.aIModelPause.findUnique({
+    where: { userId_model: { userId: call.userId, model: call.model } },
+  });
+  return pause?.resumesAt && pause.resumesAt > now && !isRunningTest(pause, call.emailId)
+    ? pause
+    : null;
+}
+
 export function nextUtcMidnight(now: Date): Date {
   const next = new Date(now);
   next.setUTCHours(24, 0, 0, 0);
@@ -93,11 +107,8 @@ export async function reserveUserCall(
   const { userId } = call;
   const limit = userDailyCallLimit();
   if (limit === 0) throw new AIAccessError('PAUSED');
-  const pause = await tx.aIModelPause.findUnique({
-    where: { userId_model: { userId, model: call.model } },
-  });
-  if (pause?.resumesAt && pause.resumesAt > now && !isRunningTest(pause, call.emailId))
-    throw new AIAccessError(pause.reason, pause.resumesAt, readFailure(pause.lastFailure));
+  const pause = await blockingPause(tx, call, now);
+  if (pause) throw new AIAccessError(pause.reason, pause.resumesAt, readFailure(pause.lastFailure));
   const day = utcDay(now);
   await tx.aIUsageDay.upsert({
     where: { userId_day: { userId, day } },
