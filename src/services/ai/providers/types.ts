@@ -32,8 +32,10 @@ export type VerifyResult =
       kind: 'KEY_REJECTED' | 'ACCOUNT_OR_BILLING' | 'MODEL_UNAVAILABLE';
       modelId?: string;
       failure?: AIFailure;
+      /** Dev mode only: the provider's own error text, cleaned and short; for the log only. */
+      providerMessage?: string;
     }
-  | { result: 'INCONCLUSIVE'; failure?: AIFailure };
+  | { result: 'INCONCLUSIVE'; failure?: AIFailure; providerMessage?: string };
 
 export interface ProviderClient {
   /**
