@@ -162,7 +162,7 @@ describe('a mail that waits for AI', () => {
     expect(access.pauses).toEqual([
       {
         model: DETAILED,
-        roles: ['fast', 'detailed']
+        roles: ['fast', 'detailed'],
         reason: 'PROVIDER_BUSY',
         resumesAt: iso(pause!.resumesAt),
         failure: access.failure,
