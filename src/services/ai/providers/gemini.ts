@@ -73,11 +73,13 @@ type GoogleErrorDetail = {
 };
 
 /**
- * Reads the Google API error body (`{ error: { status, details } }`, carried as the SDK error's
- * message) in memory. Only allowlisted tokens leave this function; the text is never kept.
+ * Reads the Google API error body (`{ error: { status, message, details } }`, carried as the SDK
+ * error's message) in memory. Its message leaves only through ProviderFailure, which keeps it
+ * cleaned in dev mode and drops it otherwise.
  */
 function googleErrorBody(err: unknown): {
   status?: string;
+  message?: string;
   reason?: string;
   retryAfterMs?: number;
   quotaScope?: QuotaScope;
@@ -86,7 +88,7 @@ function googleErrorBody(err: unknown): {
   try {
     const message = err instanceof Error ? err.message : '';
     const body = JSON.parse(message) as {
-      error?: { status?: unknown; details?: GoogleErrorDetail[] };
+      error?: { status?: unknown; message?: unknown; details?: GoogleErrorDetail[] };
     };
     const details = Array.isArray(body.error?.details) ? body.error.details : [];
     const reason = details.find((d) => typeof d.reason === 'string')?.reason as string | undefined;
@@ -99,6 +101,7 @@ function googleErrorBody(err: unknown): {
       .filter((id): id is string => typeof id === 'string');
     return {
       status: typeof body.error?.status === 'string' ? body.error.status : undefined,
+      message: typeof body.error?.message === 'string' ? body.error.message : undefined,
       reason,
       retryAfterMs: Number.isFinite(seconds) ? Math.round(seconds * 1000) : undefined,
       quotaScope: quotaScope(quotaIds),
@@ -145,6 +148,7 @@ export function classifyGeminiError(err: unknown): ProviderFailure {
     quotaScope: body.quotaScope,
     freeTier: body.freeTier,
     failureCause: status === 504 ? 'PROVIDER_DEADLINE' : 'PROVIDER_ANSWER',
+    providerMessage: body.message,
   };
   if (body.reason === 'API_KEY_INVALID' || status === 401)
     return new ProviderFailure('KEY_REJECTED', details);
