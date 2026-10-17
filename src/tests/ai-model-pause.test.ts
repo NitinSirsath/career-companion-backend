@@ -199,6 +199,14 @@ describe('each model pauses on its own', () => {
     expect(await pauseOf(userId, DETAILED)).toMatchObject({ reason: 'PROVIDER_BUSY' });
   });
 
+  it('a call that works confirms a key the key check could not confirm', async () => {
+    await configureAI(userId, { verifiedAt: null });
+    await processEmailJob(job(await newEmail(1, 'Newsletter')));
+    expect(
+      (await prisma.aIConfiguration.findUniqueOrThrow({ where: { userId } })).verifiedAt,
+    ).toBeInstanceOf(Date);
+  });
+
   it('with one model for both steps, a mail waits for it', async () => {
     await configureAI(userId, { fastModel: DETAILED });
     await setPause(userId, DETAILED, { resumesAt: new Date(Date.now() + 10 * 60_000) });

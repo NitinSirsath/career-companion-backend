@@ -142,6 +142,26 @@ function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql):
     )`;
 }
 
+/**
+ * When the user replied to each of these emails, for those that are their conversation's request
+ * and stand REPLIED (the same rule as the mail list).
+ */
+export async function repliedRequests(
+  db: Db,
+  userId: string,
+  emails: { id: string; threadId: string | null }[],
+): Promise<Map<string, Date>> {
+  const keys = [...new Set(emails.map((email) => email.threadId ?? email.id))];
+  const rows = (await Promise.all(keys.map((key) => conversationRows(db, userId, { key })))).flat();
+  return new Map(
+    rows.flatMap((row) =>
+      row.requestState === 'REPLIED' && row.requestEmailId && row.lastSentAt
+        ? [[row.requestEmailId, row.lastSentAt] as const]
+        : [],
+    ),
+  );
+}
+
 /** One row per conversation, filtered, sorted and paged. */
 export async function conversationRows(
   db: Db,
