@@ -14,6 +14,12 @@ describe('action deadlines anchored to the email', () => {
     'Nov 20, 2026',
     '2026-11-20T17:00:00',
     ' BY   NOV 20 ',
+    'Nov 20 at 5 PM',
+    'Nov 20 at 5 p.m.',
+    'Nov 20, 11:59 PM IST',
+    'Friday, November 20, 5:30pm (IST)',
+    '20 November 2026 17:00',
+    'by Nov 20, 2026 at 5:30 pm',
   ])('accepts %s as a calendar date', (text) => {
     expect(parseActionDeadline(text, received)).toEqual({
       deadline: new Date('2026-11-20T00:00:00Z'),
@@ -41,7 +47,6 @@ describe('action deadlines anchored to the email', () => {
     '11.10.2026',
     'November',
     '2026',
-    'Nov 20 at 5 PM',
     'Nov 32',
     '20 de noviembre',
     '',
@@ -68,6 +73,29 @@ describe('action deadlines anchored to the email', () => {
     expect(parseActionDeadline('Nov 20, 2024', null).deadline?.toISOString()).toBe(
       '2024-11-20T00:00:00.000Z',
     );
+  });
+  it('reads the date of a deadline written with a time (17 Oct 2026 full-flow test)', () => {
+    expect(
+      parseActionDeadline(
+        'Friday, 30 October 2026, 11:59 PM IST',
+        new Date('2026-10-17T09:24:00Z'),
+      ),
+    ).toEqual({ deadline: new Date('2026-10-30T00:00:00Z'), precision: 'DATE', reason: null });
+  });
+  it.each([
+    ['30 October 2026, 25:00', 'INVALID_DATE'],
+    ['Nov 20, 17:60', 'INVALID_DATE'],
+    ['Nov 20, 13 PM', 'INVALID_DATE'],
+    ['Nov 20 at 0 am', 'INVALID_DATE'],
+    ['30 October 2026, 11', 'UNCLEAR'],
+    ['Nov 20 at noon', 'UNCLEAR'],
+    ['Thursday, November 20, 5 PM', 'WEEKDAY_MISMATCH'],
+  ])('rejects the date and time %s as %s', (text, reason) => {
+    expect(parseActionDeadline(text, received)).toEqual({
+      deadline: null,
+      precision: null,
+      reason,
+    });
   });
   it.each([
     ['2026-11-20T17:00:00Z', '2026-11-20T17:00:00.000Z'],

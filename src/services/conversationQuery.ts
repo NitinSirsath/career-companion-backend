@@ -143,23 +143,42 @@ function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql):
 }
 
 /**
- * When the user replied to each of these emails, for those that are their conversation's request
- * and stand REPLIED (the same rule as the mail list).
+ * When the user replied to each of these emails' requests: the newest message they sent in the
+ * thread after the request arrived and before the conversation's next request did. For the newest
+ * request that is the mail list's rule; an earlier one keeps the reply it got. A request the user
+ * reopened after that reply has none.
  */
 export async function repliedRequests(
   db: Db,
   userId: string,
   emails: { id: string; threadId: string | null }[],
 ): Promise<Map<string, Date>> {
+  if (!emails.length) return new Map();
   const keys = [...new Set(emails.map((email) => email.threadId ?? email.id))];
-  const rows = (await Promise.all(keys.map((key) => conversationRows(db, userId, { key })))).flat();
-  return new Map(
-    rows.flatMap((row) =>
-      row.requestState === 'REPLIED' && row.requestEmailId && row.lastSentAt
-        ? [[row.requestEmailId, row.lastSentAt] as const]
-        : [],
-    ),
-  );
+  const rows = await db.$queryRaw<{ id: string; repliedAt: Date }[]>`
+    WITH requests AS (
+      SELECT e.id, e."threadId", e."receivedAt", e."requestUserState", e."requestUserStateAt",
+             LEAD(e."receivedAt") OVER (
+               PARTITION BY COALESCE(e."threadId", e.id::text)
+               ORDER BY e."receivedAt" ASC NULLS FIRST, e.id ASC
+             ) AS "nextRequestAt"
+      FROM emails e
+      JOIN ai_processing_results r ON r."emailId" = e.id
+      WHERE e."userId" = ${userId}::uuid AND e."relevanceState" = 'RELEVANT'
+        AND COALESCE(e."threadId", e.id::text) = ANY(${keys}::text[])
+        AND (COALESCE(r."actionRequired", FALSE) OR COALESCE(r."followUpRequired", FALSE))
+    )
+    SELECT q.id, MAX(o."sentAt") AS "repliedAt"
+    FROM requests q
+    JOIN outgoing_emails o ON o."userId" = ${userId}::uuid AND o."threadId" = q."threadId"
+      AND o."sentAt" > q."receivedAt"
+      AND (q."nextRequestAt" IS NULL OR o."sentAt" < q."nextRequestAt")
+    WHERE q.id = ANY(${emails.map((email) => email.id)}::uuid[])
+    GROUP BY q.id, q."requestUserState", q."requestUserStateAt"
+    HAVING NOT COALESCE(
+      q."requestUserState" = 'OPEN' AND q."requestUserStateAt" > MAX(o."sentAt"), FALSE
+    )`;
+  return new Map(rows.map((row) => [row.id, row.repliedAt]));
 }
 
 /** One row per conversation, filtered, sorted and paged. */

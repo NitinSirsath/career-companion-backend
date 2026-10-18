@@ -394,6 +394,54 @@ describe('answering a request', () => {
     expect(await of(mail.id)).toMatchObject({ repliedAt: null });
   });
 
+  it('keeps an earlier request replied when newer requests follow in the thread', async () => {
+    // As in the 17 Oct 2026 full-flow test: invite, reply, a new task, an offer, reply.
+    const invite = await jobMail('thread-b', at(1), {
+      category: 'INTERVIEW',
+      actionRequired: true,
+      requestedAction: 'Confirm the time',
+    });
+    const task = await jobMail('thread-b', at(3), {
+      category: 'INTERVIEW',
+      actionRequired: true,
+      requestedAction: 'Send a case study',
+    });
+    const offer = await jobMail('thread-b', at(4), {
+      category: 'OFFER',
+      actionRequired: true,
+      requestedAction: 'Let them know your decision',
+    });
+    const applicationId = LinkConversationResponseSchema.parse((await link('thread-b')).body)
+      .application.id;
+    await sent('thread-b', at(2));
+    await sent('thread-b', at(5));
+    const actions = async () => {
+      const res = await request(app)
+        .get(`/api/applications/${applicationId}/actions`)
+        .set(as(OWNER));
+      expect(res.status).toBe(200);
+      return res.body.items as { emailId: string; status: string; repliedAt: string | null }[];
+    };
+    const repliedAt = async (emailId: string) =>
+      (await actions()).find((a) => a.emailId === emailId)?.repliedAt;
+
+    expect(await repliedAt(invite.id)).toBe(at(2).toISOString());
+    expect(await repliedAt(task.id)).toBeNull(); // no message from the user before the offer came
+    expect(await repliedAt(offer.id)).toBe(at(5).toISOString());
+    expect((await list())[0].request).toMatchObject({
+      emailId: offer.id,
+      state: 'REPLIED',
+      repliedAt: at(5).toISOString(),
+    });
+
+    // Reopened by the user after that reply, while it was still the newest request.
+    await prisma.email.update({
+      where: { id: invite.id },
+      data: { requestUserState: 'OPEN', requestUserStateAt: at(2, 12) },
+    });
+    expect(await repliedAt(invite.id)).toBeNull();
+  });
+
   it('follows an action finished elsewhere', async () => {
     const mail = await jobMail('thread-e', at(1), { actionRequired: true });
     await link('thread-e');
