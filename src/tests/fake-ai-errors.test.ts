@@ -10,6 +10,7 @@ import {
   FakeAiError,
   blockProviderRequests,
   fakeAiAnswers,
+  fakesForOpenAILibrary,
 } from './helpers/fakeAiErrors';
 import { processEmailJob } from '../jobs/emailProcessingJob';
 import { CLASSIFICATION_CONTRACT } from '../services/ai/contracts';
@@ -34,10 +35,17 @@ vi.mock('@google/genai', async (importOriginal) => ({
 }));
 vi.mock('openai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('openai')>();
-  const OpenAIMock = vi.fn().mockImplementation(function () {
+  // The library serves OpenAI and OpenRouter: each client answers as the provider at its address.
+  const OpenAIMock = vi.fn().mockImplementation(function (options: { baseURL: string }) {
     return {
-      chat: { completions: { create: (body: { model: string }) => answers.openai.create(body) } },
+      chat: {
+        completions: {
+          create: (body: { model: string }) =>
+            fakesForOpenAILibrary(answers, options.baseURL).create(body),
+        },
+      },
       models: { retrieve: (id: string) => answers.openai.retrieve(id) },
+      get: (path: string) => answers.openrouter.get(path),
     };
   });
   return { ...actual, default: OpenAIMock, OpenAI: OpenAIMock };
@@ -85,36 +93,52 @@ async function failureOf(fault: FakeAiError, providerId: string) {
   return pending;
 }
 
-/** The kind each fault gets from today's real error handling: Gemini, OpenAI, Anthropic. */
-const KINDS_TODAY: Record<FakeAiError, [string, string, string]> = {
-  busy: ['PROVIDER_BUSY', 'PROVIDER_BUSY', 'PROVIDER_BUSY'],
-  'no-answer': ['OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
-  // A 504 is Google's own deadline; for OpenAI and Anthropic it is busy.
-  deadline: ['OUTCOME_UNKNOWN', 'PROVIDER_BUSY', 'PROVIDER_BUSY'],
-  'rate-minute': ['RATE_LIMITED', 'RATE_LIMITED', 'RATE_LIMITED'],
-  'rate-day': ['RATE_LIMITED', 'RATE_LIMITED', 'RATE_LIMITED'],
-  key: ['KEY_REJECTED', 'KEY_REJECTED', 'KEY_REJECTED'],
-  billing: ['ACCOUNT_OR_BILLING', 'ACCOUNT_OR_BILLING', 'ACCOUNT_OR_BILLING'],
-  'model-gone': ['MODEL_UNAVAILABLE', 'MODEL_UNAVAILABLE', 'MODEL_UNAVAILABLE'],
-  unusable: ['INVALID_OUTPUT', 'INVALID_OUTPUT', 'INVALID_OUTPUT'],
-  'no-connection': ['PROVIDER_BUSY', 'PROVIDER_BUSY', 'PROVIDER_BUSY'],
-  'line-dropped': ['OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
-  'server-error': ['PROVIDER_BUSY', 'PROVIDER_BUSY', 'PROVIDER_BUSY'],
+type PerProvider = readonly [string, string, string, string];
+/** The kind each fault gets from today's real error handling: Gemini, OpenAI, Anthropic, OpenRouter. */
+const KINDS_TODAY: Record<FakeAiError, PerProvider> = {
+  busy: ['PROVIDER_BUSY', 'PROVIDER_BUSY', 'PROVIDER_BUSY', 'PROVIDER_BUSY'],
+  'no-answer': ['OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
+  // A 504 is Google's own deadline; for OpenAI and Anthropic it is busy. OpenRouter answers 408.
+  deadline: ['OUTCOME_UNKNOWN', 'PROVIDER_BUSY', 'PROVIDER_BUSY', 'OUTCOME_UNKNOWN'],
+  'rate-minute': ['RATE_LIMITED', 'RATE_LIMITED', 'RATE_LIMITED', 'RATE_LIMITED'],
+  'rate-day': ['RATE_LIMITED', 'RATE_LIMITED', 'RATE_LIMITED', 'RATE_LIMITED'],
+  key: ['KEY_REJECTED', 'KEY_REJECTED', 'KEY_REJECTED', 'KEY_REJECTED'],
+  billing: ['ACCOUNT_OR_BILLING', 'ACCOUNT_OR_BILLING', 'ACCOUNT_OR_BILLING', 'ACCOUNT_OR_BILLING'],
+  'model-gone': [
+    'MODEL_UNAVAILABLE',
+    'MODEL_UNAVAILABLE',
+    'MODEL_UNAVAILABLE',
+    'MODEL_UNAVAILABLE',
+  ],
+  unusable: ['INVALID_OUTPUT', 'INVALID_OUTPUT', 'INVALID_OUTPUT', 'INVALID_OUTPUT'],
+  'no-connection': ['PROVIDER_BUSY', 'PROVIDER_BUSY', 'PROVIDER_BUSY', 'PROVIDER_BUSY'],
+  'line-dropped': ['OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN', 'OUTCOME_UNKNOWN'],
+  'server-error': ['PROVIDER_BUSY', 'PROVIDER_BUSY', 'PROVIDER_BUSY', 'PROVIDER_BUSY'],
 };
-const answer = ['PROVIDER_ANSWER', 'PROVIDER_ANSWER', 'PROVIDER_ANSWER'] as const;
-/** Where each fault failed, as the adapters sort it: Gemini, OpenAI, Anthropic. */
-const CAUSES: Record<FakeAiError, readonly [string, string, string]> = {
+const answer = [
+  'PROVIDER_ANSWER',
+  'PROVIDER_ANSWER',
+  'PROVIDER_ANSWER',
+  'PROVIDER_ANSWER',
+] as const;
+/** Where each fault failed, as the adapters sort it: Gemini, OpenAI, Anthropic, OpenRouter. */
+const CAUSES: Record<FakeAiError, PerProvider> = {
   busy: answer,
-  'no-answer': ['TIMEOUT', 'TIMEOUT', 'TIMEOUT'],
-  deadline: ['PROVIDER_DEADLINE', 'PROVIDER_ANSWER', 'PROVIDER_ANSWER'],
+  'no-answer': ['TIMEOUT', 'TIMEOUT', 'TIMEOUT', 'TIMEOUT'],
+  deadline: ['PROVIDER_DEADLINE', 'PROVIDER_ANSWER', 'PROVIDER_ANSWER', 'PROVIDER_ANSWER'],
   'rate-minute': answer,
   'rate-day': answer,
   key: answer,
   billing: answer,
   'model-gone': answer,
   unusable: answer,
-  'no-connection': ['NETWORK', 'NETWORK', 'NETWORK'],
-  'line-dropped': ['NETWORK_AFTER_SEND', 'NETWORK_AFTER_SEND', 'NETWORK_AFTER_SEND'],
+  'no-connection': ['NETWORK', 'NETWORK', 'NETWORK', 'NETWORK'],
+  'line-dropped': [
+    'NETWORK_AFTER_SEND',
+    'NETWORK_AFTER_SEND',
+    'NETWORK_AFTER_SEND',
+    'NETWORK_AFTER_SEND',
+  ],
   'server-error': answer,
 };
 const NETWORK_CODES: Partial<Record<FakeAiError, string>> = {
@@ -156,6 +180,26 @@ describe('each fake AI error through the real adapter and error handling', () =>
     'Google %s answers %i %s, as the app reads it',
     async (fault, status, providerCode, retryAfterMs) => {
       expect(await failureOf(fault, 'gemini')).toMatchObject({
+        status,
+        providerCode,
+        retryAfterMs,
+      });
+    },
+  );
+
+  it.each([
+    ['busy', 503, 'provider_overloaded', undefined],
+    ['deadline', 408, undefined, undefined],
+    ['rate-minute', 429, 'rate_limit_exceeded', 10_000],
+    ['rate-day', 429, 'rate_limit_exceeded', undefined],
+    ['key', 401, undefined, undefined],
+    ['billing', 403, 'openrouter_key_limit', undefined],
+    ['model-gone', 503, undefined, undefined],
+    ['server-error', 500, undefined, undefined],
+  ] as const)(
+    'OpenRouter %s answers %i %s, as the app reads it',
+    async (fault, status, providerCode, retryAfterMs) => {
+      expect(await failureOf(fault, 'openrouter')).toMatchObject({
         status,
         providerCode,
         retryAfterMs,
@@ -359,6 +403,7 @@ describe('the fake-error command never runs outside dev mode and sends nothing',
         gemini: { call: 'PROVIDER_BUSY', check: 'INCONCLUSIVE' },
         openai: { call: 'PROVIDER_BUSY', check: 'INCONCLUSIVE' },
         anthropic: { call: 'PROVIDER_BUSY', check: 'INCONCLUSIVE' },
+        openrouter: { call: 'PROVIDER_BUSY', check: 'INCONCLUSIVE' },
       },
       sent: [],
     });
@@ -371,6 +416,7 @@ describe('the fake-error command never runs outside dev mode and sends nothing',
       'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
       new URL('https://api.openai.com/v1/chat/completions'),
       new Request('https://api.anthropic.com/v1/messages'),
+      'https://openrouter.ai/api/v1/key',
     ])
       await expect(guarded(url)).rejects.toThrow('was blocked');
     expect(send).not.toHaveBeenCalled();
