@@ -509,12 +509,25 @@ export async function resolveEmailMatch(
     MatchConfirmationSource.USER_CONFIRMED,
   );
 }
+/**
+ * A mail typed as an interview, or one with an interview date. The AI also names the stage of an
+ * assessment ("Assessment") or of a recruiter's first call ("Initial Screening"), so a stage name
+ * alone does not make those an interview.
+ */
+function isInterview(aiResult: AIProcessingResult): boolean {
+  if (aiResult.interviewDate || aiResult.category === 'INTERVIEW') return true;
+  return (
+    !!aiResult.interviewStage &&
+    aiResult.category !== 'ASSESSMENT' &&
+    aiResult.category !== 'RECRUITER'
+  );
+}
+
 export function inferState(aiResult: AIProcessingResult): ApplicationStatus | null {
   if (aiResult.rejectionInfo || aiResult.category === 'REJECTION')
     return ApplicationStatus.REJECTED;
   if (aiResult.offerInfo || aiResult.category === 'OFFER') return ApplicationStatus.OFFER;
-  if (aiResult.interviewStage || aiResult.interviewDate || aiResult.category === 'INTERVIEW')
-    return ApplicationStatus.INTERVIEW;
+  if (isInterview(aiResult)) return ApplicationStatus.INTERVIEW;
   if (aiResult.assessmentInfo || aiResult.category === 'ASSESSMENT')
     return ApplicationStatus.ASSESSMENT;
   if (aiResult.recruiterName || aiResult.category === 'RECRUITER')
