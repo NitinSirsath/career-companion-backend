@@ -13,6 +13,18 @@ AI_EVAL_API_KEY=<key> npm run ai:eval -- --provider <gemini|openai|anthropic|ope
 
 Never put a real key in a file. Results and the certification checklist live in the docs repo: `docs/ai/provider-evaluation.md`.
 
+## Before adding or keeping an OpenRouter model
+
+```bash
+npm run ai:openrouter-models -- [candidate model IDs…]
+```
+
+- It checks the catalog's OpenRouter models, and any candidates, against OpenRouter's public lists (`/models`, `/endpoints/zdr`, `/providers`). No key and no cost. It needs the network, so CI does not run it.
+- For each model it prints: listed or not, the dated slug and expiry date, whether the model can think, and its zero-retention servers with JSON output, each with country and price. It marks the servers that take our full request (`requiredParameters` in `src/services/ai/providers/openrouter.ts`).
+- It warns when fewer than 3 servers take the request, OpenRouter set an expiry date (it suggests `retiresOn`), the catalog's thinking setting does not fit the model, a server has under 32k context or 4,096 output tokens, or the dated slug is not the ID plus a date.
+- Exit 1: a model is not listed, no server takes the request, or an ID is an alias (`~`) or a variant (`:`). Exit 2: a network error or an unexpected answer.
+- Then add the model to the catalog with `evaluation: null` and run the evaluation twice. The steps are in the docs repo: `docs/ai/provider-evaluation.md`, "Changing an OpenRouter model".
+
 Evaluation reports distinguish `PASS`, `FAIL` and `INCONCLUSIVE` (exit 0/1/2).
 Quota, busy and access refusals are counted separately and excluded from quality and latency;
 invalid output and unknown outcomes still fail quality. An unanswered call ends

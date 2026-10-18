@@ -20,7 +20,8 @@
     "db:generate": "prisma generate",
     "db:seed": "prisma db seed",
     "db:reset": "prisma migrate reset",
-    "ai:eval": "ts-node-dev --transpile-only src/eval/ai/run.ts"
+    "ai:eval": "ts-node-dev --transpile-only src/eval/ai/run.ts",
+    "ai:openrouter-models": "node scripts/openrouter-models.cjs"
   },
   "repository": {
     "type": "git",
