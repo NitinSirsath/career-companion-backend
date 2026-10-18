@@ -1,9 +1,8 @@
-import OpenAI, { APIConnectionError, APIConnectionTimeoutError, APIError } from 'openai';
 import type { CatalogProvider } from '../../../contracts/aiCatalog';
 import { ProviderFailure } from '../errors';
+import { errorMessageOf, httpAnswerOf, openaiLibraryClient, usableReply } from './chatCompletions';
 import { retryAfterMs } from './headers';
-import { nullsToAbsent, strictJsonSchema } from './jsonSchema';
-import { droppedConnection, libraryConnectionFailure, unansweredFailure } from './network';
+import { strictJsonSchema } from './jsonSchema';
 import { ProviderClient, VERIFY_TIMEOUT_MS } from './types';
 import { checkModels } from './verify';
 
@@ -13,34 +12,21 @@ const BILLING_CODES = ['insufficient_quota', 'billing_not_active', 'billing_hard
 /** OpenAI's short server errors and a conflict (409): busy, so the mail waits and uses no try. */
 const BUSY_STATUSES = [409, 500, 502, 503, 504];
 
-/** The text of OpenAI's error body (`{ error: { message } }`); cleaned by ProviderFailure. */
-function errorText(err: APIError): string | undefined {
-  const body = err.error as { message?: unknown } | undefined;
-  return typeof body?.message === 'string' ? body.message : undefined;
-}
-
 /**
  * OpenAI-compatible error mapping (plan §3.6). Starting table; each row must be confirmed with a
  * real key before the provider is offered in production. Unrecognized → no answer in time.
  */
 export function classifyOpenAIError(err: unknown): ProviderFailure {
-  if (err instanceof ProviderFailure) return err;
-  if (err instanceof APIConnectionError)
-    return unansweredFailure(
-      libraryConnectionFailure(err, err instanceof APIConnectionTimeoutError),
-    );
-  const dropped = droppedConnection(err);
-  if (dropped) return unansweredFailure(dropped);
-  if (!(err instanceof APIError) || typeof err.status !== 'number')
-    return new ProviderFailure('OUTCOME_UNKNOWN', { failureCause: 'UNCLASSIFIED' });
-  const status = err.status;
-  const code = typeof err.code === 'string' ? err.code : err.type;
+  const answer = httpAnswerOf(err);
+  if (answer instanceof ProviderFailure) return answer;
+  const status = answer.status;
+  const code = typeof answer.code === 'string' ? answer.code : answer.type;
   const details = {
     status,
     providerCode: code ?? undefined,
-    retryAfterMs: retryAfterMs(err.headers),
-    providerRequestId: err.requestID ?? undefined,
-    providerMessage: errorText(err),
+    retryAfterMs: retryAfterMs(answer.headers),
+    providerRequestId: answer.requestID ?? undefined,
+    providerMessage: errorMessageOf(answer.error),
   };
   if (status === 401) return new ProviderFailure('KEY_REJECTED', details);
   if (status === 403 || (code && BILLING_CODES.includes(code)))
@@ -53,22 +39,8 @@ export function classifyOpenAIError(err: unknown): ProviderFailure {
   return new ProviderFailure('INVALID_REQUEST', details);
 }
 
-/** Why an unusable answer stopped early (for example `length`), or that the model refused. */
-function stoppedEarly(choice: OpenAI.ChatCompletion.Choice | undefined): string | undefined {
-  if (choice?.message.refusal) return 'refusal';
-  return choice?.finish_reason === 'stop' ? undefined : choice?.finish_reason;
-}
-
 export function createOpenAIClient(provider: CatalogProvider, apiKey: string): ProviderClient {
-  // No hidden retries (a retry could repeat a charged call). The endpoint is the catalog's, and
-  // organization/project are never taken from the server's environment.
-  const client = new OpenAI({
-    apiKey,
-    baseURL: provider.baseUrl,
-    maxRetries: 0,
-    organization: null,
-    project: null,
-  });
+  const client = openaiLibraryClient(provider, apiKey);
   return {
     async generateStructured({ contract, model, input }) {
       // Built before the call: an error in our own code is never taken for the provider's answer.
@@ -103,22 +75,7 @@ export function createOpenAIClient(provider: CatalogProvider, apiKey: string): P
       } catch (err) {
         throw classifyOpenAIError(err);
       }
-      const usage = {
-        inputTokens: completion.usage?.prompt_tokens ?? null,
-        outputTokens: completion.usage?.completion_tokens ?? null,
-      };
-      const choice = completion.choices[0];
-      const text = choice?.message?.content;
-      if (!choice || choice.finish_reason !== 'stop' || choice.message.refusal || !text)
-        throw new ProviderFailure('INVALID_OUTPUT', { usage, stopReason: stoppedEarly(choice) });
-      try {
-        return { data: nullsToAbsent(JSON.parse(text), contract.schema), usage };
-      } catch {
-        throw new ProviderFailure('INVALID_OUTPUT', {
-          message: 'AI provider returned invalid JSON',
-          usage,
-        });
-      }
+      return usableReply(completion, contract.schema);
     },
 
     verifyModels: (modelIds) =>
