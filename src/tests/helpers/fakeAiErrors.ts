@@ -18,17 +18,21 @@ import {
   APIConnectionTimeoutError as AnthropicTimeoutError,
   APIError as AnthropicError,
 } from '@anthropic-ai/sdk';
-import { AI_CATALOG, AIProviderId } from '../../contracts/aiCatalog';
+import { AI_CATALOG, AIProviderId, getCatalogProvider } from '../../contracts/aiCatalog';
+import { requiredParameters } from '../../services/ai/providers/openrouter';
 
 export const FAKE_AI_ERRORS = {
-  busy: 'The provider is busy: Google 503 UNAVAILABLE, OpenAI 503, Anthropic 529 overloaded.',
+  busy: 'The provider is busy: Google 503 UNAVAILABLE, OpenAI 503, Anthropic 529 overloaded, OpenRouter 503 provider_overloaded.',
   'no-answer': 'No answer in time: the AI library stops waiting (here after 5 seconds).',
-  deadline: "The provider's own deadline passed: Google 504 DEADLINE_EXCEEDED, 504 for the others.",
+  deadline:
+    "The provider's own deadline passed: Google 504 DEADLINE_EXCEEDED, OpenRouter 408, 504 for the others.",
   'rate-minute': 'Per-minute limit: 429, and the provider asks to wait 10 seconds.',
   'rate-day': "Daily limit: 429, for Google the free tier's limit per day.",
-  key: 'The API key is rejected: Google 400 API_KEY_INVALID, OpenAI and Anthropic 401.',
-  billing: 'Billing or account: Google 403 SERVICE_DISABLED, OpenAI no quota, Anthropic no credit.',
-  'model-gone': 'The model is not available to this key: 404.',
+  key: 'The API key is rejected: Google 400 API_KEY_INVALID, OpenAI, Anthropic and OpenRouter 401.',
+  billing:
+    'Billing or account: Google 403 SERVICE_DISABLED, OpenAI no quota, Anthropic no credit, OpenRouter key limit reached.',
+  'model-gone':
+    'The model is not available to this key: 404. OpenRouter: no private server takes the request (503).',
   unusable: 'An answer the app cannot use: cut off at the token limit (MAX_TOKENS).',
   'no-connection': 'No connection: the request never left (ENOTFOUND).',
   'line-dropped': 'The connection dropped after the request was sent (ECONNRESET).',
@@ -207,6 +211,40 @@ const ANTHROPIC: Record<HttpFault, HttpAnswer> = {
   'server-error': anthropicError(500, 'api_error', 'Internal server error'),
 };
 
+// ─── OpenRouter: `{ error: { code, message, metadata } }` ───────────────────
+
+const openrouterError = (
+  status: number,
+  message: string,
+  metadata?: object,
+  headers?: Record<string, string>,
+) => ({
+  status,
+  body: { error: { code: status, message, ...(metadata ? { metadata } : {}) } },
+  headers,
+});
+
+const OPENROUTER: Record<HttpFault, HttpAnswer> = {
+  busy: openrouterError(503, 'Provider returned error', { error_type: 'provider_overloaded' }),
+  deadline: openrouterError(408, 'Request timed out'),
+  'rate-minute': openrouterError(
+    429,
+    'Rate limit exceeded',
+    { error_type: 'rate_limit_exceeded' },
+    { 'retry-after': '10' },
+  ),
+  'rate-day': openrouterError(429, 'Rate limit exceeded', { error_type: 'rate_limit_exceeded' }),
+  key: openrouterError(401, 'No auth credentials found'),
+  billing: openrouterError(403, 'Key limit exceeded (total limit).', {
+    limit_source: 'openrouter_key_limit',
+  }),
+  'model-gone': openrouterError(
+    503,
+    'No endpoints found that support the requested parameters and data policy.',
+  ),
+  'server-error': openrouterError(500, 'Internal Server Error'),
+};
+
 // ─── Shared shapes ──────────────────────────────────────────────────────────
 
 /** A JSON answer cut off at the token limit. */
@@ -260,7 +298,12 @@ async function geminiAnswer(fault: FakeAiError, model: string) {
   throw new ApiError({ status, message: JSON.stringify(body) });
 }
 
-async function openaiAnswer(fault: FakeAiError, unusable: () => object) {
+/** OpenAI and OpenRouter both answer through the `openai` library, each with its own error body. */
+async function openaiLibraryAnswer(
+  fault: FakeAiError,
+  unusable: () => object,
+  provider: 'openai' | 'openrouter',
+) {
   if (fault === 'no-answer') {
     await waitForTimeout();
     throw Object.assign(new OpenAITimeoutError(), { cause: aborted() });
@@ -268,10 +311,10 @@ async function openaiAnswer(fault: FakeAiError, unusable: () => object) {
   if (isConnectionFault(fault))
     throw new OpenAIConnectionError({
       message: 'Connection error.',
-      cause: fetchFailed(fault, HOSTS.openai),
+      cause: fetchFailed(fault, HOSTS[provider]),
     });
   if (fault === 'unusable') return unusable();
-  const { status, body, headers } = OPENAI[fault];
+  const { status, body, headers } = (provider === 'openai' ? OPENAI : OPENROUTER)[fault];
   throw OpenAIError.generate(
     status,
     body,
@@ -300,10 +343,55 @@ async function anthropicAnswer(fault: FakeAiError, unusable: () => object) {
   );
 }
 
+/** A chat completion cut off at the token limit, as OpenAI and OpenRouter send it. */
+const cutOffCompletion = (model: string) => ({
+  id: 'chatcmpl-fake',
+  object: 'chat.completion',
+  created: 0,
+  model,
+  choices: [
+    {
+      index: 0,
+      message: { role: 'assistant', content: CUT_OFF_JSON, refusal: null },
+      finish_reason: 'length',
+      logprobs: null,
+    },
+  ],
+  usage: {
+    prompt_tokens: CUT_OFF_USAGE.input,
+    completion_tokens: CUT_OFF_USAGE.output,
+    total_tokens: CUT_OFF_USAGE.input + CUT_OFF_USAGE.output,
+  },
+});
+
+/** Every OpenRouter catalog model, on a private server that takes the whole request. */
+const OPENROUTER_SERVERS = (getCatalogProvider('openrouter')?.models ?? []).map((model) => ({
+  model_id: model.id,
+  supported_parameters: requiredParameters(model),
+}));
+
+/**
+ * OpenRouter's key check reads the key's record (`/key`) and the private servers
+ * (`/endpoints/zdr`). A key over its limit, a model with no server, and a working check are
+ * answers of their own; any other fault is the answer to the first request.
+ */
+async function openrouterGet(fault: FakeAiError, path: string): Promise<object> {
+  if (fault === 'billing' || fault === 'model-gone' || fault === 'unusable') {
+    if (path === '/key') return { data: { limit_remaining: fault === 'billing' ? 0 : null } };
+    const servers =
+      fault === 'model-gone'
+        ? [{ model_id: 'example/retired-model', supported_parameters: [] }]
+        : OPENROUTER_SERVERS;
+    return { data: servers };
+  }
+  return openaiLibraryAnswer(fault, () => ({}), 'openrouter');
+}
+
 /**
  * The fake library calls for one fault: Gemini `models.generateContent`, OpenAI
  * `chat.completions.create` and `models.retrieve`, Anthropic `messages.create` and
- * `models.retrieve`. The key checks use the same calls, so they answer with the fault too.
+ * `models.retrieve`, OpenRouter `chat.completions.create` and `get`. The key checks use the same
+ * calls, so they answer with the fault too.
  */
 export function fakeAiAnswers(fault: FakeAiError) {
   return {
@@ -312,27 +400,18 @@ export function fakeAiAnswers(fault: FakeAiError) {
     },
     openai: {
       create: (body: { model: string }) =>
-        openaiAnswer(fault, () => ({
-          id: 'chatcmpl-fake',
-          object: 'chat.completion',
-          created: 0,
-          model: body.model,
-          choices: [
-            {
-              index: 0,
-              message: { role: 'assistant', content: CUT_OFF_JSON, refusal: null },
-              finish_reason: 'length',
-              logprobs: null,
-            },
-          ],
-          usage: {
-            prompt_tokens: CUT_OFF_USAGE.input,
-            completion_tokens: CUT_OFF_USAGE.output,
-            total_tokens: CUT_OFF_USAGE.input + CUT_OFF_USAGE.output,
-          },
-        })),
+        openaiLibraryAnswer(fault, () => cutOffCompletion(body.model), 'openai'),
       retrieve: (id: string) =>
-        openaiAnswer(fault, () => ({ id, object: 'model', created: 0, owned_by: 'openai' })),
+        openaiLibraryAnswer(
+          fault,
+          () => ({ id, object: 'model', created: 0, owned_by: 'openai' }),
+          'openai',
+        ),
+    },
+    openrouter: {
+      create: (body: { model: string }) =>
+        openaiLibraryAnswer(fault, () => cutOffCompletion(body.model), 'openrouter'),
+      get: (path: string) => openrouterGet(fault, path),
     },
     anthropic: {
       create: (body: { model: string }) =>
@@ -355,6 +434,16 @@ export function fakeAiAnswers(fault: FakeAiError) {
         })),
     },
   };
+}
+
+export type FakeAiAnswers = ReturnType<typeof fakeAiAnswers>;
+
+/**
+ * The `openai` library serves OpenAI and OpenRouter: a client's calls answer as the provider at
+ * its address.
+ */
+export function fakesForOpenAILibrary(answers: FakeAiAnswers, baseURL: string) {
+  return new URL(baseURL).hostname === HOSTS.openrouter ? answers.openrouter : answers.openai;
 }
 
 /** Wraps fetch so that no request reaches an AI provider, whichever code sends it. */

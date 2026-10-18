@@ -16,12 +16,12 @@ const STRICT_KEPT = new Set([
 ]);
 
 function nullable(prop: Node): Node {
-  const withNullEnum = Array.isArray(prop.enum) ? { enum: [...prop.enum, null] } : {};
-  if (Array.isArray(prop.type))
-    return prop.type.includes('null')
-      ? prop
-      : { ...prop, type: [...prop.type, 'null'], ...withNullEnum };
-  if (typeof prop.type === 'string') return { ...prop, type: [prop.type, 'null'], ...withNullEnum };
+  if (Array.isArray(prop.type) && prop.type.includes('null')) return prop;
+  // A fixed list of values that may be empty is "one of the list, or null": Anthropic refuses a
+  // type list next to an enum ("Enum value does not match declared type").
+  if (Array.isArray(prop.enum)) return { anyOf: [prop, { type: 'null' }] };
+  if (Array.isArray(prop.type)) return { ...prop, type: [...prop.type, 'null'] };
+  if (typeof prop.type === 'string') return { ...prop, type: [prop.type, 'null'] };
   return { anyOf: [prop, { type: 'null' }] };
 }
 
@@ -49,6 +49,7 @@ function strict(node: Node): Node {
 }
 
 const strictSchemas = new WeakMap<z.ZodType, Node>();
+const contractSchemas = new WeakMap<z.ZodType, Node>();
 const optional = new WeakMap<z.ZodType, string[]>();
 
 /**
@@ -67,11 +68,21 @@ export function strictJsonSchema(schema: z.ZodType): Node {
   return derived;
 }
 
+/** The contract's own JSON Schema, with the bounds the strict dialect drops. */
+function contractSchema(schema: z.ZodType): Node {
+  let json = contractSchemas.get(schema);
+  if (!json) {
+    json = z.toJSONSchema(schema) as Node;
+    contractSchemas.set(schema, json);
+  }
+  return json;
+}
+
 /** Top-level keys the contract schema allows to be absent. */
 export function optionalKeys(schema: z.ZodType): string[] {
   let keys = optional.get(schema);
   if (!keys) {
-    const json = z.toJSONSchema(schema) as Node;
+    const json = contractSchema(schema);
     const required = new Set((json.required as string[] | undefined) ?? []);
     keys = Object.keys((json.properties as Node | undefined) ?? {}).filter(
       (name) => !required.has(name),
@@ -81,14 +92,55 @@ export function optionalKeys(schema: z.ZodType): string[] {
   return keys;
 }
 
+/** How far past a contract bound a number may land and still be a rounding error. */
+const ROUNDING_ERROR = 1e-9;
+
+/** The node itself, or its anyOf branch, that describes a value of this kind. */
+function branchFor(node: Node, matches: (candidate: Node) => boolean): Node | undefined {
+  if (matches(node)) return node;
+  return Array.isArray(node.anyOf) ? (node.anyOf as Node[]).find(matches) : undefined;
+}
+
+function snapNumber(value: number, node: Node): number {
+  const { minimum, maximum } = branchFor(node, (n) => n.type === 'number') ?? {};
+  if (typeof maximum === 'number' && value > maximum && value - maximum <= ROUNDING_ERROR)
+    return maximum;
+  if (typeof minimum === 'number' && value < minimum && minimum - value <= ROUNDING_ERROR)
+    return minimum;
+  return value;
+}
+
 /**
- * Undoes the strict dialect's "optional as nullable": a null in a key the contract allows to be
- * absent becomes absent, so the unchanged Zod schema (and contract version) validates it.
+ * A number a rounding error past a contract bound is the bound: a model may write
+ * 1.0000000000000002 for full confidence, because the strict dialect does not send the bounds.
+ * Anything further out is left for the contract's validation to refuse.
  */
-export function nullsToAbsent(data: unknown, schema: z.ZodType): unknown {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+function snapToBounds(value: unknown, node: Node | undefined): unknown {
+  if (!node) return value;
+  if (typeof value === 'number') return snapNumber(value, node);
+  if (Array.isArray(value)) {
+    const items = branchFor(node, (n) => n.type === 'array')?.items as Node | undefined;
+    return items ? value.map((item) => snapToBounds(item, items)) : value;
+  }
+  if (value === null || typeof value !== 'object') return value;
+  const properties = branchFor(node, (n) => n.type === 'object')?.properties as
+    Record<string, Node> | undefined;
+  if (!properties) return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, snapToBounds(item, properties[key])]),
+  );
+}
+
+/**
+ * Undoes what the strict dialect changes, so the unchanged Zod schema (and contract version)
+ * validates the answer: a null in a key the contract allows to be absent becomes absent, and a
+ * number a rounding error past a contract bound becomes the bound.
+ */
+export function fromStrictDialect(data: unknown, schema: z.ZodType): unknown {
+  const snapped = snapToBounds(data, contractSchema(schema));
+  if (!snapped || typeof snapped !== 'object' || Array.isArray(snapped)) return snapped;
   const keys = optionalKeys(schema);
   return Object.fromEntries(
-    Object.entries(data as Node).filter(([key, value]) => !(value === null && keys.includes(key))),
+    Object.entries(snapped).filter(([key, value]) => !(value === null && keys.includes(key))),
   );
 }

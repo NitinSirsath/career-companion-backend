@@ -52,6 +52,43 @@ describe('AI provider and model catalog', () => {
     }
   });
 
+  it('gives each model only the thinking control and answer format its protocol reads', () => {
+    // Every protocol must be listed: a new one needs its own rules here.
+    const thinkingKeys: Record<CatalogProvider['protocol'], string[]> = {
+      gemini: ['thinkingBudget', 'thinkingLevel'],
+      openai: ['reasoningEffort'],
+      anthropic: [],
+      openrouter: ['enabled', 'effort'],
+    };
+    const answerFormats: Record<CatalogProvider['protocol'], string[]> = {
+      gemini: ['gemini_schema'],
+      openai: ['openai_json_schema'],
+      anthropic: ['anthropic_native', 'anthropic_tool'],
+      openrouter: ['openai_json_schema'],
+    };
+    for (const provider of AI_CATALOG)
+      for (const model of provider.models) {
+        for (const key of Object.keys(model.reasoning ?? {}))
+          expect(thinkingKeys[provider.protocol], `${model.id}: ${key}`).toContain(key);
+        expect(answerFormats[provider.protocol], model.id).toContain(model.structuredOutput);
+        // Only the OpenRouter adapter reads it.
+        if (model.noOutputLimit) expect(provider.protocol, model.id).toBe('openrouter');
+      }
+  });
+
+  it('names OpenRouter models by their exact ID: no alias and no variant', () => {
+    // An alias such as "~…-latest" or a variant such as ":free" can change the model without an
+    // evaluation.
+    for (const model of getCatalogProvider('openrouter')!.models)
+      expect(model.id).toMatch(/^[a-z0-9-]+\/[a-z0-9._-]+$/);
+  });
+
+  it('writes retirement days as YYYY-MM-DD', () => {
+    for (const model of AI_CATALOG.flatMap((p) => p.models))
+      if (model.retiresOn !== null)
+        expect(model.retiresOn, model.id).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
   it('offers a provider as supported only with approved disclosure and evaluated, current models', () => {
     for (const provider of AI_CATALOG.filter((p) => p.status === 'supported')) {
       expect(provider.disclosure.reviewedOn, provider.id).not.toBeNull();

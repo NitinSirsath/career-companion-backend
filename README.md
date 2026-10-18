@@ -183,7 +183,7 @@ See [STABILIZATION.md](STABILIZATION.md) for rollout and support.
 **Code**
 - `src/services/ai/`:
   - `contracts.ts`: provider-neutral prompts and schemas;
-  - `providers/`: one adapter per protocol behind `createProviderClient`;
+  - `providers/`: one adapter per protocol behind `createProviderClient`, plus OpenRouter's own (its key check, errors and private-server routing differ); `chatCompletions.ts` holds what the OpenAI and OpenRouter adapters share;
   - `access.ts`: per-user access resolution;
   - `operations.ts`: the ledger;
   - `usage.ts`: safety limit, counts, each model's pause;
@@ -295,20 +295,20 @@ In dev mode every user has a **sandbox mailbox** that stands in for their Gmail 
 
 `npm run fake-ai-errors -- <fault>` starts dev mode like `npm run devmode`, but every AI call gets one chosen error instead of an answer. Nothing is sent to any AI provider, so no real key is needed. It is its own command: `npm run devmode` stays real AI only.
 
-- **How it works:** the command starts the dev-mode server with `scripts/fake-ai-errors-preload.cjs` loaded before the app. The preload swaps the AI libraries' calls (Gemini `models.generateContent`; OpenAI `chat.completions.create` and `models.retrieve`; Anthropic `messages.create` and `models.retrieve`) for the fakes in `src/tests/helpers/fakeAiErrors.ts`, and blocks every request to an AI provider's address. Each fake is what the library itself gives the app for that problem, built with the library's own error classes and the provider's own error body (for Google: an `ApiError` with Google's JSON body). So the app's real error handling runs. The app's code is not changed.
+- **How it works:** the command starts the dev-mode server with `scripts/fake-ai-errors-preload.cjs` loaded before the app. The preload swaps the AI libraries' calls (Gemini `models.generateContent`; OpenAI `chat.completions.create` and `models.retrieve`; Anthropic `messages.create` and `models.retrieve`; OpenRouter `chat.completions.create` and its key check's `get`) for the fakes in `src/tests/helpers/fakeAiErrors.ts`, and blocks every request to an AI provider's address. OpenAI and OpenRouter share the `openai` library, so each fake answers as the provider at the client's address. Each fake is what the library itself gives the app for that problem, built with the library's own error classes and the provider's own error body (for Google: an `ApiError` with Google's JSON body). So the app's real error handling runs. The app's code is not changed.
 - **Never in prod:** it starts only when `.env.dev` says `APP_MODE=dev` on the dev database (the dev-mode rules above), and it stops when `NODE_ENV=production`. The server checks the app mode again before it loads the fakes, and refuses to start otherwise.
 - **One fault per run.** Stop with Ctrl+C and start again with another fault. Without a fault it lists them all.
 
 | Fault | What the AI library gives the app |
 | --- | --- |
-| `busy` | Google 503 `UNAVAILABLE`; OpenAI 503; Anthropic 529 `overloaded_error` |
+| `busy` | Google 503 `UNAVAILABLE`; OpenAI 503; Anthropic 529 `overloaded_error`; OpenRouter 503 `provider_overloaded` |
 | `no-answer` | The wait ends with no answer: the request is stopped after 5 seconds |
-| `deadline` | Google 504 `DEADLINE_EXCEEDED`; OpenAI and Anthropic 504 |
+| `deadline` | Google 504 `DEADLINE_EXCEEDED`; OpenAI and Anthropic 504; OpenRouter 408 |
 | `rate-minute` | 429 per-minute limit; the provider asks to wait 10 seconds |
-| `rate-day` | Google 429 free-tier limit per day (it also asks to wait 10 seconds); OpenAI and Anthropic 429 with no wait time |
-| `key` | Google 400 `API_KEY_INVALID`; OpenAI and Anthropic 401 |
-| `billing` | Google 403 `SERVICE_DISABLED`; OpenAI 429 `insufficient_quota`; Anthropic 400 "credit balance is too low" |
-| `model-gone` | 404: the key cannot use the model |
+| `rate-day` | Google 429 free-tier limit per day (it also asks to wait 10 seconds); OpenAI, Anthropic and OpenRouter 429 with no wait time |
+| `key` | Google 400 `API_KEY_INVALID`; OpenAI, Anthropic and OpenRouter 401 |
+| `billing` | Google 403 `SERVICE_DISABLED`; OpenAI 429 `insufficient_quota`; Anthropic 400 "credit balance is too low"; OpenRouter 403 `openrouter_key_limit` (its key check finds no credit left on the key) |
+| `model-gone` | 404: the key cannot use the model. OpenRouter: 503, no private server takes the request (its key check finds no such server) |
 | `unusable` | An answer cut off at the token limit (`MAX_TOKENS`) |
 | `no-connection` | No connection, nothing was sent (`ENOTFOUND`) |
 | `line-dropped` | The connection dropped after the request was sent (`ECONNRESET`) |

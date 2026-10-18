@@ -13,7 +13,7 @@ export const AI_ROLES = ['fast', 'detailed'] as const;
 /** `fast` runs relevance screening; `detailed` runs job-data extraction. */
 export type AIRole = (typeof AI_ROLES)[number];
 
-export const AI_PROVIDER_IDS = ['gemini', 'openai', 'anthropic'] as const;
+export const AI_PROVIDER_IDS = ['gemini', 'openai', 'anthropic', 'openrouter'] as const;
 export type AIProviderId = (typeof AI_PROVIDER_IDS)[number];
 
 export interface CatalogModel {
@@ -23,11 +23,16 @@ export interface CatalogModel {
   recommendedFor: readonly AIRole[];
   /** null = the model does not accept a temperature; the adapter omits it. */
   temperature: number | null;
-  /** Reasoning or thinking kept at the minimum the model allows. */
+  /**
+   * Reasoning or thinking kept at the minimum the model allows. OpenRouter: `{ enabled: false }`
+   * turns optional thinking off; `{ effort: 'low' }` is for a model that always thinks.
+   */
   reasoning:
     | { thinkingBudget: number }
     | { thinkingLevel: 'minimal' | 'low' }
     | { reasoningEffort: 'minimal' | 'low' }
+    | { enabled: false }
+    | { effort: 'low' }
     | null;
   structuredOutput: 'gemini_schema' | 'openai_json_schema' | 'anthropic_native' | 'anthropic_tool';
   timeoutMs: number;
@@ -35,12 +40,17 @@ export interface CatalogModel {
   retiresOn: string | null;
   /** Passing evaluation report; required for every model of a supported provider. */
   evaluation: { date: string; report: string } | null;
+  /**
+   * OpenRouter only: the model's private servers take no output limit, so none is sent. The model
+   * stops by itself; the strict JSON answer keeps it short.
+   */
+  noOutputLimit?: true;
 }
 
 export interface CatalogProvider {
   id: AIProviderId;
   displayName: string;
-  protocol: 'gemini' | 'openai' | 'anthropic';
+  protocol: 'gemini' | 'openai' | 'anthropic' | 'openrouter';
   /** Fixed endpoint. No user input ever decides where a key or email content is sent. */
   baseUrl: string;
   status: 'supported' | 'hidden';
@@ -263,6 +273,107 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
         timeoutMs: 60_000,
         retiresOn: null,
         evaluation: null,
+      },
+    ],
+  },
+  {
+    id: 'openrouter',
+    displayName: 'OpenRouter',
+    protocol: 'openrouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    status: 'hidden',
+    costModel: 'PAID_ONLY',
+    recommendedNote:
+      'One key for several small, low-cost models. Prepaid credit; small amounts work.',
+    links: {
+      apiKeys: 'https://openrouter.ai/settings/keys',
+      billing: 'https://openrouter.ai/settings/credits',
+      dataUse: 'https://openrouter.ai/privacy',
+    },
+    setupSteps: [
+      'Sign in at openrouter.ai and add credit under Credits.',
+      'Under Keys, create an API key (not a Management key). Give it a credit limit, for example $2.',
+      'Keep "Input & Output Logging" (workspace Observability) and the "1% data discount" (Privacy) turned off.',
+      'Paste the key below. Career Companion stores it encrypted and never shows it again.',
+    ],
+    disclosure: {
+      version: 'openrouter-draft-2026-10',
+      // DRAFT pending owner approval against OpenRouter's current terms.
+      summary:
+        'Your emails go to OpenRouter under your own account. OpenRouter passes each request to one server that runs the model you chose.',
+      training:
+        'Career Companion asks OpenRouter to use only servers that keep nothing, so they cannot train on it. OpenRouter itself keeps only usage numbers, unless you turn on logging in your OpenRouter account.',
+      residency:
+        'The server may be in any country, mostly the US or Europe. OpenRouter picks it for each request.',
+      reviewedOn: null,
+    },
+    // Small models only (owner, 17 Oct 2026), pending evaluation. Exact IDs: an alias such as
+    // "~…-latest" can move to another model without an evaluation. Both models serve both roles,
+    // so each timeout fits the longer job.
+    models: [
+      {
+        id: 'google/gemma-4-26b-a4b-it',
+        displayName: 'Gemma 4 26B A4B',
+        roles: ['fast', 'detailed'],
+        recommendedFor: ['fast'],
+        temperature: 0.1,
+        reasoning: { enabled: false },
+        structuredOutput: 'openai_json_schema',
+        timeoutMs: 45_000,
+        retiresOn: null,
+        evaluation: null,
+      },
+      {
+        id: 'deepseek/deepseek-v4.1-flash',
+        displayName: 'DeepSeek V4.1 Flash',
+        roles: ['fast', 'detailed'],
+        recommendedFor: ['detailed'],
+        temperature: 0.1,
+        reasoning: { enabled: false },
+        structuredOutput: 'openai_json_schema',
+        timeoutMs: 45_000,
+        retiresOn: null,
+        evaluation: null,
+      },
+      // Test candidates (owner, 17 Oct 2026). Their private servers take no temperature.
+      // Screening only: Anthropic's JSON output allows at most 16 fields that may be empty, and
+      // the extraction contract has 19.
+      {
+        id: 'anthropic/claude-haiku-5.5',
+        displayName: 'Claude Haiku 5.5',
+        roles: ['fast'],
+        recommendedFor: [],
+        temperature: null,
+        reasoning: { enabled: false },
+        structuredOutput: 'openai_json_schema',
+        timeoutMs: 45_000,
+        retiresOn: null,
+        evaluation: null,
+      },
+      {
+        id: 'google/gemini-3.8-flash',
+        displayName: 'Gemini 3.8 Flash',
+        roles: ['fast', 'detailed'],
+        recommendedFor: [],
+        temperature: null,
+        reasoning: { effort: 'low' },
+        structuredOutput: 'openai_json_schema',
+        timeoutMs: 60_000,
+        retiresOn: null,
+        evaluation: null,
+      },
+      {
+        id: 'openai/gpt-6-sol',
+        displayName: 'GPT-6 Sol',
+        roles: ['fast', 'detailed'],
+        recommendedFor: [],
+        temperature: null,
+        reasoning: { enabled: false },
+        structuredOutput: 'openai_json_schema',
+        timeoutMs: 60_000,
+        retiresOn: null,
+        evaluation: null,
+        noOutputLimit: true,
       },
     ],
   },

@@ -2,6 +2,7 @@ import type { CatalogProvider } from '../../../contracts/aiCatalog';
 import { createAnthropicClient } from './anthropic';
 import { createGeminiClient } from './gemini';
 import { createOpenAIClient } from './openai';
+import { createOpenRouterClient } from './openrouter';
 import type { ProviderClient } from './types';
 
 export type { ProviderClient, StructuredRequest, StructuredResponse, VerifyResult } from './types';
@@ -15,5 +16,7 @@ export function createProviderClient(provider: CatalogProvider, apiKey: string):
       return createOpenAIClient(provider, apiKey);
     case 'anthropic':
       return createAnthropicClient(provider, apiKey);
+    case 'openrouter':
+      return createOpenRouterClient(provider, apiKey);
   }
 }

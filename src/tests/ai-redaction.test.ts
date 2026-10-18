@@ -1,7 +1,7 @@
 /**
  * End-to-end redaction (BYO AI plan §8): a recognizable key and recognizable email text are pushed
  * through save, verify, check, sample test, processing and every failure kind, with the real
- * Gemini, OpenAI and Anthropic adapters whose SDK errors and responses echo both. Neither may
+ * Gemini, OpenAI, Anthropic and OpenRouter adapters whose SDK errors and responses echo both. Neither may
  * appear in any log line, HTTP response (the exact error included: the mail list, the AI settings,
  * the retry dialog), or stored row (the sealed key never contains the plaintext).
  */
@@ -20,6 +20,7 @@ import {
   APIError as AnthropicError,
 } from '@anthropic-ai/sdk';
 import { getCatalogProvider } from '../contracts/aiCatalog';
+import { requiredParameters } from '../services/ai/providers/openrouter';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
 import { processEmailJob } from '../jobs/emailProcessingJob';
@@ -36,10 +37,12 @@ vi.mock('@google/genai', async (importOriginal) => ({
 }));
 const create = vi.fn();
 const retrieve = vi.fn();
+/** OpenRouter's key check reads its own records through the library's `get`. */
+const openrouterGet = vi.fn();
 vi.mock('openai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('openai')>();
   const OpenAIMock = vi.fn().mockImplementation(function () {
-    return { chat: { completions: { create } }, models: { retrieve } };
+    return { chat: { completions: { create } }, models: { retrieve }, get: openrouterGet };
   });
   return { ...actual, default: OpenAIMock, OpenAI: OpenAIMock };
 });
@@ -291,6 +294,41 @@ const anthropicError = (status: number, type?: string) =>
     undefined,
     new Headers(),
   );
+/** OpenRouter's error body echoes the key and the email text, in its text and its metadata. */
+const openRouterError = (status: number, metadata: object = {}) =>
+  OpenAIError.generate(
+    status,
+    {
+      error: {
+        code: status,
+        message: `Key ${KEY} failed for: ${CONTENT}`,
+        metadata: { raw: `${KEY} ${CONTENT}`, provider_name: CONTENT, ...metadata },
+      },
+    },
+    undefined,
+    new Headers(),
+  );
+/** A key check of OpenAI or Anthropic looks up models; OpenRouter's reads its own records. */
+const modelLookup = {
+  refuse: (err: unknown) => retrieve.mockRejectedValueOnce(err),
+  accept: () => retrieve.mockResolvedValue({ id: 'model' }),
+};
+const openRouterRecords = {
+  refuse: (err: unknown) => openrouterGet.mockRejectedValueOnce(err),
+  // The answers echo both too, and are never kept.
+  accept: () =>
+    openrouterGet.mockImplementation(async (path: string) =>
+      path === '/key'
+        ? { data: { label: KEY, limit_remaining: null } }
+        : {
+            data: getCatalogProvider('openrouter')!.models.map((model) => ({
+              model_id: model.id,
+              provider_name: CONTENT,
+              supported_parameters: requiredParameters(model),
+            })),
+          },
+    ),
+};
 /** What Node's fetch throws when a connection fails, its text and code echoing both. */
 const leakyFetch = () =>
   new TypeError(`fetch failed ${KEY} ${CONTENT}`, {
@@ -300,6 +338,7 @@ const leakyFetch = () =>
 describe.each([
   {
     provider: 'openai',
+    keyCheck: modelLookup,
     failures: [
       openAIError(401, 'invalid_api_key'),
       openAIError(403),
@@ -339,6 +378,7 @@ describe.each([
   },
   {
     provider: 'anthropic',
+    keyCheck: modelLookup,
     failures: [
       anthropicError(401, 'authentication_error'),
       anthropicError(400, 'invalid_request_error'),
@@ -364,23 +404,67 @@ describe.each([
       },
     ],
   },
-])('no key or email content leaks with $provider', ({ provider, failures, unusable }) => {
+  {
+    provider: 'openrouter',
+    keyCheck: openRouterRecords,
+    failures: [
+      openRouterError(401),
+      openRouterError(402),
+      openRouterError(403, { limit_source: 'openrouter_key_limit' }),
+      openRouterError(403, { reasons: [CONTENT], flagged_input: CONTENT }),
+      openRouterError(404),
+      openRouterError(429, { error_type: `rate ${KEY}` }),
+      openRouterError(502),
+      openRouterError(503),
+      openRouterError(400),
+      new OpenAITimeout({ message: `${KEY} ${CONTENT}` }),
+      new OpenAIConnectionError({ message: `${KEY} ${CONTENT}`, cause: leakyFetch() }),
+    ],
+    // Cut off, a server that failed inside a 200 answer, and not JSON.
+    unusable: [
+      {
+        choices: [
+          {
+            finish_reason: 'length',
+            message: { content: `{"a": "${CONTENT} ${KEY}`, refusal: null },
+          },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      },
+      {
+        choices: [],
+        error: {
+          code: 502,
+          message: `${KEY} ${CONTENT}`,
+          metadata: { error_type: 'provider_unavailable', raw: CONTENT },
+        },
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      },
+      {
+        choices: [
+          { finish_reason: 'stop', message: { content: `${CONTENT} ${KEY}`, refusal: null } },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      },
+    ],
+  },
+])('no key or email content leaks with $provider', ({ provider, keyCheck, failures, unusable }) => {
   const consentDisclosure = getCatalogProvider(provider)!.disclosure.version;
 
   it('stays out of logs, responses and storage on every path', async () => {
     // Save: the key is refused with an error that echoes it, then accepted.
-    retrieve.mockRejectedValueOnce(failures[0]);
+    keyCheck.refuse(failures[0]);
     expect(
       (await call('put', '/api/ai/settings', { provider, apiKey: KEY, consentDisclosure })).status,
     ).toBe(422);
-    retrieve.mockResolvedValue({ id: 'model' });
+    keyCheck.accept();
     expect(
       (await call('put', '/api/ai/settings', { provider, apiKey: KEY, consentDisclosure })).status,
     ).toBe(200);
     // Check again: the provider cannot confirm (the failure is answered), then refuses.
-    retrieve.mockRejectedValueOnce(failures[failures.length - 2]);
+    keyCheck.refuse(failures[failures.length - 2]);
     expect((await call('post', '/api/ai/settings/check')).body.verificationFailure).toBeTruthy();
-    retrieve.mockRejectedValueOnce(failures[0]);
+    keyCheck.refuse(failures[0]);
     await call('post', '/api/ai/settings/check');
     await prisma.aIConfiguration.updateMany({ where: { userId }, data: { accessIssue: null } });
     // Sample test: a failure, then an answer that cannot be used.

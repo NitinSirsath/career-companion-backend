@@ -15,6 +15,7 @@ if (appMode() !== 'dev')
 const {
   blockProviderRequests,
   fakeAiAnswers,
+  fakesForOpenAILibrary,
   isFakeAiError,
 } = require('../src/tests/helpers/fakeAiErrors');
 
@@ -33,10 +34,20 @@ genai.GoogleGenAI = class FakeGoogleGenAI extends GoogleGenAI {
     this.models.generateContent = answers.gemini.generateContent;
   }
 };
-// OpenAI and Anthropic keep their calls on shared classes.
+// OpenAI and Anthropic keep their calls on shared classes. The openai library serves OpenAI and
+// OpenRouter: each fake answers as the provider at the client's address.
 const { OpenAI } = require('openai');
-OpenAI.Chat.Completions.prototype.create = answers.openai.create;
+OpenAI.Chat.Completions.prototype.create = function (body) {
+  return fakesForOpenAILibrary(answers, this._client.baseURL).create(body);
+};
 OpenAI.Models.prototype.retrieve = answers.openai.retrieve;
+// Only OpenRouter's key check calls `get` itself; any other client keeps the real call, which
+// stays blocked.
+const realGet = OpenAI.prototype.get;
+OpenAI.prototype.get = function (path, options) {
+  const fakes = fakesForOpenAILibrary(answers, this.baseURL);
+  return 'get' in fakes ? fakes.get(path) : realGet.call(this, path, options);
+};
 const { Anthropic } = require('@anthropic-ai/sdk');
 Anthropic.Messages.prototype.create = answers.anthropic.create;
 Anthropic.Models.prototype.retrieve = answers.anthropic.retrieve;

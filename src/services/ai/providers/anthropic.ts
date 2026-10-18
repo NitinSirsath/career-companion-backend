@@ -5,7 +5,7 @@ import Anthropic, {
 } from '@anthropic-ai/sdk';
 import type { CatalogProvider } from '../../../contracts/aiCatalog';
 import { ProviderFailure } from '../errors';
-import { nullsToAbsent, strictJsonSchema } from './jsonSchema';
+import { fromStrictDialect, strictJsonSchema } from './jsonSchema';
 import { retryAfterMs } from './headers';
 import { droppedConnection, libraryConnectionFailure, unansweredFailure } from './network';
 import { ProviderClient, VERIFY_TIMEOUT_MS } from './types';
@@ -136,7 +136,7 @@ export function createAnthropicClient(provider: CatalogProvider, apiKey: string)
           throw new ProviderFailure('INVALID_OUTPUT', { usage });
         data = call.input;
       }
-      return { data: nullsToAbsent(data, contract.schema), usage };
+      return { data: fromStrictDialect(data, contract.schema), usage };
     },
 
     verifyModels: (modelIds) =>

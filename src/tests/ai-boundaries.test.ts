@@ -33,15 +33,22 @@ describe('credential boundaries (BYO AI plan §8)', () => {
 
   it('builds provider clients only through the single seam', () => {
     expect(
-      using(/from '\.\/(gemini|openai|anthropic)'|providers\/(gemini|openai|anthropic)'/),
+      using(
+        /from '\.\/(gemini|openai|anthropic|openrouter)'|providers\/(gemini|openai|anthropic|openrouter)'/,
+      ),
     ).toEqual(['services/ai/providers/index.ts']);
   });
 
-  it('keeps provider SDKs inside the adapters', () => {
+  it('keeps provider SDKs inside the adapters and their shared helper', () => {
     expect(using(/from '(openai|@anthropic-ai\/sdk|@google\/genai)'/)).toEqual([
       'services/ai/providers/anthropic.ts',
+      'services/ai/providers/chatCompletions.ts',
       'services/ai/providers/gemini.ts',
-      'services/ai/providers/openai.ts',
+      'services/ai/providers/openrouter.ts',
     ]);
+  });
+
+  it('decides in one place whether an OpenAI-style answer is usable', () => {
+    expect(using(/\bfinish_reason\b/)).toEqual(['services/ai/providers/chatCompletions.ts']);
   });
 });
