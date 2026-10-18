@@ -42,6 +42,9 @@ const isoDate =
   /^(\d{4})-(\d{2})-(\d{2})(?:t(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(z|[+-]\d{2}:\d{2})?)?$/;
 const weekdayPrefix =
   /^(sunday|sun|monday|mon|tuesday|tue|wednesday|wed|thursday|thu|friday|fri|saturday|sat),? /;
+/** A time after a written date: `, 11:59 PM IST`, ` at 5 pm`, ` 17:00`, with an optional zone name. */
+const timeSuffix =
+  /,? (?:at )?(?:(\d{1,2}):(\d{2})(?: ?([ap])\.?m\.?)?|(\d{1,2}) ?([ap])\.?m\.?)(?: [a-z]{2,5}| \([a-z]{2,5}\))?$/;
 
 /** Deliberately narrow grammar: provider prose is never passed to JavaScript's date parser. */
 export function parseActionDeadline(
@@ -102,7 +105,25 @@ function zoneOffsetMinutes(zone: string): number | null {
   return (hours * 60 + minutes) * (zone[0] === '+' ? 1 : -1);
 }
 
-/** `by Friday, March 6`, `6 Mar 2026`. Without a year, the next such date after the email. */
+/** A real clock time: 0-23 hours, or 1-12 with AM or PM. */
+function isClockTime(time: RegExpExecArray): boolean {
+  const hour = +(time[1] ?? time[4]),
+    minute = +(time[2] ?? 0);
+  if (minute > 59) return false;
+  return time[3] || time[5] ? hour >= 1 && hour <= 12 : hour <= 23;
+}
+
+/** The text without a time at its end, or null when that time cannot exist. */
+function withoutTime(value: string): string | null {
+  const time = timeSuffix.exec(value);
+  if (!time) return value;
+  return isClockTime(time) ? value.slice(0, time.index) : null;
+}
+
+/**
+ * `by Friday, March 6`, `6 Mar 2026`. Without a year, the next such date after the email. A time
+ * after the date is allowed but not kept: like an ISO time without an offset, its zone is unclear.
+ */
 function parseNamedDeadline(value: string, anchor: Date | null): Candidate | Rejected {
   let remainder = value.replace(/^by /, '');
   let weekday: number | undefined;
@@ -111,7 +132,9 @@ function parseNamedDeadline(value: string, anchor: Date | null): Candidate | Rej
     weekday = weekdays.indexOf(prefix[1].slice(0, 3));
     remainder = remainder.slice(prefix[0].length);
   }
-  const match = namedDate.exec(remainder);
+  const dateText = withoutTime(remainder);
+  if (dateText === null) return reject('INVALID_DATE');
+  const match = namedDate.exec(dateText);
   if (!match) return reject('UNCLEAR');
   const month = months.indexOf((match[1] ?? match[4]).slice(0, 3)) + 1;
   const day = +(match[2] ?? match[3]);
