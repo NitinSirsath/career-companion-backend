@@ -249,12 +249,20 @@ describe('OpenAI adapter', () => {
     const schema = strictJsonSchema(CLASSIFICATION_CONTRACT.schema) as {
       required: string[];
       additionalProperties: boolean;
-      properties: Record<string, { type: unknown; enum?: unknown[] }>;
+      properties: Record<string, object>;
     };
     expect(schema.required.sort()).toEqual(['category', 'confidence', 'decision', 'reasoning']);
     expect(schema.additionalProperties).toBe(false);
-    expect(schema.properties.category.type).toEqual(['string', 'null']);
-    expect(schema.properties.category.enum).toContain(null);
+    // An optional fixed list is "one of the list, or null", a form OpenAI and Anthropic both read.
+    expect(schema.properties.category).toEqual({
+      anyOf: [
+        expect.objectContaining({
+          type: 'string',
+          enum: expect.arrayContaining(['RECRUITER', 'INTERVIEW']),
+        }),
+        { type: 'null' },
+      ],
+    });
     expect(schema.properties.confidence).not.toHaveProperty('minimum');
     const extraction = strictJsonSchema(EXTRACTION_CONTRACT.schema) as { required: string[] };
     expect(extraction.required).toHaveLength(19);
