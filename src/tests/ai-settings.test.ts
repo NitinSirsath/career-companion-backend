@@ -1,5 +1,6 @@
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AI_CATALOG } from '../contracts/aiCatalog';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
 import { openApiKey, sealApiKey } from '../services/ai/credentials';
@@ -75,7 +76,8 @@ describe('AI settings API: authentication and reading', () => {
     expect(res.body).toMatchObject({
       configured: false,
       provider: null,
-      offeredProviders: ['gemini', 'openai', 'anthropic'],
+      // Outside production every catalog provider is offered, hidden ones too, in catalog order.
+      offeredProviders: AI_CATALOG.map((provider) => provider.id),
       models: null,
       access: { state: 'NOT_SET_UP', reason: 'NOT_SET_UP', verified: false },
       usageToday: { day: utcDay(new Date()), calls: 0 },
