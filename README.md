@@ -193,6 +193,7 @@ See [STABILIZATION.md](STABILIZATION.md) for rollout and support.
   - `credentials.ts`: key sealing;
   - `settings.ts`: the settings API.
 - `src/eval/ai/`: the manual evaluation runner (`npm run ai:eval`). See its README.
+- `scripts/openrouter-models.cjs`: checks OpenRouter models against OpenRouter's public lists before one is added or kept (`npm run ai:openrouter-models`). See `src/eval/ai/README.md`.
 
 **Tests:** tests use fake provider clients and fixture keys only. Real keys are used only in supervised evaluation and release runs.
 
