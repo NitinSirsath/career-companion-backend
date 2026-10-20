@@ -4,6 +4,7 @@
  *   GET  /api/auth/connect    start Google sign-in (prod mode only)
  *   GET  /api/auth/callback   finish Google sign-in (prod mode only)
  *   POST /api/auth/login      sign in with email and password
+ *   POST /api/auth/test-login sign in to a test account (see services/testAccounts.ts)
  *   POST /api/auth/password   set the first password, or change it
  *   POST /api/auth/register   create a user with a password (dev mode only)
  *   GET  /api/auth/me         the signed-in user
@@ -26,7 +27,9 @@ import {
   warnIfGoogleLoginNotConfigured,
 } from '../services/googleOAuth';
 import { loginWithPassword, registerUser, setPassword } from '../services/passwordLogin';
+import { isTestAccountEmail } from '../services/testAccounts';
 import { findOrCreateGoogleUser, getUserProfile } from '../services/user';
+import { AppError } from '../errors';
 import { frontendUrl, isProduction } from '../utils/config';
 import { logError } from '../utils/log';
 
@@ -106,6 +109,9 @@ router.get('/callback', prodModeOnly, async (req: Request, res: Response) => {
     }
 
     const identity = await verifyGoogleLogin(code);
+    // A test account signs in on its own page only.
+    if (isTestAccountEmail(identity.email))
+      return res.redirect(302, `${frontendLoginUrl}?error=test_account`);
     const user = await findOrCreateGoogleUser(identity.googleId, identity.email, identity.name);
 
     await signIn(req, user.id);
@@ -119,10 +125,22 @@ router.get('/callback', prodModeOnly, async (req: Request, res: Response) => {
 router.post(
   '/login',
   handle(200, async (req) => {
-    const userId = await loginWithPassword(
-      PasswordLoginRequestSchema.parse(req.body),
-      req.ip ?? '',
-    );
+    const input = PasswordLoginRequestSchema.parse(req.body);
+    if (isTestAccountEmail(input.email))
+      throw new AppError(403, 'USE_TEST_LOGIN', 'Test accounts sign in on the test sign-in page.');
+    const userId = await loginWithPassword(input, req.ip ?? '');
+    await signIn(req, userId);
+    return getUserProfile(userId);
+  }),
+);
+
+router.post(
+  '/test-login',
+  handle(200, async (req) => {
+    const input = PasswordLoginRequestSchema.parse(req.body);
+    if (!isTestAccountEmail(input.email))
+      throw new AppError(403, 'NOT_TEST_ACCOUNT', 'This page is for test accounts only.');
+    const userId = await loginWithPassword(input, req.ip ?? '');
     await signIn(req, userId);
     return getUserProfile(userId);
   }),
