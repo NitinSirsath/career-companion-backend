@@ -18,7 +18,7 @@ import {
   validateProductionConfig,
   validateRequiredSecrets,
 } from './utils/config';
-import { logEvent, logWarn } from './utils/log';
+import { logError, logEvent, logWarn } from './utils/log';
 import { createMcpRouter } from './mcp/router';
 import { healthRouter } from './routes/health';
 import { requestContext } from './middleware/requestContext';
@@ -102,18 +102,20 @@ app.use('/api/workspace', workspaceRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/integration-tokens', integrationTokenRouter);
 app.use('/api/submissions', submissionRouter);
-// Dev mode only: answers 404 in prod (utils/config.ts).
+// Dev mode and test accounts only: answers 404 for everyone else (middleware/appMode.ts).
 app.use('/api/sandbox', sandboxRouter);
 
 app.use(errorHandler);
 
 import { startWorkers } from './jobs/startWorkers';
+import { ensureTestAccounts } from './services/testAccounts';
 import { stopQueue } from './services/queue';
 import { prisma } from './db/prisma';
 
 if (!isTest()) {
   let shuttingDown = false;
   void startWorkers(undefined, { isShuttingDown: () => shuttingDown });
+  ensureTestAccounts().catch((err) => logError('test_accounts_failed', {}, err));
 
   const server = app.listen(port(), () => {
     logEvent('server_started', { port: port() });

@@ -25,7 +25,7 @@ import { prodModeOnly } from '../middleware/appMode';
 import { requireAuth } from '../middleware/auth';
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
 import { GmailSettingsPatchSchema } from '../contracts/gmail';
-import { devMode, frontendUrl, isProduction } from '../utils/config';
+import { frontendUrl, isProduction } from '../utils/config';
 import { logError } from '../utils/log';
 import { listEmails } from '../services/email';
 import {
@@ -39,6 +39,7 @@ import {
 import { startManualSync } from '../services/gmailSyncRequests';
 import { exchangeGmailCode, gmailConsentUrl, revokeGmailAccess } from '../services/googleOAuth';
 import { GmailAuthError, SyncInProgressError } from '../services/gmailSync';
+import { usesSandbox } from '../services/testAccounts';
 
 const router = Router();
 
@@ -76,8 +77,8 @@ router.get('/status', async (req: Request, res: Response, next: NextFunction) =>
 router.get('/connect', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const returnTo = returnPath(req.query.returnTo);
-    // Dev mode has no Google account: the sandbox mailbox is connected at once.
-    if (devMode()) {
+    // Dev mode and test accounts have no Google account: the sandbox mailbox is connected at once.
+    if (await usesSandbox(req.auth!.user.id)) {
       await connectSandboxMailbox(req.auth!.user.id);
       return res.redirect(302, `${frontendUrl()}${returnTo}`);
     }
@@ -181,8 +182,9 @@ router.post('/disconnect', async (req: Request, res: Response, next: NextFunctio
     const accessToken = await connectedAccessToken(userId);
     if (accessToken === null) return res.status(200).json({ disconnected: true });
 
-    // The token is cleared from the database whether or not Google accepted the revoke.
-    await revokeGmailAccess(accessToken);
+    // The token is cleared from the database whether or not Google accepted the revoke. A
+    // sandbox mailbox holds no Google grant.
+    if (!(await usesSandbox(userId))) await revokeGmailAccess(accessToken);
     await clearGmailConnection(userId);
 
     return res.status(200).json({ disconnected: true });

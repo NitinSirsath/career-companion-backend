@@ -10,6 +10,7 @@ import type { PasswordLoginRequest, RegisterRequest, SetPasswordRequest } from '
 import { prisma } from '../db/prisma';
 import { AppError } from '../errors';
 import { hashPassword, verifyPassword } from '../utils/passwordHash';
+import { isTestAccountEmail } from './testAccounts';
 
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_TRIES_PER_EMAIL = 5;
@@ -88,6 +89,8 @@ export async function setPassword(
   request: { ip: string; sessionId: string },
 ) {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+  if (isTestAccountEmail(user.email))
+    throw new AppError(403, 'TEST_ACCOUNT', "A test account's password is set on the server.");
   if (user.passwordHash) {
     const email = user.email.toLowerCase();
     await assertNotBlocked(email, request.ip);

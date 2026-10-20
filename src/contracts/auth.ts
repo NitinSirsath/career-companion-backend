@@ -18,6 +18,8 @@ export const UserProfileSchema = z.object({
   hasPassword: z.boolean(),
   /** True when the user can sign in with Google. */
   hasGoogle: z.boolean(),
+  /** True for a test account: it signs in on the test sign-in page and uses the mail sandbox. */
+  testAccount: z.boolean(),
 });
 export type UserProfile = z.infer<typeof UserProfileSchema>;
 

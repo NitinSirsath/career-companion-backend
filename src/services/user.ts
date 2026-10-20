@@ -1,5 +1,6 @@
 import type { UserProfile } from '../contracts/auth';
 import { prisma } from '../db/prisma';
+import { isTestAccountEmail } from './testAccounts';
 
 /**
  * The user for a verified Google identity: the one already linked to it, else the account with
@@ -36,5 +37,6 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
     name: user.name,
     hasPassword: user.passwordHash !== null,
     hasGoogle: user.googleId !== null,
+    testAccount: isTestAccountEmail(user.email),
   };
 }

@@ -230,6 +230,41 @@ export function devMode(): boolean {
 
 export const appMode = (): AppMode => (devMode() ? 'dev' : 'prod');
 
+// ─── Test accounts ──────────────────────────────────────────────────────────
+// A few fixed accounts that sign in on their own page and use the mail sandbox instead of Gmail,
+// so one deploy serves real users and testers. Written `email:password,email:password`.
+
+export interface TestAccount {
+  email: string;
+  password: string;
+}
+
+const TEST_ACCOUNT_MAX = 5;
+const TEST_PASSWORD_MIN_LENGTH = 16;
+const PLAIN_EMAIL = /^[^\s@:,]+@[^\s@:,]+\.[^\s@:,]+$/;
+
+export function parseTEST_ACCOUNTS(value: string | undefined): TestAccount[] {
+  if (!value?.trim()) return [];
+  const accounts = value.split(',').map((pair) => {
+    const at = pair.indexOf(':');
+    const email = pair.slice(0, at).trim().toLowerCase();
+    const password = pair.slice(at + 1);
+    if (at < 0 || !PLAIN_EMAIL.test(email))
+      throw new Error('TEST_ACCOUNTS must be email:password pairs separated by commas');
+    if (password.length < TEST_PASSWORD_MIN_LENGTH || password.length > 200)
+      throw new Error(
+        `Each TEST_ACCOUNTS password needs ${TEST_PASSWORD_MIN_LENGTH} to 200 characters`,
+      );
+    return { email, password };
+  });
+  if (accounts.length > TEST_ACCOUNT_MAX)
+    throw new Error(`TEST_ACCOUNTS takes at most ${TEST_ACCOUNT_MAX} accounts`);
+  if (new Set(accounts.map((a) => a.email)).size !== accounts.length)
+    throw new Error('TEST_ACCOUNTS lists an email twice');
+  return accounts;
+}
+export const testAccounts = () => parseTEST_ACCOUNTS(process.env.TEST_ACCOUNTS);
+
 function validateAppMode(env: NodeJS.ProcessEnv) {
   if (env.TEST_TOOLS_ENABLED === 'true')
     throw new Error('TEST_TOOLS_ENABLED was replaced by APP_MODE=dev');
@@ -273,6 +308,7 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env) {
   parseAI_TRIAGE_BATCH_ENABLED(env.AI_TRIAGE_BATCH_ENABLED);
   parseAI_TRIAGE_BATCH_SIZE(env.AI_TRIAGE_BATCH_SIZE);
   validateAppMode(env);
+  parseTEST_ACCOUNTS(env.TEST_ACCOUNTS);
   if (env.NODE_ENV !== 'production') return;
   if (env.ENABLE_DEV_AUTH === 'true')
     throw new Error('Development authentication is forbidden in production');

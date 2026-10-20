@@ -111,12 +111,11 @@ describe('remembering for each connection whether it may send', () => {
     expect(await status()).toMatchObject({ connected: false, canSend: false });
   });
 
-  it('lets the dev-mode sandbox mailbox always send, and only there', () => {
+  it('lets the sandbox mailbox always send, and only there', () => {
     const readOnly = { status: 'CONNECTED', canSend: false };
-    expect(maySend(readOnly)).toBe(false);
-    vi.stubEnv('APP_MODE', 'dev');
-    expect(maySend(readOnly)).toBe(true);
-    expect(maySend({ status: 'NOT_CONNECTED', canSend: false })).toBe(false);
+    expect(maySend(readOnly, false)).toBe(false);
+    expect(maySend(readOnly, true)).toBe(true);
+    expect(maySend({ status: 'NOT_CONNECTED', canSend: false }, true)).toBe(false);
   });
 });
 
