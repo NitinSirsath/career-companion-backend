@@ -18,6 +18,8 @@ const DEV_VALUES: Record<string, string> = {
   RELEVANCE_CONFIDENCE_THRESHOLD: '0.95',
   AGENDA_EXTRACTION_V3_ENABLED: 'true',
   LOG_LEVEL: 'debug',
+  TEST_ACCOUNTS: 'dev1@test.com:a-long-dev-password-1',
+  AI_SHOW_HIDDEN_PROVIDERS: 'true',
 };
 const pinned = Object.keys(PINNED_TEST_ENV);
 let before: Record<string, string | undefined>;
