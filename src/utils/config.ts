@@ -131,6 +131,18 @@ export function parseAI_USER_DAILY_CALL_LIMIT(value: string | undefined): number
 export const userDailyCallLimit = () =>
   parseAI_USER_DAILY_CALL_LIMIT(process.env.AI_USER_DAILY_CALL_LIMIT);
 
+/**
+ * Test deploys only: offer the AI catalog's hidden (uncertified) providers in production too.
+ * Empty means off; only `true` turns it on.
+ */
+export function parseAI_SHOW_HIDDEN_PROVIDERS(value: string | undefined): boolean {
+  if (value === undefined || value === '') return false;
+  if (value === 'true') return true;
+  throw new Error('AI_SHOW_HIDDEN_PROVIDERS must be empty or true');
+}
+export const showHiddenProviders = () =>
+  parseAI_SHOW_HIDDEN_PROVIDERS(process.env.AI_SHOW_HIDDEN_PROVIDERS);
+
 /** Off until extraction/v3 is qualified. Turning it off only stops new selection and projection. */
 export const agendaExtractionV3Enabled = () => process.env.AGENDA_EXTRACTION_V3_ENABLED === 'true';
 
@@ -309,6 +321,7 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env) {
   parseAI_TRIAGE_BATCH_SIZE(env.AI_TRIAGE_BATCH_SIZE);
   validateAppMode(env);
   parseTEST_ACCOUNTS(env.TEST_ACCOUNTS);
+  parseAI_SHOW_HIDDEN_PROVIDERS(env.AI_SHOW_HIDDEN_PROVIDERS);
   if (env.NODE_ENV !== 'production') return;
   if (env.ENABLE_DEV_AUTH === 'true')
     throw new Error('Development authentication is forbidden in production');
@@ -371,6 +384,10 @@ export function startupWarnings(): string[] {
     warnings.push(
       'FRONTEND_URL is not set — defaulting to http://localhost:5173 (Vite dev server). ' +
         'Set FRONTEND_URL in .env for production.',
+    );
+  if (isProduction() && showHiddenProviders())
+    warnings.push(
+      'AI_SHOW_HIDDEN_PROVIDERS is on: uncertified AI providers are offered. Test deploys only.',
     );
   return warnings;
 }
