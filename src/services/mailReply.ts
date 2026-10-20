@@ -18,6 +18,7 @@ import { googleStatus, withGmail } from './gmailClient';
 import { maySend } from './gmailConnection';
 import { gmailCallOptions } from './googleTransport';
 import { ReplyTarget, mailboxAddress, readGmail, replyTarget } from './mailbox';
+import { usesSandbox } from './testAccounts';
 
 const READ_BUDGET_MS = 20_000;
 const SEND_BUDGET_MS = 30_000;
@@ -191,7 +192,7 @@ async function assertMaySend(userId: string): Promise<void> {
   });
   if (!connection || connection.status !== 'CONNECTED')
     throw new AppError(409, 'GMAIL_NOT_CONNECTED', 'Connect Gmail to reply from here.');
-  if (!maySend(connection)) throw sendNotAllowed();
+  if (!maySend(connection, await usesSandbox(userId))) throw sendNotAllowed();
 }
 
 /** Sends the mail. Any failure without a clear "no" from Gmail may still have sent it. */
