@@ -1,5 +1,5 @@
 /**
- * Mail sandbox API (dev mode only; see the app mode section of utils/config.ts).
+ * Mail sandbox API: dev mode, and test accounts (see services/testAccounts.ts).
  *
  *   GET  /api/sandbox/threads                     conversations in Inbox or Sent
  *   GET  /api/sandbox/threads/:threadId           one conversation, both sides, with its text
@@ -8,7 +8,7 @@
  *   GET  /api/sandbox/senders                     sender addresses used before
  *   POST /api/sandbox/reset                       empty the mailbox and what the app made from it
  *
- * In prod mode every path answers 404 before authentication. Mail text is never logged.
+ * For anyone else every path answers 404 (middleware/appMode.ts). Mail text is never logged.
  */
 import { NextFunction, Request, Response, Router } from 'express';
 import {
@@ -18,7 +18,7 @@ import {
   SandboxIdSchema,
   SendSandboxMailRequestSchema,
 } from '../contracts/sandbox';
-import { devModeOnly } from '../middleware/appMode';
+import { sandboxAvailable, sandboxUsersOnly } from '../middleware/appMode';
 import { requireAuth } from '../middleware/auth';
 import {
   listSandboxSenders,
@@ -30,8 +30,9 @@ import {
 } from '../services/sandbox/mailbox';
 
 const router = Router();
-router.use(devModeOnly);
+router.use(sandboxAvailable);
 router.use(requireAuth);
+router.use(sandboxUsersOnly);
 
 function handle(status: number, action: (req: Request) => Promise<unknown>) {
   return async (req: Request, res: Response, next: NextFunction) => {
