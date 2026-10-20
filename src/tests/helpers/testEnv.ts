@@ -15,6 +15,8 @@ export const PINNED_TEST_ENV: Record<string, string> = {
   RELEVANCE_CONFIDENCE_THRESHOLD: '0.7', // not '': Number('') is 0
   AGENDA_EXTRACTION_V3_ENABLED: '', // off
   LOG_LEVEL: '', // info
+  TEST_ACCOUNTS: '', // none
+  AI_SHOW_HIDDEN_PROVIDERS: '', // off
 };
 
 /** `fromEnvTest`: the values `.env.test` sets. The name must exist, even empty, to stay pinned. */
