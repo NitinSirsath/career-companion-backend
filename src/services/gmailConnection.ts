@@ -4,16 +4,18 @@
  */
 import { prisma } from '../db/prisma';
 import { AppError } from '../errors';
-import { devMode } from '../utils/config';
 import { encryptToken } from '../utils/gmailTokenEncryption';
 import { nextScheduledSyncAt } from './gmailSchedule';
+import { usesSandbox } from './testAccounts';
 
 /**
  * True when replies can be sent from this connection: the Google grant covers sending. The
- * dev-mode sandbox mailbox can always send; nothing leaves the app there.
+ * sandbox mailbox (`sandbox`, see services/testAccounts.ts) can always send; nothing leaves the app there.
  */
-export const maySend = (connection: { status: string; canSend: boolean }): boolean =>
-  connection.status === 'CONNECTED' && (devMode() || connection.canSend);
+export const maySend = (
+  connection: { status: string; canSend: boolean },
+  sandbox: boolean,
+): boolean => connection.status === 'CONNECTED' && (sandbox || connection.canSend);
 
 /** Connection and sync state for the Gmail page. */
 export async function readGmailStatus(userId: string) {
@@ -68,7 +70,7 @@ export async function readGmailStatus(userId: string) {
           }
         : null,
     syncLookbackDays: connection.syncLookbackDays,
-    canSend: maySend(connection),
+    canSend: maySend(connection, await usesSandbox(userId)),
   };
 }
 
@@ -117,7 +119,7 @@ export async function saveGmailGrant(
 }
 
 /**
- * Dev mode: connects the user's sandbox mailbox in place of a Gmail account. There is no Google
+ * Dev mode and test accounts: connects the user's sandbox mailbox in place of a Gmail account. There is no Google
  * grant, so the saved token is a placeholder that nothing reads.
  */
 export async function connectSandboxMailbox(userId: string): Promise<void> {
