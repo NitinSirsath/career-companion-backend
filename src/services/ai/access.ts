@@ -20,7 +20,7 @@ import { AIAccessError, AccessReason } from './errors';
 import { readFailure } from './failures';
 import { createProviderClient } from './providers';
 import { nextUtcMidnight, userDailyCallLimit, utcDay } from './usage';
-import { isProduction } from '../../utils/config';
+import { isProduction, showHiddenProviders } from '../../utils/config';
 import { logError } from '../../utils/log';
 
 export type AccessState = 'NOT_SET_UP' | 'READY' | 'NEEDS_ATTENTION' | 'LIMITED';
@@ -85,9 +85,12 @@ export const NEEDS_ATTENTION_ISSUES: readonly AIAccessIssue[] = [
   'KEY_UNREADABLE',
 ];
 
-/** Hidden providers are built and evaluated outside production, never offered in it. */
+/**
+ * Hidden providers are built and evaluated outside production, and offered in it only on a test
+ * deploy that sets AI_SHOW_HIDDEN_PROVIDERS.
+ */
 export const isOffered = (provider: CatalogProvider) =>
-  provider.status === 'supported' || !isProduction();
+  provider.status === 'supported' || !isProduction() || showHiddenProviders();
 
 export function offeredProvider(id: string): CatalogProvider | undefined {
   const provider = getCatalogProvider(id);
