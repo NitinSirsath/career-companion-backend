@@ -11,9 +11,10 @@ import {
 } from './gmailSyncErrors';
 import { google, gmail_v1 } from 'googleapis';
 import { prisma } from '../db/prisma';
-import { devMode, gmailOAuth } from '../utils/config';
+import { gmailOAuth } from '../utils/config';
 import { decryptToken, encryptToken } from '../utils/gmailTokenEncryption';
 import { sandboxGmail } from './sandbox/gmail';
+import { usesSandbox } from './testAccounts';
 
 export function googleStatus(error: unknown): number | undefined {
   if (!error || typeof error !== 'object') return undefined;
@@ -33,8 +34,9 @@ export async function withGmail<T>(
   const connection = await prisma.gmailConnection.findUnique({ where: { userId } });
   if (!connection || connection.status !== 'CONNECTED') throw new Error('Gmail is not connected');
   if (options.signal?.aborted) throw new Error('Gmail request failed');
-  // Dev mode has no Google account: the user's sandbox mailbox answers, and Google is never called.
-  if (devMode()) return work(sandboxGmail(userId));
+  // Dev mode and test accounts have no Google account: the user's sandbox mailbox answers, and
+  // Google is never called.
+  if (await usesSandbox(userId)) return work(sandboxGmail(userId));
   const oauth = createGoogleOAuthClient({
     ...gmailOAuth(),
     timeoutMs: GOOGLE_OAUTH_TIMEOUT_MS,
