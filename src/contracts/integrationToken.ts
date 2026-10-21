@@ -59,6 +59,15 @@ export const ListIntegrationTokensResponseSchema =
   createPaginatedResponseSchema(IntegrationTokenSchema);
 export type ListIntegrationTokensResponse = z.infer<typeof ListIntegrationTokensResponseSchema>;
 
+// ─── GET /api/integration-tokens/connection ─────────────────────────────────
+
+/**
+ * Where the automation reaches this backend: `https://` and the first MCP_ALLOWED_HOSTS name, or
+ * null when none is set (local runs, where the frontend's own address passes /mcp on).
+ */
+export const McpConnectionResponseSchema = z.object({ serverAddress: z.string().nullable() });
+export type McpConnectionResponse = z.infer<typeof McpConnectionResponseSchema>;
+
 // ─── DELETE /api/integration-tokens/:id (revoke) ───────────────────────────
 
 export const RevokeIntegrationTokenResponseSchema = IntegrationTokenSchema;
