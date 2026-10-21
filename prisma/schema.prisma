@@ -28,6 +28,7 @@ model User {
   aiUsageDays         AIUsageDay[]
   integrationTokens   IntegrationToken[]
   externalSubmissions ExternalSubmission[]
+  notSubmittedJobs    NotSubmittedJob[]
   sandboxMessages     SandboxMessage[]
 
   @@map("users")
@@ -628,8 +629,9 @@ model IntegrationToken {
   lastUsedAt    DateTime?
   revokedAt     DateTime?
 
-  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  submissions ExternalSubmission[]
+  user             User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  submissions      ExternalSubmission[]
+  notSubmittedJobs NotSubmittedJob[]
 
   @@index([userId, createdAt])
   @@map("integration_tokens")
@@ -654,7 +656,8 @@ enum SubmissionResolvedBy {
 }
 
 /// Evidence that the user's automation reported a confirmed submission (ADR-0002 decision 6).
-/// Immutable: never updated from a later call. Only the match fields change, once, on resolution.
+/// A later call for the same entry fills only empty fields and never changes a saved value
+/// (amendment of 21 Oct 2026). The match fields change once, on resolution.
 model ExternalSubmission {
   id               String                       @id @default(uuid()) @db.Uuid
   userId           String                       @db.Uuid
@@ -672,6 +675,11 @@ model ExternalSubmission {
   location         String?
   workMode         String?
   confirmationText String?
+  /// Full http/https URL of the page where the form was submitted.
+  applyUrl         String?
+  resumeFilename   String?
+  /// [{ question, answer }] as written in the daily file; null when none were reported.
+  submittedAnswers Json?
   receivedAt       DateTime                     @default(now())
   tokenId          String?                      @db.Uuid
   matchState       ExternalSubmissionMatchState
@@ -691,6 +699,39 @@ model ExternalSubmission {
   @@index([userId, receivedAt])
   @@index([applicationId])
   @@map("external_submissions")
+}
+
+enum NotSubmittedOutcome {
+  SKIPPED
+  NEEDS_USER
+}
+
+/// A job the user's automation looked at but did not apply to (`skipped` or `needs_user` in its
+/// daily file). Never an application. Same entry key and fill-only-empty rule as ExternalSubmission.
+model NotSubmittedJob {
+  id              String                   @id @default(uuid()) @db.Uuid
+  userId          String                   @db.Uuid
+  source          ExternalSubmissionSource
+  /// `YYYY-MM-DD/HH:MM:SS` from the automation's daily file; the idempotency key.
+  sourceRecordRef String
+  outcome         NotSubmittedOutcome
+  platform        String
+  company         String
+  jobTitle        String
+  jobUrl          String?
+  reason          String
+  /// When the automation wrote the entry.
+  loggedAt        DateTime
+  receivedAt      DateTime                 @default(now())
+  tokenId         String?                  @db.Uuid
+
+  user  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token IntegrationToken? @relation(fields: [tokenId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, source, sourceRecordRef])
+  @@index([userId, loggedAt])
+  @@index([userId, receivedAt])
+  @@map("not_submitted_jobs")
 }
 
 enum AgendaState {
