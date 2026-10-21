@@ -38,7 +38,7 @@ if (proxyHops) app.set('trust proxy', proxyHops);
 app.use(requestContext);
 
 // MCP endpoint (ADR-0002). Mounted right after the request ID, before CORS, the global JSON
-// parser, cookies and session: its own 32 KB body limit must apply, and it accepts only Bearer
+// parser, cookies and session: its own 128 KB body limit must apply, and it accepts only Bearer
 // integration tokens.
 app.use('/mcp', createMcpRouter());
 app.use(healthRouter);
