@@ -2,6 +2,7 @@
  * Review of automation submissions that need a person (ADR-0002 decision 7).
  *
  *   GET  /api/submissions/pending       owner's NEEDS_REVIEW submissions, newest first
+ *   GET  /api/submissions/not-submitted owner's jobs the automation did not apply to, newest first
  *   POST /api/submissions/:id/resolve   { action: link, applicationId } | { action: create } | { action: ignore }
  *
  * Errors follow the email resolve route: 404 NOT_FOUND (missing or foreign submission),
@@ -10,9 +11,14 @@
  */
 import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
-import { PendingSubmission, ResolveSubmissionRequestSchema } from '../contracts/submission';
+import {
+  NotSubmittedJob,
+  PendingSubmission,
+  ResolveSubmissionRequestSchema,
+} from '../contracts/submission';
 import { requireAuth } from '../middleware/auth';
 import { listPendingSubmissions, resolveSubmission } from '../services/externalSubmission';
+import { listNotSubmittedJobs } from '../services/notSubmittedJob';
 import { createPaginatedResponse, getPaginationParams } from '../utils/pagination';
 import { logEvent } from '../utils/log';
 
@@ -26,6 +32,21 @@ router.get('/pending', async (req: Request, res: Response, next: NextFunction) =
     const items: PendingSubmission[] = rows.map((row) => ({
       ...row,
       submittedAt: row.submittedAt.toISOString(),
+      receivedAt: row.receivedAt.toISOString(),
+    }));
+    res.status(200).json(createPaginatedResponse(items, limit, offset));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/not-submitted', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { limit, offset } = getPaginationParams(req.query);
+    const rows = await listNotSubmittedJobs(req.auth!.user.id, limit, offset);
+    const items: NotSubmittedJob[] = rows.map((row) => ({
+      ...row,
+      loggedAt: row.loggedAt.toISOString(),
       receivedAt: row.receivedAt.toISOString(),
     }));
     res.status(200).json(createPaginatedResponse(items, limit, offset));

@@ -26,6 +26,9 @@ export const SUBMISSION_PLATFORMS = [
 ] as const;
 export const AUTOMATION_SUBMITTED = 'AUTOMATION_SUBMITTED';
 const CONFIRMATION_TEXT_LIMIT = 300;
+export const SUBMITTED_ANSWERS_LIMIT = 50;
+const QUESTION_LIMIT = 500;
+const ANSWER_LIMIT = 2000;
 const FUTURE_TOLERANCE_MS = 5 * 60_000;
 const JOB_URL_QUERY_ALLOWLIST = new Set(['jk', 'currentJobId', 'gh_jid', 'jobId']);
 const LEGAL_SUFFIXES = new Set([
@@ -47,9 +50,16 @@ const LEGAL_SUFFIXES = new Set([
 // Optional fields may be omitted or null; both mean "not reported".
 const optionalText = (max: number) => z.string().trim().max(max).nullish();
 
+const httpUrl = () =>
+  z
+    .url({ protocol: /^https?$/ })
+    .max(2048)
+    .nullish();
+
 /**
- * The tool contract (ADR-0002, v1). Strict: unknown keys are rejected, so there is no field for
- * answers, resume data or credentials. Required strings are trimmed before their length check.
+ * The tool contract (ADR-0002, v1, amended 21 Oct 2026 with the apply page link, the resume file
+ * name and the submitted answers). Strict: unknown keys are rejected, so there is no field for
+ * resume content or credentials. Required strings are trimmed before their length check.
  */
 export const RecordApplicationSubmissionInputSchema = z.strictObject({
   sourceRecordRef: z
@@ -68,10 +78,7 @@ export const RecordApplicationSubmissionInputSchema = z.strictObject({
   submittedAt: z.iso
     .datetime({ offset: true })
     .describe('ISO 8601 with UTC offset, when the site confirmed the submission'),
-  jobUrl: z
-    .url({ protocol: /^https?$/ })
-    .max(2048)
-    .nullish(),
+  jobUrl: httpUrl(),
   portalJobId: optionalText(200),
   destinationHost: z.hostname().max(253).nullish(),
   discoverySource: optionalText(100),
@@ -81,6 +88,18 @@ export const RecordApplicationSubmissionInputSchema = z.strictObject({
     .string()
     .nullish()
     .describe('The confirmation the site showed; longer text is truncated to 300 characters'),
+  applyUrl: httpUrl().describe('Full http or https URL of the page where the form was submitted'),
+  resumeFilename: optionalText(255).describe('File name of the resume used, never its content'),
+  submittedAnswers: z
+    .array(
+      z.strictObject({
+        question: z.string().trim().min(1).max(QUESTION_LIMIT),
+        answer: z.string().trim().max(ANSWER_LIMIT),
+      }),
+    )
+    .max(SUBMITTED_ANSWERS_LIMIT)
+    .nullish()
+    .describe('Every screening question and the answer given, as written in the daily file'),
 });
 
 export type SubmissionResult = 'created' | 'linked' | 'needs_review' | 'already_recorded';
@@ -111,6 +130,10 @@ export interface CanonicalSubmission {
   location: string | null;
   workMode: string | null;
   confirmationText: string | null;
+  applyUrl: string | null;
+  resumeFilename: string | null;
+  /** null when none were reported. */
+  submittedAnswers: { question: string; answer: string }[] | null;
 }
 
 const KNOWN_FIELDS = new Set(Object.keys(RecordApplicationSubmissionInputSchema.shape));
@@ -119,7 +142,9 @@ const KNOWN_FIELDS = new Set(Object.keys(RecordApplicationSubmissionInputSchema.
 function invalidFields(issues: z.core.$ZodIssue[]): string[] {
   const fields = new Set<string>();
   for (const issue of issues) {
-    if (issue.code === 'unrecognized_keys') issue.keys.forEach((k) => fields.add(k));
+    // A nested unknown key (inside an answer) is reported by its top-level field.
+    if (issue.code === 'unrecognized_keys' && !issue.path.length)
+      issue.keys.forEach((k) => fields.add(k));
     else fields.add(issue.path.length ? String(issue.path[0]) : '(input)');
   }
   return [...fields];
@@ -131,6 +156,15 @@ export function loggableFields(fields: string[]) {
     invalidFields: fields.filter((f) => KNOWN_FIELDS.has(f) || f === '(input)'),
     unknownKeyCount: fields.filter((f) => !KNOWN_FIELDS.has(f) && f !== '(input)').length,
   };
+}
+
+/** Keeps the full address, query included, but drops the fragment and any user name or password. */
+export function canonicalApplyUrl(raw: string): string {
+  const url = new URL(raw);
+  url.hash = '';
+  url.username = '';
+  url.password = '';
+  return url.toString();
 }
 
 /** Drops the fragment and any user name or password, and keeps only the job-ID query parameters. */
@@ -177,6 +211,9 @@ export function parseSubmissionInput(raw: unknown, now = new Date()): CanonicalS
     confirmationText: confirmation
       ? Array.from(confirmation).slice(0, CONFIRMATION_TEXT_LIMIT).join('')
       : null,
+    applyUrl: input.applyUrl ? canonicalApplyUrl(input.applyUrl) : null,
+    resumeFilename: blankToNull(input.resumeFilename),
+    submittedAnswers: input.submittedAnswers?.length ? input.submittedAnswers : null,
   };
 }
 
@@ -285,12 +322,45 @@ const STORED_FIELDS = [
   'location',
   'workMode',
   'confirmationText',
+  'applyUrl',
+  'resumeFilename',
+] as const;
+/** Optional fields a repeat may fill while they are still empty. */
+const FILLABLE_FIELDS = [
+  'jobUrl',
+  'portalJobId',
+  'destinationHost',
+  'discoverySource',
+  'location',
+  'workMode',
+  'confirmationText',
+  'applyUrl',
+  'resumeFilename',
 ] as const;
 function payloadDiffers(stored: ExternalSubmission, incoming: CanonicalSubmission) {
   return (
     stored.submittedAt.getTime() !== incoming.submittedAt.getTime() ||
-    STORED_FIELDS.some((field) => (stored[field] ?? null) !== (incoming[field] ?? null))
+    STORED_FIELDS.some((field) => (stored[field] ?? null) !== (incoming[field] ?? null)) ||
+    answersKey(stored.submittedAnswers) !== answersKey(incoming.submittedAnswers)
   );
+}
+
+/** Answers as [question, answer] pairs: the database may store an object's keys in another order. */
+const answersKey = (answers: unknown) =>
+  JSON.stringify(
+    Array.isArray(answers)
+      ? answers.map((a: { question?: unknown; answer?: unknown }) => [a.question, a.answer])
+      : null,
+  );
+
+/** What a repeat adds: only fields that are empty in the stored record. Saved values never change. */
+export function fillEmptyFields(stored: ExternalSubmission, incoming: CanonicalSubmission) {
+  const fill: Prisma.ExternalSubmissionUpdateInput = {};
+  for (const field of FILLABLE_FIELDS)
+    if (stored[field] === null && incoming[field] !== null) fill[field] = incoming[field];
+  if (stored.submittedAnswers === null && incoming.submittedAnswers)
+    fill.submittedAnswers = incoming.submittedAnswers;
+  return fill;
 }
 
 export interface IntakeOutcome {
@@ -300,12 +370,33 @@ export interface IntakeOutcome {
   payloadDiffered?: boolean;
 }
 
+/** A repeat of a stored entry: fills its empty fields; null when the entry is new. */
+async function repeatOf(
+  db: Tx | typeof prisma,
+  ref: { userId: string; source: 'AUTOMATION'; sourceRecordRef: string },
+  submission: CanonicalSubmission,
+): Promise<IntakeOutcome | null> {
+  const stored = await db.externalSubmission.findUnique({
+    where: { userId_source_sourceRecordRef: ref },
+  });
+  if (!stored) return null;
+  const fill = fillEmptyFields(stored, submission);
+  if (Object.keys(fill).length)
+    await db.externalSubmission.update({ where: { id: stored.id }, data: fill });
+  return {
+    result: 'already_recorded',
+    recordId: stored.id,
+    payloadDiffered: payloadDiffers(stored, submission),
+  };
+}
+
 const RESULT_OF = { CREATED: 'created', LINKED: 'linked', NEEDS_REVIEW: 'needs_review' } as const;
 const TX_OPTIONS = { maxWait: 5000, timeout: 10000 };
 
 /**
  * Records one confirmed submission for the token's user. Idempotent on
- * (user, AUTOMATION, sourceRecordRef): the first write wins and a repeat returns already_recorded.
+ * (user, AUTOMATION, sourceRecordRef): a repeat returns already_recorded and only fills fields
+ * that are still empty; a saved value is never changed and the match is never redone.
  */
 export async function recordSubmission(
   userId: string,
@@ -320,18 +411,7 @@ export async function recordSubmission(
     source: 'AUTOMATION' as const,
     sourceRecordRef: submission.sourceRecordRef,
   };
-  const existing = async (db: Tx | typeof prisma): Promise<IntakeOutcome | null> => {
-    const stored = await db.externalSubmission.findUnique({
-      where: { userId_source_sourceRecordRef: ref },
-    });
-    return (
-      stored && {
-        result: 'already_recorded',
-        recordId: stored.id,
-        payloadDiffered: payloadDiffers(stored, submission),
-      }
-    );
-  };
+  const existing = (db: Tx | typeof prisma) => repeatOf(db, ref, submission);
   try {
     return await prisma.$transaction(async (tx) => {
       await lockUser(tx, LOCK_NAMESPACE.externalSubmissions, userId);
@@ -371,10 +451,12 @@ export async function recordSubmission(
         else decision = { state: 'NEEDS_REVIEW' };
       }
       const settled = decision.state !== 'NEEDS_REVIEW';
+      const { submittedAnswers, ...fields } = submission;
       const record = await tx.externalSubmission.create({
         data: {
           ...ref,
-          ...submission,
+          ...fields,
+          submittedAnswers: submittedAnswers ?? Prisma.DbNull,
           receivedAt: now,
           tokenId,
           matchState: decision.state,
@@ -475,6 +557,39 @@ export async function listPendingSubmissions(userId: string, limit: number, offs
       location: true,
       workMode: true,
       confirmationText: true,
+    },
+  });
+}
+
+/** Everything the automation reported behind one owned application, newest first; null if not owned. */
+export async function listApplicationSubmissions(userId: string, applicationId: string) {
+  const app = await prisma.application.findFirst({
+    where: { id: applicationId, userId },
+    select: { id: true },
+  });
+  if (!app) return null;
+  return prisma.externalSubmission.findMany({
+    where: { userId, applicationId, matchState: { in: ['LINKED', 'CREATED'] } },
+    orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
+    select: {
+      id: true,
+      sourceRecordRef: true,
+      matchState: true,
+      platform: true,
+      company: true,
+      jobTitle: true,
+      submittedAt: true,
+      receivedAt: true,
+      jobUrl: true,
+      applyUrl: true,
+      portalJobId: true,
+      destinationHost: true,
+      discoverySource: true,
+      location: true,
+      workMode: true,
+      confirmationText: true,
+      resumeFilename: true,
+      submittedAnswers: true,
     },
   });
 }

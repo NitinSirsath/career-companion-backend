@@ -9,8 +9,9 @@ import { app } from '../index';
 import { prisma } from '../db/prisma';
 import { createIntegrationToken } from '../services/integrationTokens';
 import { createMcpRouter } from '../mcp/router';
-import { ADVERTISED_INPUT_SCHEMA } from '../mcp/server';
+import { ADVERTISED_INPUT_SCHEMA, ADVERTISED_NOT_SUBMITTED_SCHEMA } from '../mcp/server';
 import { RecordApplicationSubmissionInputSchema } from '../services/externalSubmission';
+import { RecordNotSubmittedJobInputSchema } from '../services/notSubmittedJob';
 import express from 'express';
 import {
   ApplicationResponseSchema,
@@ -252,6 +253,7 @@ describe('official SDK client', () => {
       expect((await read(`/api/applications/${application.id}/events`)).body.items).toHaveLength(3);
       expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
         'record_application_submission',
+        'record_not_submitted_job',
       ]);
     } finally {
       await client.close();
@@ -260,17 +262,29 @@ describe('official SDK client', () => {
     }
   });
 
-  it('lists exactly one write-only, idempotent tool with a strict input schema', async () => {
+  it('lists two write-only, idempotent tools with strict input schemas', async () => {
     const client = await connect();
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(['record_application_submission']);
-    const [tool] = tools;
-    expect(tool.annotations).toEqual({
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
+    expect(tools.map((t) => t.name)).toEqual([
+      'record_application_submission',
+      'record_not_submitted_job',
+    ]);
+    const [tool, notSubmitted] = tools;
+    for (const each of tools)
+      expect(each.annotations).toEqual({
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      });
+    expect(notSubmitted.inputSchema).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: expect.arrayContaining(['sourceRecordRef', 'outcome', 'reason', 'loggedAt']),
     });
+    expect(JSON.stringify(notSubmitted.inputSchema)).not.toMatch(
+      /anyOf|oneOf|"null"|\$schema|\(\?[=!]/,
+    );
     expect(tool.inputSchema).toMatchObject({
       type: 'object',
       additionalProperties: false,
@@ -284,6 +298,7 @@ describe('official SDK client', () => {
     });
     expect(Object.keys(tool.inputSchema.properties ?? {}).sort()).toEqual(
       [
+        'applyUrl',
         'company',
         'confirmationText',
         'destinationHost',
@@ -293,7 +308,9 @@ describe('official SDK client', () => {
         'location',
         'platform',
         'portalJobId',
+        'resumeFilename',
         'sourceRecordRef',
+        'submittedAnswers',
         'submittedAt',
         'workMode',
       ].sort(),
@@ -407,6 +424,23 @@ describe('advertised schema matches the validated contract', () => {
     expect(ADVERTISED_INPUT_SCHEMA.properties.platform.enum).toEqual(shape.platform.options);
     expect(ADVERTISED_INPUT_SCHEMA.properties.workMode.enum).toEqual(
       shape.workMode.unwrap().unwrap().options,
+    );
+  });
+
+  it('has the same not-submitted fields, required fields and enums', () => {
+    const notSubmitted = RecordNotSubmittedJobInputSchema.shape;
+    expect(Object.keys(ADVERTISED_NOT_SUBMITTED_SCHEMA.properties).sort()).toEqual(
+      Object.keys(notSubmitted).sort(),
+    );
+    const required = Object.entries(notSubmitted)
+      .filter(([, field]) => !field.safeParse(undefined).success)
+      .map(([k]) => k);
+    expect([...ADVERTISED_NOT_SUBMITTED_SCHEMA.required].sort()).toEqual(required.sort());
+    expect(ADVERTISED_NOT_SUBMITTED_SCHEMA.properties.outcome.enum).toEqual(
+      notSubmitted.outcome.options,
+    );
+    expect(ADVERTISED_NOT_SUBMITTED_SCHEMA.properties.platform.enum).toEqual(
+      notSubmitted.platform.options,
     );
   });
 
@@ -539,19 +573,19 @@ describe('HTTP boundary', () => {
     ).toBe(403);
   });
 
-  it('413 JSON for a body over 32 KB, without a stack trace', async () => {
+  it('413 JSON for a body over 128 KB, without a stack trace', async () => {
     const res = await mcp()
       .set('Authorization', `Bearer ${token}`)
-      .send({ ...initialize, params: { ...initialize.params, padding: 'x'.repeat(33 * 1024) } });
+      .send({ ...initialize, params: { ...initialize.params, padding: 'x'.repeat(129 * 1024) } });
     expect(res.status).toBe(413);
     expect(res.headers['content-type']).toMatch(/json/);
     expect(res.text).not.toMatch(/at .*\.js|PayloadTooLargeError|<html/i);
   });
 
-  it('accepts a body under 32 KB that the global 100 KB parser would also accept', async () => {
+  it('accepts a body under 128 KB that the global 100 KB parser would refuse', async () => {
     const res = await mcp()
       .set('Authorization', `Bearer ${token}`)
-      .send({ ...initialize, params: { ...initialize.params, padding: 'x'.repeat(30 * 1024) } });
+      .send({ ...initialize, params: { ...initialize.params, padding: 'x'.repeat(120 * 1024) } });
     expect(res.status).toBe(200);
   });
 

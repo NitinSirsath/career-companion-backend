@@ -17,6 +17,8 @@ import {
   updateUserStatus,
 } from '../services/application';
 import { requireAuth } from '../middleware/auth';
+import { ApplicationSubmission, SubmittedAnswerSchema } from '../contracts/submission';
+import { listApplicationSubmissions } from '../services/externalSubmission';
 
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
 import { logEvent } from '../utils/log';
@@ -108,6 +110,33 @@ router.get('/:id/actions', async (req: Request, res: Response, next: NextFunctio
     }
 
     return res.status(200).json(createPaginatedResponse(actions, limit, offset));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/applications/:id/submissions
+ * Everything the automation reported for this application (ADR-0002, amended 21 Oct 2026),
+ * newest first. 403 when the application is missing or belongs to another user, as for events.
+ */
+router.get('/:id/submissions', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rows = await listApplicationSubmissions(req.auth!.user.id, z.uuid().parse(req.params.id));
+    if (rows === null)
+      return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Access denied' } });
+    const items: ApplicationSubmission[] = rows.map(({ submittedAnswers, ...row }) => ({
+      ...row,
+      matchState: row.matchState as ApplicationSubmission['matchState'],
+      submittedAt: row.submittedAt.toISOString(),
+      receivedAt: row.receivedAt.toISOString(),
+      // Stored JSON is re-checked; anything that is not a question-answer pair is left out.
+      submittedAnswers: z
+        .array(SubmittedAnswerSchema)
+        .catch([])
+        .parse(submittedAnswers ?? []),
+    }));
+    return res.status(200).json({ items });
   } catch (err) {
     next(err);
   }

@@ -2,12 +2,12 @@
  * POST /mcp — the Streamable HTTP MCP endpoint (ADR-0002 decisions 1, 10, 11, 13).
  *
  * Mounted in index.ts BEFORE every global middleware (CORS, JSON parser, cookies, session), so:
- *   - the route-local 32 KB JSON limit is the one that applies;
+ *   - the route-local 128 KB JSON limit is the one that applies;
  *   - no session is ever read here: only a Bearer integration token authenticates;
  *   - no CORS headers are added, so a web page cannot read responses.
  *
  * Order: one log line per request → POST only (405) → Host allowlist (403) → Origin allowlist
- * (403; requests without Origin pass) → Bearer token (401) → 32 KB JSON → MCP handler.
+ * (403; requests without Origin pass) → Bearer token (401) → 128 KB JSON → MCP handler.
  *
  * Built on the SDK's runtime-neutral core (`@modelcontextprotocol/server` + `/node`), not the
  * Express add-on, which re-types `req.auth` for the whole app. The verified AuthInfo is handed to
@@ -30,7 +30,8 @@ import { McpCallRecord, currentCall, rpcMethodOf, runWithCall, writeCallLog } fr
 import { mcpConfig } from '../utils/config';
 import { createMcpServer } from './server';
 
-export const MCP_BODY_LIMIT = 32 * 1024;
+// Room for up to 50 submitted answers (ADR-0002 amendment, 21 Oct 2026).
+export const MCP_BODY_LIMIT = 128 * 1024;
 const REQUIRED_SCOPES = [TOKEN_SCOPE];
 
 const verifier = {

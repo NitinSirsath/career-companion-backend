@@ -183,6 +183,12 @@ export function mcpConfig(env: NodeJS.ProcessEnv = process.env) {
   };
 }
 
+/** The public address of this backend for the automation: the first allowed /mcp host, or null. */
+export function mcpServerAddress(env: NodeJS.ProcessEnv = process.env): string | null {
+  const [host] = parseHostnameList('MCP_ALLOWED_HOSTS', env.MCP_ALLOWED_HOSTS);
+  return host ? `https://${host}` : null;
+}
+
 export const DEFAULT_DAILY_SUBMISSION_LIMIT = 500;
 
 /** New submissions per user per UTC day, 0–5000. 0 stops all new submissions. */

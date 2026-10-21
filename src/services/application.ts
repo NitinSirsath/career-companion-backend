@@ -35,13 +35,24 @@ const sourceSubmissionSelect = {
 } as const;
 const AUTOMATION_SUBMITTED = 'AUTOMATION_SUBMITTED';
 
+const SETTLED = {
+  matchState: { in: ['LINKED', 'CREATED'] },
+} satisfies Prisma.ExternalSubmissionWhereInput;
+
 const enrichment = {
   _count: {
     select: {
       actions: { where: { status: 'PENDING', retiredAt: null } },
       // submittedVia: a linked or created automation submission (never a status).
-      externalSubmissions: { where: { matchState: { in: ['LINKED', 'CREATED'] } } },
+      externalSubmissions: { where: SETTLED },
     },
+  },
+  // automation: the table's facts from the newest linked or created submission.
+  externalSubmissions: {
+    where: SETTLED,
+    orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
+    take: 1,
+    select: { userId: true, platform: true, jobUrl: true, submittedAt: true },
   },
 } satisfies Prisma.ApplicationInclude;
 
@@ -515,5 +526,19 @@ function mapToResponse(
       : null,
     pendingActionCount: app._count.actions,
     submittedVia: app._count.externalSubmissions > 0 ? 'AUTOMATION' : null,
+    automation: toAutomation(userId, app.externalSubmissions[0]),
+  };
+}
+
+/** Owner-checked like the event evidence: another user's row is never shown. */
+function toAutomation(
+  userId: string,
+  submission: EnrichedApplication['externalSubmissions'][number] | undefined,
+): ApplicationResponse['automation'] {
+  if (!submission || submission.userId !== userId) return null;
+  return {
+    platform: submission.platform,
+    jobUrl: submission.jobUrl,
+    submittedAt: submission.submittedAt.toISOString(),
   };
 }
