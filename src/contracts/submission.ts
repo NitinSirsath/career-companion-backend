@@ -65,3 +65,59 @@ export type SourceSubmission = z.infer<typeof SourceSubmissionSchema>;
 
 export const SubmittedViaSchema = z.enum(['AUTOMATION']);
 export type SubmittedVia = z.infer<typeof SubmittedViaSchema>;
+
+// ─── Automation details on applications ─────────────────────────────────────
+
+/** The table's facts for an automation application: from its newest linked or created submission. */
+export const ApplicationAutomationSchema = z.object({
+  platform: z.string(),
+  /** Stored http/https URL of the job post. */
+  jobUrl: z.string().nullable(),
+  submittedAt: IsoDateTime,
+});
+export type ApplicationAutomation = z.infer<typeof ApplicationAutomationSchema>;
+
+/** One screening question and the answer the automation gave, as written in its daily file. */
+export const SubmittedAnswerSchema = z.object({ question: z.string(), answer: z.string() });
+export type SubmittedAnswer = z.infer<typeof SubmittedAnswerSchema>;
+
+/** Everything the automation reported for one submission behind an application. */
+export const ApplicationSubmissionSchema = PendingSubmissionSchema.extend({
+  matchState: z.enum(['LINKED', 'CREATED']),
+  /** Full http/https URL of the page where the form was submitted. */
+  applyUrl: z.string().nullable(),
+  resumeFilename: z.string().nullable(),
+  submittedAnswers: z.array(SubmittedAnswerSchema),
+});
+export type ApplicationSubmission = z.infer<typeof ApplicationSubmissionSchema>;
+
+// GET /api/applications/:id/submissions — newest first; not paginated (a few per application).
+export const ListApplicationSubmissionsResponseSchema = z.object({
+  items: z.array(ApplicationSubmissionSchema),
+});
+export type ListApplicationSubmissionsResponse = z.infer<
+  typeof ListApplicationSubmissionsResponseSchema
+>;
+
+// ─── GET /api/submissions/not-submitted ─────────────────────────────────────
+
+/** A job the automation looked at but did not apply to. Never an application. */
+export const NotSubmittedJobSchema = z.object({
+  id: z.string(),
+  sourceRecordRef: z.string(),
+  outcome: z.enum(['SKIPPED', 'NEEDS_USER']),
+  platform: z.string(),
+  company: z.string(),
+  jobTitle: z.string(),
+  jobUrl: z.string().nullable(),
+  /** Why it was skipped, or the question or step that needs the user. */
+  reason: z.string(),
+  /** When the automation wrote the entry. */
+  loggedAt: IsoDateTime,
+  receivedAt: IsoDateTime,
+});
+export type NotSubmittedJob = z.infer<typeof NotSubmittedJobSchema>;
+
+export const ListNotSubmittedJobsResponseSchema =
+  createPaginatedResponseSchema(NotSubmittedJobSchema);
+export type ListNotSubmittedJobsResponse = z.infer<typeof ListNotSubmittedJobsResponseSchema>;
