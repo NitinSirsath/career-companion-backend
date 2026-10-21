@@ -15,13 +15,20 @@ const { spawnSync } = require('node:child_process');
 const { Client } = require('pg');
 const { assertTestDatabase } = require('../dist/utils/testDatabase');
 
-const NEW_MIGRATION = '20261002150000_automation_submissions';
+// The migration under test, and every later migration that changes what it created. The legacy
+// lane holds none of them; the upgrade applies them together.
+const NEW_MIGRATIONS = [
+  '20261002150000_automation_submissions',
+  '20261021100000_automation_details',
+];
 const NEW_UNIQUES = [
   'application_events_externalSubmissionId_key',
   'external_submissions_pkey',
   'external_submissions_userId_source_sourceRecordRef_key',
   'integration_tokens_pkey',
   'integration_tokens_tokenHash_key',
+  'not_submitted_jobs_pkey',
+  'not_submitted_jobs_userId_source_sourceRecordRef_key',
 ];
 const NEW_TRIGGERS = [
   'event_submission_ownership',
@@ -353,7 +360,7 @@ async function upgradeLane(url) {
   fs.mkdirSync(path.join(legacy, 'migrations'), { recursive: true });
   fs.copyFileSync(path.join(backend, 'prisma/schema.prisma'), path.join(legacy, 'schema.prisma'));
   for (const entry of fs.readdirSync(path.join(backend, 'prisma/migrations')))
-    if (entry !== NEW_MIGRATION)
+    if (!NEW_MIGRATIONS.includes(entry))
       fs.cpSync(
         path.join(backend, 'prisma/migrations', entry),
         path.join(legacy, 'migrations', entry),
