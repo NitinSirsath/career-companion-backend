@@ -3,19 +3,24 @@
  *
  *   POST   /api/integration-tokens       create; the only response with the plaintext token
  *   GET    /api/integration-tokens       list, newest first, offset pagination
+ *   GET    /api/integration-tokens/connection   the server address the automation uses
  *   DELETE /api/integration-tokens/:id   revoke (keeps the row for the audit trail)
  *
  * The user always comes from the session. An integration token is never accepted here.
  */
 import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
-import { CreateIntegrationTokenRequestSchema } from '../contracts/integrationToken';
+import {
+  CreateIntegrationTokenRequestSchema,
+  McpConnectionResponse,
+} from '../contracts/integrationToken';
 import { requireAuth } from '../middleware/auth';
 import {
   createIntegrationToken,
   listIntegrationTokens,
   revokeIntegrationToken,
 } from '../services/integrationTokens';
+import { mcpServerAddress } from '../utils/config';
 import { createPaginatedResponse, getPaginationParams } from '../utils/pagination';
 
 const router = Router();
@@ -45,6 +50,11 @@ router.get(
     const items = await listIntegrationTokens(req.auth!.user.id, limit, offset);
     return createPaginatedResponse(items, limit, offset);
   }),
+);
+
+router.get(
+  '/connection',
+  handle(200, async (): Promise<McpConnectionResponse> => ({ serverAddress: mcpServerAddress() })),
 );
 
 router.delete(
