@@ -43,3 +43,4 @@ ALTER TABLE "not_submitted_jobs" ADD CONSTRAINT "not_submitted_jobs_userId_fkey"
 
 -- AddForeignKey
 ALTER TABLE "not_submitted_jobs" ADD CONSTRAINT "not_submitted_jobs_tokenId_fkey" FOREIGN KEY ("tokenId") REFERENCES "integration_tokens"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
