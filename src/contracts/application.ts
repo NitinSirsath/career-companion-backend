@@ -1,5 +1,9 @@
 import { createPaginatedResponseSchema, PaginatedResponse } from './pagination';
-import { SourceSubmissionSchema, SubmittedViaSchema } from './submission';
+import {
+  ApplicationAutomationSchema,
+  SourceSubmissionSchema,
+  SubmittedViaSchema,
+} from './submission';
 import { z } from 'zod';
 
 export const ApplicationStatusSchema = z.enum([
@@ -118,6 +122,8 @@ const ApplicationResponseObjectSchema = z.object({
   pendingActionCount: z.number(),
   /** 'AUTOMATION' when a linked or created automation submission exists (ADR-0002). Never a status. */
   submittedVia: SubmittedViaSchema.nullable(),
+  /** Platform, job link and time of the newest automation submission; null for other applications. */
+  automation: ApplicationAutomationSchema.nullable(),
 });
 
 export const ApplicationResponseSchema = ApplicationResponseObjectSchema.superRefine((app, ctx) => {
