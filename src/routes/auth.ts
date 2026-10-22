@@ -10,6 +10,7 @@
  *   GET  /api/auth/me         the signed-in user
  *   GET|POST /api/auth/logout
  *
+ * `?returnTo=` on connect: the app page to open after sign-in (`next` on /login if it fails).
  * Request bodies are never logged, and validation errors never include submitted values.
  */
 import { randomBytes } from 'crypto';
@@ -32,10 +33,12 @@ import { findOrCreateGoogleUser, getUserProfile } from '../services/user';
 import { AppError } from '../errors';
 import { frontendUrl, isProduction } from '../utils/config';
 import { logError } from '../utils/log';
+import { returnPath } from '../utils/returnPath';
 
 const router = Router();
 
 const AUTH_STATE_COOKIE_NAME = 'google_login_state';
+const AUTH_RETURN_COOKIE_NAME = 'google_login_return';
 const FRONTEND_LOGIN_PATH = '/login';
 const FRONTEND_DASHBOARD_PATH = '/';
 
@@ -52,6 +55,12 @@ async function signIn(req: Request, userId: string) {
   );
 }
 
+/** The login page after a failed sign-in; `next` keeps the page asked for, for the next try. */
+function loginErrorUrl(code: string, returnTo: string) {
+  const url = `${frontendUrl()}${FRONTEND_LOGIN_PATH}?error=${code}`;
+  return returnTo === FRONTEND_DASHBOARD_PATH ? url : `${url}&next=${encodeURIComponent(returnTo)}`;
+}
+
 function handle(status: number, action: (req: Request) => Promise<unknown>) {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -64,16 +73,21 @@ function handle(status: number, action: (req: Request) => Promise<unknown>) {
 
 router.get('/connect', prodModeOnly, async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const returnTo = returnPath(req.query.returnTo, FRONTEND_DASHBOARD_PATH);
     const state = randomBytes(32).toString('hex');
     const authUrl = googleLoginUrl(state);
 
-    res.cookie(AUTH_STATE_COOKIE_NAME, state, {
+    const cookie = {
       httpOnly: true,
       sameSite: 'lax',
       maxAge: 5 * 60 * 1000, // 5 minutes
       signed: true,
       secure: isProduction(),
-    });
+    } as const;
+    res.cookie(AUTH_STATE_COOKIE_NAME, state, cookie);
+    // Kept for the same few minutes; an earlier try's page must not outlive it.
+    if (returnTo === FRONTEND_DASHBOARD_PATH) res.clearCookie(AUTH_RETURN_COOKIE_NAME);
+    else res.cookie(AUTH_RETURN_COOKIE_NAME, returnTo, cookie);
 
     return res.redirect(302, authUrl);
   } catch (err) {
@@ -82,8 +96,12 @@ router.get('/connect', prodModeOnly, async (req: Request, res: Response, next: N
 });
 
 router.get('/callback', prodModeOnly, async (req: Request, res: Response) => {
-  const frontendLoginUrl = `${frontendUrl()}${FRONTEND_LOGIN_PATH}`;
-  const frontendDashboardUrl = `${frontendUrl()}${FRONTEND_DASHBOARD_PATH}`;
+  // Checked again on the way back, and single use like the state.
+  const returnTo = returnPath(
+    req.signedCookies?.[AUTH_RETURN_COOKIE_NAME],
+    FRONTEND_DASHBOARD_PATH,
+  );
+  res.clearCookie(AUTH_RETURN_COOKIE_NAME);
 
   try {
     const { code, state, error } = req.query as {
@@ -94,31 +112,31 @@ router.get('/callback', prodModeOnly, async (req: Request, res: Response) => {
 
     if (error === 'access_denied') {
       res.clearCookie(AUTH_STATE_COOKIE_NAME);
-      return res.redirect(302, `${frontendLoginUrl}?error=denied`);
+      return res.redirect(302, loginErrorUrl('denied', returnTo));
     }
 
     const storedState = req.signedCookies?.[AUTH_STATE_COOKIE_NAME];
     res.clearCookie(AUTH_STATE_COOKIE_NAME);
 
     if (!storedState || !state || storedState !== state) {
-      return res.redirect(302, `${frontendLoginUrl}?error=csrf`);
+      return res.redirect(302, loginErrorUrl('csrf', returnTo));
     }
 
     if (!code) {
-      return res.redirect(302, `${frontendLoginUrl}?error=missing_code`);
+      return res.redirect(302, loginErrorUrl('missing_code', returnTo));
     }
 
     const identity = await verifyGoogleLogin(code);
     // A test account signs in on its own page only.
     if (isTestAccountEmail(identity.email))
-      return res.redirect(302, `${frontendLoginUrl}?error=test_account`);
+      return res.redirect(302, loginErrorUrl('test_account', returnTo));
     const user = await findOrCreateGoogleUser(identity.googleId, identity.email, identity.name);
 
     await signIn(req, user.id);
-    return res.redirect(302, frontendDashboardUrl);
+    return res.redirect(302, `${frontendUrl()}${returnTo}`);
   } catch (err) {
     logError('google_login_failed', {}, err);
-    return res.redirect(302, `${frontendLoginUrl}?error=server_error`);
+    return res.redirect(302, loginErrorUrl('server_error', returnTo));
   }
 });
 
