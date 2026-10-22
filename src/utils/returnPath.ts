@@ -1,6 +1,6 @@
 /**
  * A path inside this app: one `/` first, then printable ASCII without a backslash. A browser
- * reads `//host` and `/\\host` as another site, and drops tabs and line breaks, so none of these
+ * reads `//host` and `/\host` as another site, and drops tabs and line breaks, so none of these
  * may pass. A real page path, query and fragment are already percent-encoded and always fit.
  */
 const IN_APP_PATH = /^\/(?!\/)[\x21-\x5b\x5d-\x7e]*$/;
