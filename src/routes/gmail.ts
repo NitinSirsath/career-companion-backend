@@ -27,6 +27,7 @@ import { getPaginationParams, createPaginatedResponse } from '../utils/paginatio
 import { GmailSettingsPatchSchema } from '../contracts/gmail';
 import { frontendUrl, isProduction } from '../utils/config';
 import { logError } from '../utils/log';
+import { returnPath } from '../utils/returnPath';
 import { listEmails } from '../services/email';
 import {
   clearGmailConnection,
@@ -52,11 +53,10 @@ const OAUTH_COOKIE_MAX_AGE_MS = 5 * 60 * 1000; // enough time to complete the OA
 
 /**
  * Where to send the user after connecting: the mail they came from, or the Gmail page. Only a
- * mail details path of this app is accepted, so the value can never lead to another site.
+ * mail details path is accepted here, a narrower rule than the shared in-app path check.
  */
 const MAIL_PAGE = /^\/mails\/(gmail\/)?[A-Za-z0-9_-]{1,128}$/;
-const returnPath = (value: unknown): string =>
-  typeof value === 'string' && MAIL_PAGE.test(value) ? value : FRONTEND_GMAIL_PATH;
+const mailReturnPath = (value: unknown) => returnPath(value, FRONTEND_GMAIL_PATH, MAIL_PAGE);
 
 // ─── Protect all routes with dev auth ───────────────────────────────────────
 
@@ -76,7 +76,7 @@ router.get('/status', async (req: Request, res: Response, next: NextFunction) =>
 
 router.get('/connect', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const returnTo = returnPath(req.query.returnTo);
+    const returnTo = mailReturnPath(req.query.returnTo);
     // Dev mode and test accounts have no Google account: the sandbox mailbox is connected at once.
     if (await usesSandbox(req.auth!.user.id)) {
       await connectSandboxMailbox(req.auth!.user.id);
@@ -134,7 +134,7 @@ router.get('/callback', prodModeOnly, async (req: Request, res: Response) => {
 
     // Clear the state cookie immediately — it is single-use.
     res.clearCookie(STATE_COOKIE_NAME);
-    const returnTo = returnPath(req.signedCookies?.[RETURN_COOKIE_NAME]);
+    const returnTo = mailReturnPath(req.signedCookies?.[RETURN_COOKIE_NAME]);
     res.clearCookie(RETURN_COOKIE_NAME);
 
     if (!storedState || !state || storedState !== state || !state.startsWith(`${userId}.`)) {
