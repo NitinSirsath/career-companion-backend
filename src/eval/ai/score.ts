@@ -33,6 +33,7 @@ const ExtractionField = z.enum([
   'actionDeadline',
   'followUpRequired',
   'followUpDate',
+  'fakeOfferWarning',
 ]);
 const Matcher = z.union([
   z.strictObject({ contains: z.array(z.string().min(1)).min(1) }),
