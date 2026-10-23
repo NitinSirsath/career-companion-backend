@@ -7,7 +7,7 @@ import { processEmail } from '../services/ai/pipeline';
 import { fetchMessageBody, fetchMessageMetadata } from '../services/gmailFetcher';
 import { createProviderClient } from '../services/ai/providers';
 import * as matcher from '../services/matcher';
-import { JobExtractionSchema } from '../services/ai/contracts';
+import { JobExtractionV4Schema } from '../services/ai/contracts';
 import { fakeProviderClient } from './helpers/fakeProviderClient';
 import { configureAI, fakeAccess } from './helpers/aiAccess';
 vi.mock('../services/gmailFetcher');
@@ -169,8 +169,8 @@ describe('Durable AI external-effect boundary', () => {
   });
 
   it('keeps low-confidence classifications eligible for extraction without repeating either call', async () => {
-    const extraction = JobExtractionSchema.parse(
-      Object.fromEntries(Object.keys(JobExtractionSchema.shape).map((key) => [key, null])),
+    const extraction = JobExtractionV4Schema.parse(
+      Object.fromEntries(Object.keys(JobExtractionV4Schema.shape).map((key) => [key, null])),
     );
     const client = fakeProviderClient({
       classification: { decision: 'IRRELEVANT', confidence: 0.2, reasoning: 'uncertain' },
@@ -186,15 +186,15 @@ describe('Durable AI external-effect boundary', () => {
     await processEmail(userId, emailId);
     await processEmail(userId, emailId);
     expect(client.calls('email_relevance')).toHaveLength(1);
-    expect(client.calls('job_extraction')).toHaveLength(1);
-    expect(client.calls('job_extraction')[0][0].input).toHaveLength(8000);
+    expect(client.calls('job_extraction_v4')).toHaveLength(1);
+    expect(client.calls('job_extraction_v4')[0][0].input).toHaveLength(8000);
     expect(
       (await prisma.aIProcessingResult.findUniqueOrThrow({ where: { emailId } })).relevanceDecision,
     ).toBe('UNCERTAIN');
   });
   it('keeps classification/extraction checkpoints across a matching failure', async () => {
-    const extraction = JobExtractionSchema.parse(
-      Object.fromEntries(Object.keys(JobExtractionSchema.shape).map((key) => [key, null])),
+    const extraction = JobExtractionV4Schema.parse(
+      Object.fromEntries(Object.keys(JobExtractionV4Schema.shape).map((key) => [key, null])),
     );
     const client = fakeProviderClient({
       classification: { decision: 'RELEVANT', confidence: 0.9, reasoning: 'job' },
@@ -212,6 +212,6 @@ describe('Durable AI external-effect boundary', () => {
     await expect(processEmail(userId, emailId)).rejects.toThrow('domain failure');
     await processEmail(userId, emailId);
     expect(client.calls('email_relevance')).toHaveLength(1);
-    expect(client.calls('job_extraction')).toHaveLength(1);
+    expect(client.calls('job_extraction_v4')).toHaveLength(1);
   });
 });
