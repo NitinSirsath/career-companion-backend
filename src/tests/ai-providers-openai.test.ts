@@ -12,7 +12,7 @@ import { bindCapabilities } from '../services/ai/capabilities';
 import {
   CLASSIFICATION_CONTRACT,
   EXTRACTION_CONTRACT,
-  JobExtractionSchema,
+  JobExtractionV4Schema,
 } from '../services/ai/contracts';
 import { ProviderFailure } from '../services/ai/errors';
 import { strictJsonSchema } from '../services/ai/providers/jsonSchema';
@@ -291,14 +291,14 @@ describe('OpenAI adapter', () => {
     create.mockResolvedValue(
       completion(
         JSON.stringify(
-          Object.fromEntries(Object.keys(JobExtractionSchema.shape).map((k) => [k, null])),
+          Object.fromEntries(Object.keys(JobExtractionV4Schema.shape).map((k) => [k, null])),
         ),
       ),
     );
     await capabilities().analyzer.extractJobData('body');
     expect(create.mock.calls[0][0]).toMatchObject({
       model: 'gpt-5-mini',
-      response_format: { json_schema: { name: 'job_extraction' } },
+      response_format: { json_schema: { name: 'job_extraction_v4' } },
     });
     expect(create.mock.calls[0][1]).toEqual({ timeout: 45_000 });
   });
