@@ -24,6 +24,7 @@ model User {
   outgoingEmails      OutgoingEmail[]
   mailReplies         MailReply[]
   aiConfiguration     AIConfiguration?
+  aiSavedProviders    AISavedProvider[]
   aiBatches           AIBatch[]
   aiUsageDays         AIUsageDay[]
   integrationTokens   IntegrationToken[]
@@ -542,8 +543,9 @@ enum AIAccessIssue {
   PROVIDER_BUSY
 }
 
-/// One active AI setup per user (ADR-0001 decision 5). The key is write-only AES-256-GCM
-/// ciphertext bound to the user; it is selected only where a provider call or verification needs it.
+/// The user's active AI setup (ADR-0001 decision 5): all AI work runs on it. The key is write-only
+/// AES-256-GCM ciphertext bound to the user; it is selected only where a provider call or
+/// verification needs it. Other connected providers wait in AISavedProvider.
 model AIConfiguration {
   userId            String         @id @db.Uuid
   /// Catalog provider ID (code catalog, not a database catalog).
@@ -572,9 +574,38 @@ model AIConfiguration {
   @@map("ai_configurations")
 }
 
+/// A connected provider that is not the active one (ADR-0001 decision 5, owner 22 Oct 2026). With
+/// the active setup, a user holds at most one key per provider. It does no AI work: only a check, a
+/// key change or a model change the user starts calls the provider. Making it active moves it into
+/// AIConfiguration, and the active setup it replaces moves here.
+model AISavedProvider {
+  userId            String         @db.Uuid
+  /// Catalog provider ID.
+  provider          String
+  encryptedApiKey   String
+  /// null follows the catalog's recommended model for the role.
+  fastModel         String?
+  detailedModel     String?
+  /// A key, billing or model problem found by the last check (never a pause).
+  accessIssue       AIAccessIssue?
+  accessIssueModel  String?
+  accessFailure     Json?
+  verifiedAt        DateTime?
+  lastCheckedAt     DateTime?
+  consentDisclosure String
+  consentedAt       DateTime
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, provider])
+  @@map("ai_saved_providers")
+}
+
 /// One model's pause for one user: the provider was busy, limited the key, or did not answer in
 /// time. Each model pauses on its own; a success on the model removes its row. Survives the UTC
-/// day boundary.
+/// day boundary. Pauses belong to the active setup: making another provider active removes them.
 model AIModelPause {
   userId              String          @db.Uuid
   /// Catalog model ID.
