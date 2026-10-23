@@ -66,12 +66,15 @@ To follow one mail, search the log for its `emailId`: each try shows `ai_call_st
 | `ai_read_waiting_requested` (testEmailId, pausedModels, alreadyTesting, or offered) | The user chose "Read waiting mails now": the test mail sent during a pause, the test mail still running (nothing sent), or the waiting mail offered |
 | `ai_resume_not_queued` | The automatic read could not be queued; the next sync offers the mail |
 | `ai_access_checked` (result, kind, providerMessage in dev mode) | Verification on save or "Check again" |
-| `ai_settings_saved` / `ai_settings_removed` | Configuration changes |
+| `ai_settings_saved` / `ai_settings_removed` | Changes of the active setup |
+| `ai_provider_saved` / `ai_provider_activated` / `ai_provider_removed` | Another provider connected or changed, made active, or removed |
 | `ai_sample_test` (outcome, providerRequestId, providerMessage in dev mode) | Sample test outcome and tokens |
 | `ai_retry_approved` | User approved one more attempt |
 | `ai_credential_unreadable` | Stored key cannot be decrypted (check the encryption key) |
 
-Per-user state lives in `ai_configurations` (access issue, revision), `ai_model_pauses` (each model's pause, failure count and "Read waiting mails now" test) and `ai_usage_days` (calls, tokens, verifications).
+Per-user state lives in `ai_configurations` (the active setup: access issue, revision), `ai_saved_providers` (each other connected provider: its key, models and last check), `ai_model_pauses` (each model's pause of the active setup, failure count and "Read waiting mails now" test) and `ai_usage_days` (calls, tokens, verifications, for all providers together).
+
+**Several providers (owner, 22 Oct 2026).** `20261022100000_ai_saved_providers` is additive: it adds `ai_saved_providers` and changes no existing row, so every current setup stays the active one. Making another provider active swaps the two setups in one transaction, increments the revision and ends the old setup's pauses. Verify it with `node scripts/verify-ai-migration.cjs`. Deploy the backend, then the frontend: the old frontend's `PUT` and `DELETE /api/ai/settings` and `POST /api/ai/settings/check` are gone.
 
 ## Automation submissions through MCP (ADR-0002)
 

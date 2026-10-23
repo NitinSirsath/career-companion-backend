@@ -162,8 +162,7 @@ describe('no key or email content leaks anywhere', () => {
     );
     expect(
       (
-        await call('put', '/api/ai/settings', {
-          provider: 'gemini',
+        await call('put', '/api/ai/providers/gemini', {
           apiKey: KEY,
           consentDisclosure: 'gemini-draft-2026-10',
         })
@@ -171,8 +170,7 @@ describe('no key or email content leaks anywhere', () => {
     ).toBe(422);
     expect(
       (
-        await call('put', '/api/ai/settings', {
-          provider: 'gemini',
+        await call('put', '/api/ai/providers/gemini', {
           apiKey: `${KEY} with spaces`,
           consentDisclosure: 'gemini-draft-2026-10',
         })
@@ -180,8 +178,7 @@ describe('no key or email content leaks anywhere', () => {
     ).toBe(400);
     expect(
       (
-        await call('put', '/api/ai/settings', {
-          provider: 'gemini',
+        await call('put', '/api/ai/providers/gemini', {
           apiKey: `${KEY}${'x'.repeat(600)}`,
         })
       ).status,
@@ -192,8 +189,7 @@ describe('no key or email content leaks anywhere', () => {
       .mockResolvedValueOnce({ text: `OK ${KEY} ${CONTENT}` });
     expect(
       (
-        await call('put', '/api/ai/settings', {
-          provider: 'gemini',
+        await call('put', '/api/ai/providers/gemini', {
           apiKey: KEY,
           consentDisclosure: 'gemini-draft-2026-10',
         })
@@ -202,13 +198,13 @@ describe('no key or email content leaks anywhere', () => {
 
     // Check again: inconclusive and rejected, both with leaky errors.
     generateContent.mockRejectedValueOnce(leakyError(503));
-    await call('post', '/api/ai/settings/check');
+    await call('post', '/api/ai/providers/gemini/check');
     generateContent.mockRejectedValueOnce(leakyError(403, { status: 'PERMISSION_DENIED' }));
-    await call('post', '/api/ai/settings/check');
+    await call('post', '/api/ai/providers/gemini/check');
     generateContent
       .mockResolvedValueOnce({ text: `OK ${KEY} ${CONTENT}` })
       .mockResolvedValueOnce({ text: `OK ${KEY} ${CONTENT}` });
-    await call('post', '/api/ai/settings/check');
+    await call('post', '/api/ai/providers/gemini/check');
     // Google is never asked to describe a model: a description proves nothing about the key.
     expect(get).not.toHaveBeenCalled();
 
@@ -455,17 +451,31 @@ describe.each([
     // Save: the key is refused with an error that echoes it, then accepted.
     keyCheck.refuse(failures[0]);
     expect(
-      (await call('put', '/api/ai/settings', { provider, apiKey: KEY, consentDisclosure })).status,
+      (
+        await call('put', `/api/ai/providers/${provider}`, {
+          apiKey: KEY,
+          consentDisclosure,
+          makeActive: true,
+        })
+      ).status,
     ).toBe(422);
     keyCheck.accept();
     expect(
-      (await call('put', '/api/ai/settings', { provider, apiKey: KEY, consentDisclosure })).status,
+      (
+        await call('put', `/api/ai/providers/${provider}`, {
+          apiKey: KEY,
+          consentDisclosure,
+          makeActive: true,
+        })
+      ).status,
     ).toBe(200);
     // Check again: the provider cannot confirm (the failure is answered), then refuses.
     keyCheck.refuse(failures[failures.length - 2]);
-    expect((await call('post', '/api/ai/settings/check')).body.verificationFailure).toBeTruthy();
+    expect(
+      (await call('post', `/api/ai/providers/${provider}/check`)).body.verificationFailure,
+    ).toBeTruthy();
     keyCheck.refuse(failures[0]);
-    await call('post', '/api/ai/settings/check');
+    await call('post', `/api/ai/providers/${provider}/check`);
     await prisma.aIConfiguration.updateMany({ where: { userId }, data: { accessIssue: null } });
     // Sample test: a failure, then an answer that cannot be used.
     create.mockRejectedValueOnce(failures[failures.length - 2]);

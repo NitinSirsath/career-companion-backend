@@ -100,18 +100,26 @@ describe('errors sent by the central handler', () => {
 
 describe('AI settings errors', () => {
   it('404 AI_NOT_CONFIGURED', async () => {
-    const res = await request(app).post('/api/ai/settings/check').set(as()).send({});
+    const res = await request(app).post('/api/ai/settings/sample-test').set(as()).send({});
     expect(res.status).toBe(404);
     expect(res.body).toEqual({
       error: { code: 'AI_NOT_CONFIGURED', message: 'AI is not set up.' },
     });
   });
 
+  it('404 AI_PROVIDER_NOT_CONNECTED', async () => {
+    const res = await request(app).post('/api/ai/providers/gemini/check').set(as()).send({});
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({
+      error: { code: 'AI_PROVIDER_NOT_CONNECTED', message: 'That AI provider is not connected.' },
+    });
+  });
+
   it('400 VALIDATION_ERROR with the settings message', async () => {
     const res = await request(app)
-      .put('/api/ai/settings')
+      .put('/api/ai/providers/gemini')
       .set(as())
-      .send({ provider: 'gemini', apiKey: 'not a valid key' });
+      .send({ apiKey: 'not a valid key' });
     expect(res.status).toBe(400);
     expect(res.body).toEqual({
       error: { code: 'VALIDATION_ERROR', message: 'The API key format is not valid.' },

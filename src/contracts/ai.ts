@@ -132,14 +132,40 @@ export const AIModelPauseSchema = z.object({
 });
 export type AIModelPause = z.infer<typeof AIModelPauseSchema>;
 
+const ModelsInUseSchema = z.object({ fast: ModelInUseSchema, detailed: ModelInUseSchema });
+
+/**
+ * One provider the user connected. Exactly one can be active: it does all AI work, and the
+ * top-level settings fields describe it. The others do no AI work until the user makes one active.
+ */
+export const AIConnectionSchema = z.object({
+  provider: z.string(),
+  active: z.boolean(),
+  /** For the active provider, the same as the top-level `access.state`. */
+  state: AIAccessStateSchema,
+  reason: AIAccessReasonSchema.nullable(),
+  /** The model a MODEL_UNAVAILABLE problem or a pause refers to. */
+  modelId: z.string().nullable(),
+  /** The exact failure behind `reason`, when it is known. */
+  failure: AIFailureSchema.nullable(),
+  /** null when the provider is no longer in the catalog. */
+  models: ModelsInUseSchema.nullable(),
+  verified: z.boolean(),
+  lastCheckedAt: IsoDateTime.nullable(),
+  /** false when the provider's data-use summary changed after the user agreed to it. */
+  consentCurrent: z.boolean(),
+});
+export type AIConnection = z.infer<typeof AIConnectionSchema>;
+
 // ─── GET /api/ai/settings ───────────────────────────────────────────────────
 
+/** Top-level fields describe the active provider; `connections` lists every connected one. */
 export const AISettingsResponseSchema = z.object({
   configured: z.boolean(),
   provider: z.string().nullable(),
   /** Catalog providers this server accepts now (hidden providers are not offered in production). */
   offeredProviders: z.array(z.string()),
-  models: z.object({ fast: ModelInUseSchema, detailed: ModelInUseSchema }).nullable(),
+  models: ModelsInUseSchema.nullable(),
   access: z.object({
     state: AIAccessStateSchema,
     reason: AIAccessReasonSchema.nullable(),
@@ -182,42 +208,70 @@ export const AISettingsResponseSchema = z.object({
   consent: z
     .object({ disclosure: z.string(), consentedAt: IsoDateTime, current: z.boolean() })
     .nullable(),
+  /** Every connected provider: the active one first, then the others in the order connected. */
+  connections: z.array(AIConnectionSchema),
 });
 export type AISettingsResponse = z.infer<typeof AISettingsResponseSchema>;
 
-// ─── PUT /api/ai/settings ───────────────────────────────────────────────────
+// ─── PUT /api/ai/providers/:provider ────────────────────────────────────────
 
-export const SaveAISettingsRequestSchema = z.strictObject({
-  provider: z.string().min(1).max(64),
-  /** Required for a new provider. Omitted or empty keeps the saved key (same provider only). */
+/**
+ * Connects a provider, replaces its key, or changes its models. The key and models are verified
+ * first; a definitive rejection saves nothing. The first provider becomes active by itself; a
+ * later one stays inactive unless `makeActive` is true.
+ */
+export const SaveAIProviderRequestSchema = z.strictObject({
+  /** Required for a provider not connected yet. Omitted or empty keeps the saved key. */
   apiKey: z.string().max(512).optional(),
-  /** null = recommended; omitted = keep the current choice (same provider) or recommended. */
+  /** null = recommended; omitted = keep the current choice (connected provider) or recommended. */
   models: z
     .strictObject({
       fast: z.string().max(128).nullable().optional(),
       detailed: z.string().max(128).nullable().optional(),
     })
     .optional(),
-  /** Catalog disclosure version the user agreed to. Required for a new provider. */
+  /** Catalog disclosure version the user agreed to. Required for a provider not connected yet. */
   consentDisclosure: z.string().max(128).optional(),
+  /** Make this provider the active one after it is saved. */
+  makeActive: z.boolean().optional(),
 });
-export type SaveAISettingsRequest = z.infer<typeof SaveAISettingsRequestSchema>;
+export type SaveAIProviderRequest = z.infer<typeof SaveAIProviderRequestSchema>;
 
-export const SaveAISettingsResponseSchema = AISettingsResponseSchema.extend({
+export const SaveAIProviderResponseSchema = AISettingsResponseSchema.extend({
   verification: z.enum(['VERIFIED', 'INCONCLUSIVE']),
   /** INCONCLUSIVE only: why the provider did not confirm the key, for example no answer in time. */
   verificationFailure: AIFailureSchema.nullable(),
 });
-export type SaveAISettingsResponse = z.infer<typeof SaveAISettingsResponseSchema>;
+export type SaveAIProviderResponse = z.infer<typeof SaveAIProviderResponseSchema>;
 
-// ─── POST /api/ai/settings/check ────────────────────────────────────────────
+// ─── POST /api/ai/providers/:provider/check ─────────────────────────────────
 
-export const CheckAISettingsResponseSchema = AISettingsResponseSchema.extend({
+export const CheckAIProviderResponseSchema = AISettingsResponseSchema.extend({
   verification: z.enum(['VERIFIED', 'REJECTED', 'INCONCLUSIVE']),
   /** INCONCLUSIVE only: why the provider did not confirm the key, for example no answer in time. */
   verificationFailure: AIFailureSchema.nullable(),
 });
-export type CheckAISettingsResponse = z.infer<typeof CheckAISettingsResponseSchema>;
+export type CheckAIProviderResponse = z.infer<typeof CheckAIProviderResponseSchema>;
+
+// ─── POST /api/ai/providers/:provider/activate ──────────────────────────────
+
+/**
+ * Makes a connected provider the active one; the one it replaces stays connected. Affects future
+ * work only, and mails waiting for AI go to the new one. Doing it twice changes nothing.
+ */
+export const ActivateAIProviderResponseSchema = AISettingsResponseSchema;
+
+// ─── DELETE /api/ai/providers/:provider ─────────────────────────────────────
+
+/**
+ * Removing the active provider: `then` names the connected provider that becomes active, or
+ * `none` (new mails wait). Without `then`, none. Ignored for an inactive provider.
+ */
+export const RemoveAIProviderQuerySchema = z.strictObject({
+  then: z.string().min(1).max(64).optional(),
+});
+
+export const RemoveAIProviderResponseSchema = AISettingsResponseSchema;
 
 // ─── POST /api/ai/settings/sample-test ──────────────────────────────────────
 
@@ -257,11 +311,13 @@ export type AISampleTestResponse = z.infer<typeof AISampleTestResponseSchema>;
 export const ReadWaitingMailResponseSchema = AISettingsResponseSchema;
 export type ReadWaitingMailResponse = z.infer<typeof ReadWaitingMailResponseSchema>;
 
-// ─── DELETE /api/ai/settings ────────────────────────────────────────────────
-
-export const RemoveAISettingsResponseSchema = z.object({ removed: z.literal(true) });
-
 // ─── Error details ──────────────────────────────────────────────────────────
+
+/** 409 AI_PROVIDER_NOT_READY: the provider's last check found a key, billing or model problem. */
+export const AIProviderNotReadyDetailsSchema = z.object({
+  reason: AIAccessReasonSchema,
+  modelId: z.string().nullable(),
+});
 
 /** 422 AI_ACCESS_REJECTED: the provider definitively refused; nothing was saved. */
 export const AIAccessRejectedDetailsSchema = z.object({

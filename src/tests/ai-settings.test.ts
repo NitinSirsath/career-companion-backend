@@ -29,9 +29,13 @@ let userId: string;
 
 const as = (email: string) => ({ 'X-Development-User': email });
 const get = (email = OWNER) => request(app).get('/api/ai/settings').set(as(email));
-const put = (body: object, email = OWNER) =>
-  request(app).put('/api/ai/settings').set(as(email)).send(body);
-const check = () => request(app).post('/api/ai/settings/check').set(as(OWNER)).send({});
+/** Saves through PUT /api/ai/providers/:provider; the body's `provider` names the path. */
+const put = (
+  { provider, ...body }: { provider: string } & Record<string, unknown>,
+  email = OWNER,
+) => request(app).put(`/api/ai/providers/${provider}`).set(as(email)).send(body);
+const check = (provider = 'gemini') =>
+  request(app).post(`/api/ai/providers/${provider}/check`).set(as(OWNER)).send({});
 const config = () => prisma.aIConfiguration.findUnique({ where: { userId } });
 
 let verifyResult: VerifyResult;
@@ -50,6 +54,7 @@ beforeEach(async () => {
   vi.mocked(createProviderClient).mockReset().mockReturnValue(client);
   send.mockClear();
   await prisma.aIConfiguration.deleteMany({ where: { userId } });
+  await prisma.aISavedProvider.deleteMany({ where: { userId } });
   await prisma.aIUsageDay.deleteMany({ where: { userId } });
   await prisma.email.deleteMany({ where: { userId } });
 });
@@ -60,10 +65,11 @@ afterAll(async () => {
 describe('AI settings API: authentication and reading', () => {
   it.each([
     ['get', '/api/ai/settings'],
-    ['put', '/api/ai/settings'],
-    ['post', '/api/ai/settings/check'],
+    ['put', '/api/ai/providers/gemini'],
+    ['post', '/api/ai/providers/gemini/activate'],
+    ['post', '/api/ai/providers/gemini/check'],
     ['post', '/api/ai/waiting/read'],
-    ['delete', '/api/ai/settings'],
+    ['delete', '/api/ai/providers/gemini'],
   ] as const)('requires a session for %s %s', async (method, path) => {
     const res = await request(app)[method](path).send({});
     expect(res.status).toBe(401);
@@ -267,7 +273,7 @@ describe('saving verifies first and stores a write-only key', () => {
     logs.forEach((spy) => spy.mockRestore());
   });
 
-  it('switches provider only after the new key verifies, with new consent and a fresh state', async () => {
+  it('makes a new provider active only after its key verifies, with new consent and a fresh state', async () => {
     await configureAI(userId, { accessIssue: 'KEY_REJECTED' });
     await setPause(userId, DETAILED, {
       reason: 'RATE_LIMITED',
@@ -279,6 +285,7 @@ describe('saving verifies first and stores a write-only key', () => {
       provider: 'openai',
       apiKey: 'sk-test-openai-key-0000',
       consentDisclosure: 'openai-draft-2026-10',
+      makeActive: true,
     };
     // A new provider needs its own key and its own data-use consent.
     expect((await put({ provider: 'openai', apiKey: 'sk-test-openai-key-0000' })).status).toBe(400);
@@ -311,6 +318,16 @@ describe('saving verifies first and stores a write-only key', () => {
       revision: before.revision + 1,
     });
     expect(await prisma.aIModelPause.count({ where: { userId } })).toBe(0);
+    // The provider it replaced stays connected, with its own key and its problem.
+    const kept = await prisma.aISavedProvider.findUniqueOrThrow({
+      where: { userId_provider: { userId, provider: 'gemini' } },
+    });
+    expect(kept.encryptedApiKey).toBe(before.encryptedApiKey);
+    expect(kept.accessIssue).toBe('KEY_REJECTED');
+    expect(res.body.connections).toMatchObject([
+      { provider: 'openai', active: true },
+      { provider: 'gemini', active: false, state: 'NEEDS_ATTENTION', reason: 'KEY_REJECTED' },
+    ]);
   });
 
   it("is per user: another user's settings stay separate", async () => {
@@ -370,7 +387,7 @@ describe('check again and remove', () => {
 
   it('rejects any body on check', async () => {
     const res = await request(app)
-      .post('/api/ai/settings/check')
+      .post('/api/ai/providers/gemini/check')
       .set(as(OWNER))
       .send({ apiKey: KEY });
     expect(res.status).toBe(400);
@@ -379,11 +396,10 @@ describe('check again and remove', () => {
 
   it('removes the configuration and its key, idempotently', async () => {
     await configureAI(userId);
-    expect((await request(app).delete('/api/ai/settings').set(as(OWNER))).body).toEqual({
-      removed: true,
-    });
+    const remove = () => request(app).delete('/api/ai/providers/gemini').set(as(OWNER));
+    expect((await remove()).body).toMatchObject({ configured: false, connections: [] });
     expect(await config()).toBeNull();
-    expect((await request(app).delete('/api/ai/settings').set(as(OWNER))).status).toBe(200);
+    expect((await remove()).status).toBe(200);
   });
 });
 
