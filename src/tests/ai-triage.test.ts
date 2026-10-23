@@ -11,6 +11,7 @@ import {
 import {
   AI_CONTRACT_VERSIONS,
   LEGACY_CONTRACT_VERSIONS,
+  STRICT_V1_CONTRACT_VERSIONS,
   buildRelevanceBatchInput,
   mapBatchResults,
   RelevanceBatchItemSchema,
