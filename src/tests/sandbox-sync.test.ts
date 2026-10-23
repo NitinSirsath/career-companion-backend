@@ -40,6 +40,7 @@ import { enqueueEmailProcessingJob, enqueueRelevanceTriage } from '../services/e
 import { fetchMessageMetadata } from '../services/gmailFetcher';
 import { syncUser } from '../services/gmailSync';
 import { configureAI } from './helpers/aiAccess';
+import { FAKE_OFFER_NEXT_STEP } from '../services/emailRequest';
 
 const OWNER = 'owner@sandbox-sync.test';
 const PRIYA = 'Priya Raman <priya.raman@northwind.example>';
@@ -312,6 +313,7 @@ describe('the real sync on sandbox mail', () => {
         company: 'Northwind Robotics',
         role: 'Senior Platform Engineer',
         requestedAction: 'Reply with a time for a call',
+        fakeOfferWarning: null,
         conversationKey: job.threadId,
         application: {
           id: application.id,
@@ -333,6 +335,33 @@ describe('the real sync on sandbox mail', () => {
       failure: 'KEY_REJECTED',
       aiStatus: expect.objectContaining({ reason: 'INTERNAL_ERROR', nextStep: 'MANUAL_RETRY' }),
       job: null,
+    });
+  });
+
+  it('shows the warning and the safe next step for a mail that asks for money', async () => {
+    const mail = await send({
+      from: 'Google HR Department <hr.google.careers@gmail.example.com>',
+      subject: 'Congratulations! Offer of employment - Google India',
+      body: 'You are selected. Pay a refundable laptop security fee of Rs 8,500 within 24 hours.',
+    });
+    await syncUser(owner);
+    await configureAI(owner);
+    await readAsJobMail(mail.id);
+    const warning = 'It asks for a fee of Rs 8,500 within 24 hours from a free-mail address.';
+    await prisma.aIProcessingResult.updateMany({
+      where: { email: { userId: owner, gmailMessageId: mail.id } },
+      data: { category: 'OFFER', requestedAction: 'Pay the fee', fakeOfferWarning: warning },
+    });
+    const [message] = SandboxThreadDetailSchema.parse(
+      (await request(app).get(`/api/sandbox/threads/${mail.threadId}`).set(as)).body,
+    ).messages;
+    expect(message.result).toMatchObject({
+      state: 'JOB_MAIL',
+      job: {
+        category: 'OFFER',
+        requestedAction: FAKE_OFFER_NEXT_STEP,
+        fakeOfferWarning: warning,
+      },
     });
   });
 
