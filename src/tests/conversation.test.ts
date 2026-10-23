@@ -9,6 +9,7 @@ vi.mock('../services/enqueue', async (importOriginal) => ({
 import { app } from '../index';
 import { prisma } from '../db/prisma';
 import { enqueueNotificationJob } from '../services/enqueue';
+import { FAKE_OFFER_NEXT_STEP } from '../services/emailRequest';
 import type { Conversation } from '../contracts';
 import {
   ConversationDetailSchema,
@@ -35,6 +36,7 @@ type Analysis = {
   followUpRequired?: boolean;
   interviewDate?: string;
   interviewTime?: string;
+  fakeOfferWarning?: string;
 };
 
 /** A processed job email as the pipeline leaves it before any application exists. */
@@ -592,5 +594,116 @@ describe('creating the application of a conversation', () => {
     expect(action.status).toBe('COMPLETED');
     expect(enqueueNotificationJob).not.toHaveBeenCalled();
     expect((await list())[0].request?.state).toBe('DONE');
+  });
+});
+
+describe('a job offer that asks for money', () => {
+  const WARNING =
+    'It asks for a laptop security fee of Rs 8,500 within 24 hours, with no interview.';
+  const feeOffer = (threadId: string, receivedAt: Date, warning = WARNING) =>
+    jobMail(
+      threadId,
+      receivedAt,
+      {
+        category: 'OFFER',
+        companyName: 'Google India',
+        jobTitle: 'Software Developer',
+        actionRequired: true,
+        requestedAction: 'Pay the registration fee of Rs 8,500',
+        actionDeadline: '2026-10-03',
+        fakeOfferWarning: warning,
+      },
+      { sender: 'Google HR Department <hr.google.careers@gmail.example.com>' },
+    );
+
+  it("shows the newest warning and the safe next step, never the mail's own request", async () => {
+    await feeOffer('thread-fee', at(1), 'An older warning.');
+    await jobMail('thread-fee', at(2), { category: 'OFFER' });
+    await feeOffer('thread-fee', at(3));
+    await jobMail('thread-plain', at(4), {
+      actionRequired: true,
+      requestedAction: 'Send your available dates',
+    });
+
+    const rows = await list();
+    const row = rows.find((item) => item.key === 'thread-fee');
+    expect(row).toMatchObject({
+      category: 'OFFER',
+      fakeOfferWarning: WARNING,
+      request: { kind: 'ACTION', state: 'OPEN', text: FAKE_OFFER_NEXT_STEP, deadline: null },
+    });
+    expect(rows.find((item) => item.key === 'thread-plain')).toMatchObject({
+      fakeOfferWarning: null,
+      request: { text: 'Send your available dates' },
+    });
+
+    const body = ConversationDetailSchema.parse((await detail('thread-fee')).body);
+    expect(body.conversation).toMatchObject({ fakeOfferWarning: WARNING });
+    expect(body.mails.map((mail) => mail.fakeOfferWarning)).toEqual([
+      'An older warning.',
+      null,
+      WARNING,
+    ]);
+    expect(body.mails[2]).toMatchObject({
+      requestedAction: FAKE_OFFER_NEXT_STEP,
+      actionDeadline: null,
+    });
+    expect(JSON.stringify(body)).not.toContain('Pay the registration fee');
+  });
+
+  it('shows the safe next step even when the AI saw no request', async () => {
+    await jobMail('thread-quiet', at(1), { category: 'OFFER', fakeOfferWarning: WARNING });
+    const [row] = await list();
+    expect(row.request).toMatchObject({ kind: 'ACTION', text: FAKE_OFFER_NEXT_STEP });
+    expect((await list('?request=open')).map((item) => item.key)).toEqual(['thread-quiet']);
+  });
+
+  it('never changes the status of the application it is linked to; a real offer does', async () => {
+    const real = await prisma.application.create({
+      data: { userId: owner, companyName: 'Google India', jobTitle: 'Software Developer' },
+    });
+    await prisma.application.update({ where: { id: real.id }, data: { aiStatus: 'INTERVIEW' } });
+    await feeOffer('thread-fee-status', at(1));
+    expect((await link('thread-fee-status', { applicationId: real.id })).status).toBe(200);
+    expect(await prisma.application.findUniqueOrThrow({ where: { id: real.id } })).toMatchObject({
+      aiStatus: 'INTERVIEW',
+    });
+
+    await jobMail('thread-real-offer', at(2), {
+      category: 'OFFER',
+      companyName: 'Google India',
+      jobTitle: 'Software Developer',
+    });
+    expect((await link('thread-real-offer', { applicationId: real.id })).status).toBe(200);
+    expect(await prisma.application.findUniqueOrThrow({ where: { id: real.id } })).toMatchObject({
+      aiStatus: 'OFFER',
+    });
+  });
+
+  it('is not swept into a new application of the same company', async () => {
+    const fake = await feeOffer('thread-fee-sweep', at(1));
+    await jobMail('thread-google', at(2), {
+      category: 'RECRUITER',
+      companyName: 'Google India',
+      jobTitle: 'Software Developer',
+    });
+    expect((await link('thread-google')).status).toBe(200);
+    expect(await prisma.email.findUniqueOrThrow({ where: { id: fake.id } })).toMatchObject({
+      matchState: 'UNMATCHED',
+      applicationId: null,
+    });
+  });
+
+  it('never becomes an application action', async () => {
+    await feeOffer('thread-fee-link', at(1));
+    const res = await link('thread-fee-link');
+    expect(res.status).toBe(200);
+    const body = LinkConversationResponseSchema.parse(res.body);
+    expect(await prisma.action.count({ where: { applicationId: body.application.id } })).toBe(0);
+    expect(enqueueNotificationJob).not.toHaveBeenCalled();
+    expect(body.conversation).toMatchObject({
+      fakeOfferWarning: WARNING,
+      request: { text: FAKE_OFFER_NEXT_STEP },
+    });
   });
 });
