@@ -362,6 +362,7 @@ describe('Gemini adapter', () => {
         followUpDate: null,
         extractionConfidence: 0.9,
         provenance: 'body',
+        fakeOfferWarning: null,
       }),
     });
     const result = await capabilities().analyzer.extractJobData('test body');
