@@ -56,6 +56,8 @@ export async function matchEmailToApplication(emailId: string): Promise<void> {
     return;
   }
   if (email.matchState === 'IGNORED') return;
+  // A mail that asks for money is never linked automatically; the user can still link it.
+  if (aiProcessingResult.fakeOfferWarning) return;
 
   // 1. Thread Match
   const decision = await threadDecision(prisma, email);
@@ -523,7 +525,9 @@ function isInterview(aiResult: AIProcessingResult): boolean {
   );
 }
 
+/** The status an email suggests. A mail that asks for money suggests none: it is not evidence. */
 export function inferState(aiResult: AIProcessingResult): ApplicationStatus | null {
+  if (aiResult.fakeOfferWarning) return null;
   if (aiResult.rejectionInfo || aiResult.category === 'REJECTION')
     return ApplicationStatus.REJECTED;
   if (aiResult.offerInfo || aiResult.category === 'OFFER') return ApplicationStatus.OFFER;
@@ -586,6 +590,15 @@ export async function threadDecision(db: Prisma.TransactionClient, email: Email)
 }
 
 /**
+ * Whether the email's request becomes an application action. A mail that asks for money never
+ * does: the Mails page warns about it and shows a safe next step instead.
+ */
+function makesAction(aiResult: AIProcessingResult): boolean {
+  if (aiResult.fakeOfferWarning) return false;
+  return !!aiResult.actionRequired || !!aiResult.followUpRequired;
+}
+
+/**
  * Applies a matched email to its application: status, timeline event, agenda and action.
  * Returns the ID of the action to notify about, or null when there is nothing to notify.
  */
@@ -603,7 +616,7 @@ async function applyEffects(
   const { reactivate = false, actionStatus = 'PENDING', snoozedUntil = null } = carried;
   await recordEmailOnTimeline(tx, email, app, aiResult, reactivate);
   if (!reactivate) await projectAgenda(tx, email, app, aiResult);
-  if (!aiResult.actionRequired && !aiResult.followUpRequired) return null;
+  if (!makesAction(aiResult)) return null;
 
   const existing = await tx.action.findFirst({
     where: { applicationId: app.id, emailId: email.id },
