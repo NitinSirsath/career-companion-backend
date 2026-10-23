@@ -281,7 +281,7 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
     displayName: 'OpenRouter',
     protocol: 'openrouter',
     baseUrl: 'https://openrouter.ai/api/v1',
-    status: 'hidden',
+    status: 'supported',
     costModel: 'PAID_ONLY',
     recommendedNote:
       'One key for several small, low-cost models. Prepaid credit; small amounts work.',
@@ -292,52 +292,27 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
     },
     setupSteps: [
       'Sign in at openrouter.ai and add credit under Credits.',
-      'Under Keys, create an API key (not a Management key). Give it a credit limit, for example $2.',
+      'Under Keys, create an API key (not a Management key). Give it a credit limit of at least $5, or none: GPT-6 Sol needs about $1.50 of the limit free for each request.',
       'Keep "Input & Output Logging" (workspace Observability) and the "1% data discount" (Privacy) turned off.',
       'Paste the key below. Career Companion stores it encrypted and never shows it again.',
     ],
     disclosure: {
-      version: 'openrouter-draft-2026-10',
-      // DRAFT pending owner approval against OpenRouter's current terms.
+      version: 'openrouter-2026-10-23',
       summary:
         'Your emails go to OpenRouter under your own account. OpenRouter passes each request to one server that runs the model you chose.',
       training:
-        'Career Companion asks OpenRouter to use only servers that keep nothing, so they cannot train on it. OpenRouter itself keeps only usage numbers, unless you turn on logging in your OpenRouter account.',
+        'Career Companion asks OpenRouter to use only servers that keep nothing, so they cannot train on it. OpenRouter says it does not train on it and keeps only usage numbers, unless you turn on prompt logging in your OpenRouter account.',
       residency:
-        'The server may be in any country, mostly the US or Europe. OpenRouter picks it for each request.',
-      reviewedOn: null,
+        'OpenRouter is based in the US. Claude Haiku 5.5 and Gemini 3.8 Flash run on Google servers, and GPT-6 Luna and GPT-6 Sol on Microsoft Azure servers, in the US or Europe. OpenRouter picks the server for each request.',
+      reviewedOn: '2026-10-23',
     },
-    // Small models only (owner, 17 Oct 2026), pending evaluation. Exact IDs: an alias such as
-    // "~…-latest" can move to another model without an evaluation. Both models serve both roles,
-    // so each timeout fits the longer job.
+    // Certified 2026-10-23 (owner decisions, docs/ai/provider-evaluation.md). Exact IDs only: an alias such
+    // as "~…-latest" can move to another model without an evaluation. Haiku screens only: Anthropic's
+    // JSON output allows at most 16 fields that may be empty, and extraction has 19. These private
+    // servers take no temperature. Luna is recommended for both steps (owner, 2026-10-23): in a 49-mail
+    // sandbox test it read the same mails right as Haiku + Gemini at a sixth of the cost, and Haiku let a
+    // fake job offer through.
     models: [
-      {
-        id: 'google/gemma-4-26b-a4b-it',
-        displayName: 'Gemma 4 26B A4B',
-        roles: ['fast', 'detailed'],
-        recommendedFor: ['fast'],
-        temperature: 0.1,
-        reasoning: { enabled: false },
-        structuredOutput: 'openai_json_schema',
-        timeoutMs: 45_000,
-        retiresOn: null,
-        evaluation: null,
-      },
-      {
-        id: 'deepseek/deepseek-v4.1-flash',
-        displayName: 'DeepSeek V4.1 Flash',
-        roles: ['fast', 'detailed'],
-        recommendedFor: ['detailed'],
-        temperature: 0.1,
-        reasoning: { enabled: false },
-        structuredOutput: 'openai_json_schema',
-        timeoutMs: 45_000,
-        retiresOn: null,
-        evaluation: null,
-      },
-      // Test candidates (owner, 17 Oct 2026). Their private servers take no temperature.
-      // Screening only: Anthropic's JSON output allows at most 16 fields that may be empty, and
-      // the extraction contract has 19.
       {
         id: 'anthropic/claude-haiku-5.5',
         displayName: 'Claude Haiku 5.5',
@@ -348,19 +323,49 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
         structuredOutput: 'openai_json_schema',
         timeoutMs: 45_000,
         retiresOn: null,
-        evaluation: null,
+        evaluation: {
+          date: '2026-10-22',
+          report:
+            'src/eval/ai/reports/2026-10-22T19-22-55-385Z_openrouter_anthropic_claude-haiku-5.5_google_gemini-3.8-flash.json',
+        },
       },
+      // GPT-6 Luna and Sol run on Azure's private servers. They take no output limit, so none is
+      // sent; OpenRouter then holds the worst case on the key's credit limit before each call (about
+      // $0.07 for Luna, $1.30 for Sol). Azure's safety filter blocks an email that tries to give the
+      // AI orders: the answer is unusable and the mail waits for the user (owner exception).
+      {
+        id: 'openai/gpt-6-luna',
+        displayName: 'GPT-6 Luna',
+        roles: ['fast', 'detailed'],
+        recommendedFor: ['fast', 'detailed'],
+        temperature: null,
+        reasoning: { enabled: false },
+        structuredOutput: 'openai_json_schema',
+        timeoutMs: 60_000,
+        retiresOn: null,
+        evaluation: {
+          date: '2026-10-22',
+          report:
+            'src/eval/ai/reports/2026-10-22T19-22-12-192Z_openrouter_openai_gpt-6-luna_openai_gpt-6-luna.json',
+        },
+        noOutputLimit: true,
+      },
+      // Detailed only. It always thinks; under 60 s it sometimes gave no answer in time.
       {
         id: 'google/gemini-3.8-flash',
         displayName: 'Gemini 3.8 Flash',
-        roles: ['fast', 'detailed'],
+        roles: ['detailed'],
         recommendedFor: [],
         temperature: null,
         reasoning: { effort: 'low' },
         structuredOutput: 'openai_json_schema',
-        timeoutMs: 60_000,
+        timeoutMs: 90_000,
         retiresOn: null,
-        evaluation: null,
+        evaluation: {
+          date: '2026-10-22',
+          report:
+            'src/eval/ai/reports/2026-10-22T19-22-55-385Z_openrouter_anthropic_claude-haiku-5.5_google_gemini-3.8-flash.json',
+        },
       },
       {
         id: 'openai/gpt-6-sol',
@@ -372,7 +377,11 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
         structuredOutput: 'openai_json_schema',
         timeoutMs: 60_000,
         retiresOn: null,
-        evaluation: null,
+        evaluation: {
+          date: '2026-10-21',
+          report:
+            'src/eval/ai/reports/2026-10-21T12-02-39-117Z_openrouter_openai_gpt-6-sol_openai_gpt-6-sol.json',
+        },
         noOutputLimit: true,
       },
     ],
