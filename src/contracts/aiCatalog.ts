@@ -248,7 +248,9 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
         "Processed on Anthropic's infrastructure; see Anthropic's terms for where data is processed.",
       reviewedOn: null,
     },
-    // Candidates pending evaluation (AI-15).
+    // Candidates pending evaluation (AI-15). Native JSON output (Sonnet) allows at most 16 fields
+    // that may be empty, fewer than extraction's 20: its evaluation must show it takes the schema.
+    // A forced tool call (Haiku) is not strict, so that limit does not apply there.
     models: [
       {
         id: 'claude-haiku-4-5-20251001',
@@ -308,7 +310,7 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
     },
     // Certified 2026-10-23 (owner decisions, docs/ai/provider-evaluation.md). Exact IDs only: an alias such
     // as "~…-latest" can move to another model without an evaluation. Haiku screens only: Anthropic's
-    // JSON output allows at most 16 fields that may be empty, and extraction has 19. These private
+    // JSON output allows at most 16 fields that may be empty, and extraction has 20. These private
     // servers take no temperature. Luna is recommended for both steps (owner, 2026-10-23): in a 49-mail
     // sandbox test it read the same mails right as Haiku + Gemini at a sixth of the cost, and Haiku let a
     // fake job offer through.
