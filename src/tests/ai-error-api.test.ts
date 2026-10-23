@@ -638,7 +638,11 @@ describe('a mail that stopped', () => {
 describe('a check or sample test that does not finish', () => {
   it('a key check Google did not confirm says why', async () => {
     generateContent.mockRejectedValueOnce(busy());
-    const res = await request(app).post('/api/ai/settings/check').set(as).send({}).expect(200);
+    const res = await request(app)
+      .post('/api/ai/providers/gemini/check')
+      .set(as)
+      .send({})
+      .expect(200);
     expect(res.body).toMatchObject({
       verification: 'INCONCLUSIVE',
       verificationFailure: {
@@ -650,7 +654,7 @@ describe('a check or sample test that does not finish', () => {
       },
     });
     generateContent.mockResolvedValue({ text: 'OK' });
-    const verified = await request(app).post('/api/ai/settings/check').set(as).send({});
+    const verified = await request(app).post('/api/ai/providers/gemini/check').set(as).send({});
     expect(verified.body).toMatchObject({ verification: 'VERIFIED', verificationFailure: null });
   });
 
