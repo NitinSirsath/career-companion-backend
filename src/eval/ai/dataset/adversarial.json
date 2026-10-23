@@ -111,7 +111,8 @@
       "fields": {
         "fakeOfferWarning": {
           "present": true
-        },
+        }
+      },
       "mustBeNull": ["interviewDate"]
     },
     "group": "adversarial"
