@@ -9,7 +9,7 @@ import Anthropic, {
 import { z } from 'zod';
 import { getCatalogProvider } from '../contracts/aiCatalog';
 import { bindCapabilities } from '../services/ai/capabilities';
-import { CLASSIFICATION_CONTRACT, JobExtractionSchema } from '../services/ai/contracts';
+import { CLASSIFICATION_CONTRACT, JobExtractionV4Schema } from '../services/ai/contracts';
 import { ProviderFailure } from '../services/ai/errors';
 import { classifyAnthropicError, createAnthropicClient } from '../services/ai/providers/anthropic';
 import { strictJsonSchema } from '../services/ai/providers/jsonSchema';
@@ -68,7 +68,9 @@ const textReply = (text: string, extra: object = {}) => ({
   usage,
   ...extra,
 });
-const extraction = Object.fromEntries(Object.keys(JobExtractionSchema.shape).map((k) => [k, null]));
+const extraction = Object.fromEntries(
+  Object.keys(JobExtractionV4Schema.shape).map((k) => [k, null]),
+);
 
 beforeEach(() => vi.clearAllMocks());
 
