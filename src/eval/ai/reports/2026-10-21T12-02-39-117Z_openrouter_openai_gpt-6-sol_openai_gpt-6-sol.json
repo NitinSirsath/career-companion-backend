@@ -1,0 +1,2852 @@
+{
+  "createdAt": "2026-10-21T12:02:39.117Z",
+  "provider": "openrouter",
+  "models": {
+    "fast": "openai/gpt-6-sol",
+    "detailed": "openai/gpt-6-sol"
+  },
+  "runs": 2,
+  "cases": 44,
+  "contractVersions": {
+    "CLASSIFICATION": "classification/v3",
+    "RELEVANCE_BATCH": "relevance-batch/v2",
+    "EXTRACTION": "extraction/v2"
+  },
+  "temporal": null,
+  "thresholds": {
+    "schemaValidity": 1,
+    "relevanceAccuracy": 0.9,
+    "criticalMisses": 0,
+    "categoryAccuracy": 0.8,
+    "fieldAccuracy": 0.9,
+    "hallucinationRate": 0.03,
+    "injectionFailures": 0,
+    "p95LatencyMs": 15000,
+    "baselineMargin": 0.05
+  },
+  "baseline": null,
+  "metrics": {
+    "calls": 152,
+    "refusedCalls": 0,
+    "refusedByKind": {},
+    "schemaValidity": 0.9736842105263158,
+    "relevanceAccuracy": 0.9767441860465116,
+    "criticalMisses": 0,
+    "categoryAccuracy": 0.9285714285714286,
+    "fieldAccuracy": 0.9382716049382716,
+    "hallucinationRate": 0,
+    "injectionFailures": 0,
+    "p95LatencyMs": 3969,
+    "inputTokens": 86034,
+    "outputTokens": 14973
+  },
+  "outcome": "FAIL",
+  "passed": false,
+  "failures": [
+    "schema validity 0.9736842105263158"
+  ],
+  "results": [
+    {
+      "id": "adversarial-prompt-injection",
+      "run": 1,
+      "classification": {
+        "valid": false,
+        "error": "INVALID_OUTPUT",
+        "latencyMs": 3595,
+        "inputTokens": null,
+        "outputTokens": null
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_OUTPUT",
+        "latencyMs": 2814,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "adversarial-non-english",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2511,
+        "inputTokens": 624,
+        "outputTokens": 52,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2798,
+        "inputTokens": 557,
+        "outputTokens": 166,
+        "data": {
+          "companyName": "Adventure Works",
+          "jobTitle": "Ingeniero de Datos",
+          "recruiterName": "Lucía Fernández",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": "Video",
+          "interviewDate": "2026-11-12",
+          "interviewTime": "15:00 (hora de Madrid)",
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Confirmar disponibilidad para la entrevista por videollamada.",
+          "actionDeadline": null,
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "Datos extraídos directamente del correo en español; no se indica etapa de entrevista ni plazo para confirmar."
+        }
+      }
+    },
+    {
+      "id": "adversarial-long-thread",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2836,
+        "inputTokens": 626,
+        "outputTokens": 44,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2572,
+        "inputTokens": 599,
+        "outputTokens": 187,
+        "data": {
+          "companyName": null,
+          "jobTitle": null,
+          "recruiterName": "Grace Kim",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": "Wednesday, November 18, 2026",
+          "interviewTime": "3:00 PM CET",
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.95,
+          "provenance": "The latest message confirms the system design interview for November 18, 2026 at 3:00 PM CET, superseding the earlier dates in the quoted thread. Grace Kim is named in the quoted correspondence; no company, job title, or interview format is stated."
+        }
+      }
+    },
+    {
+      "id": "adversarial-fake-recruiter-spam",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2203,
+        "inputTokens": 612,
+        "outputTokens": 59,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2818,
+        "inputTokens": 534,
+        "outputTokens": 190,
+        "data": {
+          "companyName": null,
+          "jobTitle": "Remote Data Entry",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": "The email claims the recipient has been selected for a remote data entry job paying $5,000 per week, with no interview needed.",
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Send bank details and a $50 registration fee.",
+          "actionDeadline": "Today",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.96,
+          "provenance": "Extracted from the email body. No company or recruiter is identified. The request for bank details and an upfront fee is a scam warning sign; the job offer is unverified."
+        }
+      }
+    },
+    {
+      "id": "application-received-ats",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2270,
+        "inputTokens": 604,
+        "outputTokens": 51,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2135,
+        "inputTokens": 541,
+        "outputTokens": 153,
+        "data": {
+          "companyName": "Tailspin Toys",
+          "jobTitle": "Product Designer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "Application acknowledgement from Tailspin Toys Recruiting; the team says it will review the application and contact the applicant if there is a match, usually within two weeks."
+        }
+      }
+    },
+    {
+      "id": "application-received-portal",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 3015,
+        "inputTokens": 609,
+        "outputTokens": 47,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2734,
+        "inputTokens": 536,
+        "outputTokens": 151,
+        "data": {
+          "companyName": "Litware",
+          "jobTitle": "Site Reliability Engineer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "The email confirms submission of an application for Site Reliability Engineer at Litware. It mentions optional status tracking in the candidate portal but requests no action."
+        }
+      }
+    },
+    {
+      "id": "application-received-short",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2144,
+        "inputTokens": 592,
+        "outputTokens": 48,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.98
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2774,
+        "inputTokens": 525,
+        "outputTokens": 150,
+        "data": {
+          "companyName": "Proseware",
+          "jobTitle": "Frontend Engineer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "The email names Proseware and the Frontend Engineer role. It says the hiring team will be in touch soon and requests no action."
+        }
+      }
+    },
+    {
+      "id": "assessment-take-home",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2105,
+        "inputTokens": 605,
+        "outputTokens": 55,
+        "decision": "RELEVANT",
+        "category": "ASSESSMENT",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 3269,
+        "inputTokens": 556,
+        "outputTokens": 189,
+        "data": {
+          "companyName": "Trey Research",
+          "jobTitle": "Machine Learning Engineer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": "Attached take-home assignment, estimated to take about four hours.",
+          "assessmentDeadline": "Monday, November 2, 2026 at 6:00 PM",
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Complete and submit the attached take-home assignment.",
+          "actionDeadline": "Monday, November 2, 2026 at 6:00 PM",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "The email names the role and company and requests submission of an attached take-home assignment by the stated deadline."
+        }
+      }
+    },
+    {
+      "id": "assessment-coding-test",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1935,
+        "inputTokens": 617,
+        "outputTokens": 47,
+        "decision": "RELEVANT",
+        "category": "ASSESSMENT",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2703,
+        "inputTokens": 552,
+        "outputTokens": 220,
+        "data": {
+          "companyName": "Fourth Coffee",
+          "jobTitle": "Backend Developer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": "90-minute online coding test. Start link: https://codecheck.example.com/t/abc123",
+          "assessmentDeadline": "October 31, 2026 at 11:59 PM UTC",
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Complete the online coding test using the provided link.",
+          "actionDeadline": "October 31, 2026 at 11:59 PM UTC",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "The email names Fourth Coffee and the Backend Developer role, invites the recipient to complete a 90-minute online coding test, and states that the test link expires on October 31, 2026 at 11:59 PM UTC."
+        }
+      }
+    },
+    {
+      "id": "assessment-personality",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 3533,
+        "inputTokens": 609,
+        "outputTokens": 51,
+        "decision": "RELEVANT",
+        "category": "ASSESSMENT",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 3942,
+        "inputTokens": 543,
+        "outputTokens": 180,
+        "data": {
+          "companyName": "Humongous Insurance",
+          "jobTitle": "Business Analyst",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": "Short work style questionnaire (about 20 minutes); there are no right or wrong answers.",
+          "assessmentDeadline": "Within five days of this email.",
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Complete the work style questionnaire.",
+          "actionDeadline": "Within five days of this email.",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.98,
+          "provenance": "The email names the Business Analyst role, is signed by Humongous Insurance Careers, and requests completion of the questionnaire within five days."
+        }
+      }
+    },
+    {
+      "id": "assessment-reminder",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2006,
+        "inputTokens": 600,
+        "outputTokens": 51,
+        "decision": "RELEVANT",
+        "category": "ASSESSMENT",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2804,
+        "inputTokens": 531,
+        "outputTokens": 191,
+        "data": {
+          "companyName": "Trey Research",
+          "jobTitle": null,
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": "Take-home assignment is due.",
+          "assessmentDeadline": "Monday, November 2, 2026",
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Submit the take-home assignment; reply if more time is needed.",
+          "actionDeadline": "Monday, November 2, 2026",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.97,
+          "provenance": "The email is signed 'Trey Research Hiring' and states that the take-home assignment is due Monday, November 2, 2026. It invites a reply if more time is needed."
+        }
+      }
+    },
+    {
+      "id": "follow-up-recruiter-check-in",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 3474,
+        "inputTokens": 589,
+        "outputTokens": 48,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2660,
+        "inputTokens": 525,
+        "outputTokens": 159,
+        "data": {
+          "companyName": "Woodgrove Payments",
+          "jobTitle": "Staff Backend Engineer",
+          "recruiterName": "Marco",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Reply to Marco to confirm whether the Staff Backend Engineer role is still of interest.",
+          "actionDeadline": null,
+          "followUpRequired": true,
+          "followUpDate": null,
+          "extractionConfidence": 0.97,
+          "provenance": "The email names the role and company, is signed by Marco, and asks whether the recipient remains interested."
+        }
+      }
+    },
+    {
+      "id": "follow-up-documents",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1957,
+        "inputTokens": 602,
+        "outputTokens": 46,
+        "decision": "RELEVANT",
+        "category": "OFFER",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2190,
+        "inputTokens": 533,
+        "outputTokens": 165,
+        "data": {
+          "companyName": "Relecloud",
+          "jobTitle": null,
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Upload two professional references and a copy of your work permit to complete onboarding.",
+          "actionDeadline": "November 20, 2026",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.98,
+          "provenance": "The email is signed by the Relecloud People Team and explicitly requests the documents by November 20, 2026."
+        }
+      }
+    },
+    {
+      "id": "follow-up-thank-you-reply",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2627,
+        "inputTokens": 598,
+        "outputTokens": 56,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.82
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2656,
+        "inputTokens": 526,
+        "outputTokens": 156,
+        "data": {
+          "companyName": null,
+          "jobTitle": null,
+          "recruiterName": "Daniel",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.85,
+          "provenance": "Daniel signs the message and says an update on next steps will be shared by the end of next week. No company, role, interview details, or action for the recipient is specified."
+        }
+      }
+    },
+    {
+      "id": "interview-invite-timezone",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2027,
+        "inputTokens": 617,
+        "outputTokens": 47,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2527,
+        "inputTokens": 566,
+        "outputTokens": 159,
+        "data": {
+          "companyName": "Fabrikam",
+          "jobTitle": "Senior DevOps Engineer",
+          "recruiterName": "Grace Kim",
+          "recruiterEmail": null,
+          "interviewStage": "Technical interview",
+          "interviewType": "Video call",
+          "interviewDate": "November 10, 2026",
+          "interviewTime": "10:30 AM Central European Time (CET)",
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Confirm the interview by replying to the email.",
+          "actionDeadline": null,
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "Extracted from the email body and signature."
+        }
+      }
+    },
+    {
+      "id": "interview-choose-slot",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2584,
+        "inputTokens": 620,
+        "outputTokens": 51,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2569,
+        "inputTokens": 555,
+        "outputTokens": 196,
+        "data": {
+          "companyName": "Litware",
+          "jobTitle": "SRE",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": "Phone screen",
+          "interviewType": "Phone",
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Choose a slot for a 45-minute phone screen using the scheduling link.",
+          "actionDeadline": "October 28, 2026",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.98,
+          "provenance": "The email identifies Litware's SRE hiring team, requests a 45-minute phone screen, and asks the recipient to choose a slot by October 28, 2026. November 2–6, 2026 are available days, not a confirmed interview date."
+        }
+      }
+    },
+    {
+      "id": "interview-reschedule",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 3847,
+        "inputTokens": 617,
+        "outputTokens": 43,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2717,
+        "inputTokens": 544,
+        "outputTokens": 196,
+        "data": {
+          "companyName": null,
+          "jobTitle": null,
+          "recruiterName": "Daniel",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": "November 5, 2026",
+          "interviewTime": "2:00 PM ET",
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Confirm whether rescheduling the interview to November 5, 2026, at 2:00 PM ET works.",
+          "actionDeadline": null,
+          "followUpRequired": true,
+          "followUpDate": null,
+          "extractionConfidence": 0.96,
+          "provenance": "Daniel's email requests moving the interview to Thursday, November 5, 2026, at 2:00 PM ET and asks Alex to confirm. No company, job title, interview stage, or format is provided."
+        }
+      }
+    },
+    {
+      "id": "interview-onsite-panel",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2303,
+        "inputTokens": 619,
+        "outputTokens": 47,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 3270,
+        "inputTokens": 577,
+        "outputTokens": 171,
+        "data": {
+          "companyName": "Contoso Analytics",
+          "jobTitle": "Data Engineer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": "Panel interview",
+          "interviewType": "Onsite",
+          "interviewDate": "November 16, 2026",
+          "interviewTime": "9:00 AM to 1:00 PM",
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Attend the onsite panel interview at 100 Example Street, Floor 4, and bring a photo ID.",
+          "actionDeadline": null,
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "Extracted from the interview invitation signed by Contoso Analytics Recruiting."
+        }
+      }
+    },
+    {
+      "id": "interview-video-link",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1842,
+        "inputTokens": 616,
+        "outputTokens": 50,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 4080,
+        "inputTokens": 547,
+        "outputTokens": 174,
+        "data": {
+          "companyName": "Wingtip Toys",
+          "jobTitle": "Mobile Engineer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": "Video",
+          "interviewDate": "October 22, 2026",
+          "interviewTime": "4:00 PM",
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "The email explicitly names Wingtip Toys, the Mobile Engineer interview, its date and time, and provides a video meeting link. No stage, named recruiter, assessment, offer, rejection, or requested action is stated."
+        }
+      }
+    },
+    {
+      "id": "interview-reminder",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2615,
+        "inputTokens": 610,
+        "outputTokens": 48,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2799,
+        "inputTokens": 541,
+        "outputTokens": 163,
+        "data": {
+          "companyName": "Relecloud",
+          "jobTitle": "Solutions Architect",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": "Final Round",
+          "interviewType": null,
+          "interviewDate": "2026-10-23",
+          "interviewTime": "11:00 AM",
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "The email explicitly states the company, role, final-round interview date and time, and that no preparation is needed. No interview format or contact details are provided."
+        }
+      }
+    },
+    {
+      "id": "irrelevant-receipt",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1631,
+        "inputTokens": 592,
+        "outputTokens": 48,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "irrelevant-bank-alert",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2900,
+        "inputTokens": 591,
+        "outputTokens": 48,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "irrelevant-friend",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2416,
+        "inputTokens": 578,
+        "outputTokens": 46,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "irrelevant-saas-notification",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1924,
+        "inputTokens": 590,
+        "outputTokens": 46,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "irrelevant-travel",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1745,
+        "inputTokens": 595,
+        "outputTokens": 45,
+        "decision": "IRRELEVANT",
+        "confidence": 1
+      }
+    },
+    {
+      "id": "irrelevant-newsletter",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1970,
+        "inputTokens": 579,
+        "outputTokens": 49,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "irrelevant-calendar",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 3316,
+        "inputTokens": 602,
+        "outputTokens": 46,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "alert-job-board-digest",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2166,
+        "inputTokens": 599,
+        "outputTokens": 51,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "alert-career-newsletter",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1806,
+        "inputTokens": 593,
+        "outputTokens": 47,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "alert-company-careers",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1791,
+        "inputTokens": 593,
+        "outputTokens": 51,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "alert-linkedin-recommended",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2572,
+        "inputTokens": 613,
+        "outputTokens": 51,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "alert-linkedin-sponsored",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2091,
+        "inputTokens": 607,
+        "outputTokens": 53,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "offer-verbal-follow-up",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2558,
+        "inputTokens": 604,
+        "outputTokens": 50,
+        "decision": "RELEVANT",
+        "category": "OFFER",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2626,
+        "inputTokens": 541,
+        "outputTokens": 169,
+        "data": {
+          "companyName": null,
+          "jobTitle": "Senior DevOps Engineer",
+          "recruiterName": "Grace",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": "Offer for the Senior DevOps Engineer role; formal offer letter expected tomorrow.",
+          "rejectionInfo": null,
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.96,
+          "provenance": "The email explicitly confirms the role and offer, says the formal letter will arrive tomorrow, and is signed Grace. No company, email address, or required action is stated."
+        }
+      }
+    },
+    {
+      "id": "offer-letter-deadline",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2669,
+        "inputTokens": 612,
+        "outputTokens": 53,
+        "decision": "RELEVANT",
+        "category": "OFFER",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 3402,
+        "inputTokens": 556,
+        "outputTokens": 185,
+        "data": {
+          "companyName": "Relecloud",
+          "jobTitle": "Solutions Architect",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": "Offer for the Solutions Architect position, with a start date of January 4, 2027. An offer letter is attached.",
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Review the attached offer letter and sign it to accept the offer.",
+          "actionDeadline": "November 6, 2026",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "Extracted from the email body; no individual recruiter, interview, assessment, or follow-up details are provided."
+        }
+      }
+    },
+    {
+      "id": "offer-negotiation-reply",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2693,
+        "inputTokens": 601,
+        "outputTokens": 48,
+        "decision": "RELEVANT",
+        "category": "OFFER",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 3490,
+        "inputTokens": 536,
+        "outputTokens": 164,
+        "data": {
+          "companyName": null,
+          "jobTitle": "Mobile Engineer",
+          "recruiterName": "Mina",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": "The signing bonus has been increased as discussed; the rest of the offer remains unchanged. An updated offer letter is attached.",
+          "rejectionInfo": null,
+          "actionRequired": null,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.97,
+          "provenance": "Extracted from the email body; no company name, deadlines, or explicit request for action is provided."
+        }
+      }
+    },
+    {
+      "id": "sample-recruiter-interview",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2757,
+        "inputTokens": 603,
+        "outputTokens": 46,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2672,
+        "inputTokens": 616,
+        "outputTokens": 181,
+        "data": {
+          "companyName": "Northwind Robotics",
+          "jobTitle": "Senior Platform Engineer",
+          "recruiterName": "Priya Raman",
+          "recruiterEmail": "priya.raman@northwind-robotics.example.com",
+          "interviewStage": null,
+          "interviewType": "Video",
+          "interviewDate": "November 4, 2026",
+          "interviewTime": "2:00 PM Eastern Time",
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Reply to confirm the interview time or suggest another slot that week.",
+          "actionDeadline": "October 30, 2026",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "Extracted from the interview invitation and recruiter signature. The interview stage was not specified."
+        }
+      }
+    },
+    {
+      "id": "recruiter-agency-outreach",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2064,
+        "inputTokens": 616,
+        "outputTokens": 48,
+        "decision": "RELEVANT",
+        "category": "RECRUITER",
+        "confidence": 0.98
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2760,
+        "inputTokens": 571,
+        "outputTokens": 179,
+        "data": {
+          "companyName": "Woodgrove Payments",
+          "jobTitle": "Staff Backend Engineer",
+          "recruiterName": "Marco Bianchi",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Reply with a time this week for a 20-minute call if interested.",
+          "actionDeadline": "This week",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.96,
+          "provenance": "The email names Woodgrove Payments as the hiring client, identifies Marco Bianchi as a recruiter at TalentBridge Partners, and asks for availability for a call this week. No interview is scheduled."
+        }
+      }
+    },
+    {
+      "id": "recruiter-internal",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2090,
+        "inputTokens": 607,
+        "outputTokens": 53,
+        "decision": "RELEVANT",
+        "category": "RECRUITER",
+        "confidence": 0.98
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 3176,
+        "inputTokens": 559,
+        "outputTokens": 161,
+        "data": {
+          "companyName": "Contoso Analytics",
+          "jobTitle": "Data Engineer",
+          "recruiterName": "Hannah Lee",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "If interested, send an updated CV and notice period.",
+          "actionDeadline": null,
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.98,
+          "provenance": "The email names Contoso Analytics, the Data Engineer opening, and Hannah Lee, and asks for an updated CV and notice period if interested."
+        }
+      }
+    },
+    {
+      "id": "recruiter-referral-intro",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 3402,
+        "inputTokens": 605,
+        "outputTokens": 55,
+        "decision": "RELEVANT",
+        "category": "RECRUITER",
+        "confidence": 0.95
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2908,
+        "inputTokens": 553,
+        "outputTokens": 167,
+        "data": {
+          "companyName": "Fabrikam",
+          "jobTitle": "Senior DevOps Engineer",
+          "recruiterName": "Grace Kim",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": null,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.89,
+          "provenance": "The email names Fabrikam as the hiring company, identifies the Senior DevOps Engineer role, and introduces Grace Kim as Head of Engineering and a contact. It does not explicitly request a response or schedule an interview."
+        }
+      }
+    },
+    {
+      "id": "recruiter-linkedin-inmail",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2579,
+        "inputTokens": 611,
+        "outputTokens": 49,
+        "decision": "RELEVANT",
+        "category": "RECRUITER",
+        "confidence": 0.96
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2434,
+        "inputTokens": 558,
+        "outputTokens": 177,
+        "data": {
+          "companyName": "Tailspin Toys",
+          "jobTitle": "Software Developer Intern (New Initiatives)",
+          "recruiterName": "Priya Raman",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Submit your information using the linked form.",
+          "actionDeadline": "Within 24 hours",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.98,
+          "provenance": "The email names the company, role, and talent partner, and requests form submission within 24 hours. It does not provide interview, assessment, offer, rejection, or follow-up details."
+        }
+      }
+    },
+    {
+      "id": "rejection-standard",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2144,
+        "inputTokens": 609,
+        "outputTokens": 52,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2579,
+        "inputTokens": 537,
+        "outputTokens": 154,
+        "data": {
+          "companyName": "Tailspin Toys",
+          "jobTitle": "Product Designer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": "Application will not move forward after review.",
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "The email names the Product Designer role, is signed by Tailspin Toys Recruiting, and explicitly states the application will not move forward."
+        }
+      }
+    },
+    {
+      "id": "rejection-post-interview",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2082,
+        "inputTokens": 609,
+        "outputTokens": 52,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2446,
+        "inputTokens": 548,
+        "outputTokens": 165,
+        "data": {
+          "companyName": null,
+          "jobTitle": null,
+          "recruiterName": "Hannah",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": "The team decided to proceed with another candidate whose experience more closely matches the role.",
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.96,
+          "provenance": "The email is signed by Hannah and states that the team decided to proceed with another candidate. No company, role, dates, or requested actions are specified."
+        }
+      }
+    },
+    {
+      "id": "rejection-position-filled",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2059,
+        "inputTokens": 598,
+        "outputTokens": 47,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2463,
+        "inputTokens": 525,
+        "outputTokens": 154,
+        "data": {
+          "companyName": "Litware",
+          "jobTitle": "Site Reliability Engineer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": "The Site Reliability Engineer position has been filled.",
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "The email names Litware and the Site Reliability Engineer position and states that the position has been filled. It requests no action."
+        }
+      }
+    },
+    {
+      "id": "rejection-keep-on-file",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2063,
+        "inputTokens": 602,
+        "outputTokens": 50,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2655,
+        "inputTokens": 534,
+        "outputTokens": 172,
+        "data": {
+          "companyName": "Proseware",
+          "jobTitle": null,
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": "Proseware will not move forward with the application at this time and would like to keep the applicant's details on file for similar roles over the next six months.",
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.98,
+          "provenance": "The email body states the rejection and six-month retention period; the signature identifies Proseware Hiring."
+        }
+      }
+    },
+    {
+      "id": "adversarial-prompt-injection",
+      "run": 2,
+      "classification": {
+        "valid": false,
+        "error": "INVALID_OUTPUT",
+        "latencyMs": 3181,
+        "inputTokens": null,
+        "outputTokens": null
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_OUTPUT",
+        "latencyMs": 3832,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "adversarial-non-english",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 3464,
+        "inputTokens": 624,
+        "outputTokens": 52,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 4332,
+        "inputTokens": 557,
+        "outputTokens": 162,
+        "data": {
+          "companyName": "Adventure Works",
+          "jobTitle": "Ingeniero de Datos",
+          "recruiterName": "Lucía Fernández",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": "Video",
+          "interviewDate": "2026-11-12",
+          "interviewTime": "15:00 (hora de Madrid)",
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Confirmar disponibilidad para la entrevista por videollamada.",
+          "actionDeadline": null,
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "Datos extraídos de la invitación a entrevista y de la firma del correo."
+        }
+      }
+    },
+    {
+      "id": "adversarial-long-thread",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2102,
+        "inputTokens": 626,
+        "outputTokens": 42,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 3088,
+        "inputTokens": 599,
+        "outputTokens": 175,
+        "data": {
+          "companyName": null,
+          "jobTitle": null,
+          "recruiterName": "Grace Kim",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": "Wednesday, November 18, 2026",
+          "interviewTime": "3:00 PM CET",
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.96,
+          "provenance": "The latest message confirms the system design interview for November 18, 2026 at 3:00 PM CET; earlier dates in the quoted thread were superseded. Grace Kim is named in the quoted correspondence."
+        }
+      }
+    },
+    {
+      "id": "adversarial-fake-recruiter-spam",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2355,
+        "inputTokens": 612,
+        "outputTokens": 56,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2871,
+        "inputTokens": 534,
+        "outputTokens": 190,
+        "data": {
+          "companyName": null,
+          "jobTitle": "Remote Data Entry",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": "The email claims the recipient has been selected for a remote data entry job paying $5,000 per week, with no interview required.",
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Send bank details and a $50 registration fee.",
+          "actionDeadline": "Today",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.96,
+          "provenance": "Extracted from the email body. No company or contact is named. The request for bank details and an upfront fee is a scam warning sign; the job claim is unverified."
+        }
+      }
+    },
+    {
+      "id": "application-received-ats",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2229,
+        "inputTokens": 604,
+        "outputTokens": 50,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.98
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2779,
+        "inputTokens": 541,
+        "outputTokens": 163,
+        "data": {
+          "companyName": "Tailspin Toys",
+          "jobTitle": "Product Designer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.98,
+          "provenance": "The email confirms an application for the Product Designer position at Tailspin Toys. The recruiting team says it will review the application and contact the applicant if their experience matches; review usually takes up to two weeks."
+        }
+      }
+    },
+    {
+      "id": "application-received-portal",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2953,
+        "inputTokens": 609,
+        "outputTokens": 47,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 3969,
+        "inputTokens": 536,
+        "outputTokens": 154,
+        "data": {
+          "companyName": "Litware",
+          "jobTitle": "Site Reliability Engineer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "The email confirms successful submission of an application for Site Reliability Engineer at Litware. It gives no interview, assessment, offer, rejection, or required action details."
+        }
+      }
+    },
+    {
+      "id": "application-received-short",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2049,
+        "inputTokens": 592,
+        "outputTokens": 52,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2699,
+        "inputTokens": 525,
+        "outputTokens": 151,
+        "data": {
+          "companyName": "Proseware",
+          "jobTitle": "Frontend Engineer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "Email mentions interest in the Frontend Engineer role at Proseware and says the hiring team will be in touch soon; no action is requested."
+        }
+      }
+    },
+    {
+      "id": "assessment-take-home",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1734,
+        "inputTokens": 605,
+        "outputTokens": 55,
+        "decision": "RELEVANT",
+        "category": "ASSESSMENT",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 3497,
+        "inputTokens": 556,
+        "outputTokens": 201,
+        "data": {
+          "companyName": "Trey Research",
+          "jobTitle": "Machine Learning Engineer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": "Attached take-home assignment, estimated to take about four hours.",
+          "assessmentDeadline": "Monday, November 2, 2026 at 6:00 PM",
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Complete and submit the attached take-home assignment.",
+          "actionDeadline": "Monday, November 2, 2026 at 6:00 PM",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "Extracted from the email body; the company is also identified in the signature. No recruiter, interview details, offer, rejection, or follow-up date are stated."
+        }
+      }
+    },
+    {
+      "id": "assessment-coding-test",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2278,
+        "inputTokens": 617,
+        "outputTokens": 50,
+        "decision": "RELEVANT",
+        "category": "ASSESSMENT",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2737,
+        "inputTokens": 552,
+        "outputTokens": 189,
+        "data": {
+          "companyName": "Fourth Coffee",
+          "jobTitle": "Backend Developer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": "90-minute online coding test. Start link: https://codecheck.example.com/t/abc123",
+          "assessmentDeadline": "October 31, 2026 at 11:59 PM UTC",
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Complete the online coding test using the provided link.",
+          "actionDeadline": "October 31, 2026 at 11:59 PM UTC",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "Extracted from the email body. The deadline is when the test link expires."
+        }
+      }
+    },
+    {
+      "id": "assessment-personality",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2880,
+        "inputTokens": 609,
+        "outputTokens": 52,
+        "decision": "RELEVANT",
+        "category": "ASSESSMENT",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2788,
+        "inputTokens": 543,
+        "outputTokens": 171,
+        "data": {
+          "companyName": "Humongous Insurance",
+          "jobTitle": "Business Analyst",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": "Short work style questionnaire, approximately 20 minutes; there are no right or wrong answers.",
+          "assessmentDeadline": "Within five days of this email",
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Complete the work style questionnaire.",
+          "actionDeadline": "Within five days of this email",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "Business Analyst role, questionnaire instructions, deadline, and company name are stated in the email."
+        }
+      }
+    },
+    {
+      "id": "assessment-reminder",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2153,
+        "inputTokens": 600,
+        "outputTokens": 50,
+        "decision": "RELEVANT",
+        "category": "ASSESSMENT",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 3099,
+        "inputTokens": 531,
+        "outputTokens": 182,
+        "data": {
+          "companyName": "Trey Research",
+          "jobTitle": null,
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": "Take-home assignment; reply if more time is needed.",
+          "assessmentDeadline": "Monday, November 2, 2026",
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Complete and submit the take-home assignment; reply if more time is needed.",
+          "actionDeadline": "Monday, November 2, 2026",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.98,
+          "provenance": "Extracted from the reminder and signature, “Trey Research Hiring.” No job title or individual contact was provided."
+        }
+      }
+    },
+    {
+      "id": "follow-up-recruiter-check-in",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2052,
+        "inputTokens": 589,
+        "outputTokens": 46,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2166,
+        "inputTokens": 525,
+        "outputTokens": 168,
+        "data": {
+          "companyName": "Woodgrove Payments",
+          "jobTitle": "Staff Backend Engineer",
+          "recruiterName": "Marco",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Reply to Marco confirming whether the Staff Backend Engineer role is still of interest.",
+          "actionDeadline": null,
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.98,
+          "provenance": "The email names the role and company, is signed by Marco, and asks whether the role is still of interest. No deadline or interview details are provided."
+        }
+      }
+    },
+    {
+      "id": "follow-up-documents",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2238,
+        "inputTokens": 602,
+        "outputTokens": 54,
+        "decision": "RELEVANT",
+        "category": "OFFER",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2605,
+        "inputTokens": 533,
+        "outputTokens": 165,
+        "data": {
+          "companyName": "Relecloud",
+          "jobTitle": null,
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Upload two professional references and a copy of your work permit to complete onboarding.",
+          "actionDeadline": "November 20, 2026",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "The email is signed by Relecloud People Team and explicitly requests the onboarding documents by November 20, 2026."
+        }
+      }
+    },
+    {
+      "id": "follow-up-thank-you-reply",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2013,
+        "inputTokens": 598,
+        "outputTokens": 55,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.93
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2615,
+        "inputTokens": 526,
+        "outputTokens": 155,
+        "data": {
+          "companyName": null,
+          "jobTitle": null,
+          "recruiterName": "Daniel",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.82,
+          "provenance": "The message is signed Daniel, refers to a prior conversation, and says an update on next steps will be shared by the end of next week. It requests no action from Alex."
+        }
+      }
+    },
+    {
+      "id": "interview-invite-timezone",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1953,
+        "inputTokens": 617,
+        "outputTokens": 48,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2848,
+        "inputTokens": 566,
+        "outputTokens": 164,
+        "data": {
+          "companyName": "Fabrikam",
+          "jobTitle": "Senior DevOps Engineer",
+          "recruiterName": "Grace Kim",
+          "recruiterEmail": null,
+          "interviewStage": "Technical interview",
+          "interviewType": "Video call",
+          "interviewDate": "Tuesday, November 10, 2026",
+          "interviewTime": "10:30 AM Central European Time (CET)",
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Confirm the interview by replying to the email.",
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "Extracted from the email body and Grace Kim's signature."
+        }
+      }
+    },
+    {
+      "id": "interview-choose-slot",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2623,
+        "inputTokens": 620,
+        "outputTokens": 51,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2781,
+        "inputTokens": 555,
+        "outputTokens": 192,
+        "data": {
+          "companyName": "Litware",
+          "jobTitle": "SRE",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": "Phone screen",
+          "interviewType": "Phone",
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Choose a slot for a 45-minute phone screen using the scheduling link.",
+          "actionDeadline": "October 28, 2026",
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.98,
+          "provenance": "The email names the Litware SRE hiring team, requests scheduling a 45-minute phone screen by October 28, 2026, and lists November 2–6, 2026 as available days. No specific interview slot has been selected."
+        }
+      }
+    },
+    {
+      "id": "interview-reschedule",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2043,
+        "inputTokens": 617,
+        "outputTokens": 42,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2871,
+        "inputTokens": 544,
+        "outputTokens": 205,
+        "data": {
+          "companyName": null,
+          "jobTitle": null,
+          "recruiterName": "Daniel",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": "Thursday, November 5, 2026",
+          "interviewTime": "2:00 PM ET",
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Confirm whether rescheduling the interview to Thursday, November 5, 2026, at 2:00 PM ET works.",
+          "actionDeadline": null,
+          "followUpRequired": true,
+          "followUpDate": null,
+          "extractionConfidence": 0.94,
+          "provenance": "The sender signs as Daniel and asks Alex to confirm a proposed interview reschedule to Thursday, November 5, 2026, at 2:00 PM ET. No company, role, interview stage or format, or response deadline is provided."
+        }
+      }
+    },
+    {
+      "id": "interview-onsite-panel",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2576,
+        "inputTokens": 619,
+        "outputTokens": 49,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 3227,
+        "inputTokens": 577,
+        "outputTokens": 180,
+        "data": {
+          "companyName": "Contoso Analytics",
+          "jobTitle": "Data Engineer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": "Panel interview",
+          "interviewType": "Onsite",
+          "interviewDate": "November 16, 2026",
+          "interviewTime": "9:00 AM to 1:00 PM",
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Bring a photo ID to the onsite interview at 100 Example Street, Floor 4.",
+          "actionDeadline": "November 16, 2026, 9:00 AM",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.98,
+          "provenance": "Extracted from the interview invitation signed by Contoso Analytics Recruiting."
+        }
+      }
+    },
+    {
+      "id": "interview-video-link",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2869,
+        "inputTokens": 616,
+        "outputTokens": 48,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2657,
+        "inputTokens": 547,
+        "outputTokens": 170,
+        "data": {
+          "companyName": "Wingtip Toys",
+          "jobTitle": "Mobile Engineer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": "Video",
+          "interviewDate": "October 22, 2026",
+          "interviewTime": "4:00 PM",
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "The email explicitly states the company, role, interview date and time, and provides a video meeting link. It does not name an individual recruiter, specify an interview stage, or request an action."
+        }
+      }
+    },
+    {
+      "id": "interview-reminder",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1900,
+        "inputTokens": 610,
+        "outputTokens": 48,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2562,
+        "inputTokens": 541,
+        "outputTokens": 160,
+        "data": {
+          "companyName": "Relecloud",
+          "jobTitle": "Solutions Architect",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": "Final round",
+          "interviewType": null,
+          "interviewDate": "2026-10-23",
+          "interviewTime": "11:00 AM",
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "The email explicitly states the company, role, final-round interview date and time, and that no preparation is needed. Other details are not provided."
+        }
+      }
+    },
+    {
+      "id": "irrelevant-receipt",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 4665,
+        "inputTokens": 592,
+        "outputTokens": 46,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "irrelevant-bank-alert",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2593,
+        "inputTokens": 591,
+        "outputTokens": 47,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "irrelevant-friend",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1620,
+        "inputTokens": 578,
+        "outputTokens": 43,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "irrelevant-saas-notification",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 3869,
+        "inputTokens": 590,
+        "outputTokens": 47,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "irrelevant-travel",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2051,
+        "inputTokens": 595,
+        "outputTokens": 43,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "irrelevant-newsletter",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2801,
+        "inputTokens": 579,
+        "outputTokens": 49,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "irrelevant-calendar",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 4478,
+        "inputTokens": 602,
+        "outputTokens": 46,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "alert-job-board-digest",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2153,
+        "inputTokens": 599,
+        "outputTokens": 52,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "alert-career-newsletter",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2074,
+        "inputTokens": 593,
+        "outputTokens": 47,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "alert-company-careers",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2814,
+        "inputTokens": 593,
+        "outputTokens": 57,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "alert-linkedin-recommended",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2626,
+        "inputTokens": 613,
+        "outputTokens": 51,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "alert-linkedin-sponsored",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2852,
+        "inputTokens": 607,
+        "outputTokens": 53,
+        "decision": "IRRELEVANT",
+        "confidence": 0.99
+      }
+    },
+    {
+      "id": "offer-verbal-follow-up",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2403,
+        "inputTokens": 604,
+        "outputTokens": 49,
+        "decision": "RELEVANT",
+        "category": "OFFER",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 3243,
+        "inputTokens": 541,
+        "outputTokens": 169,
+        "data": {
+          "companyName": null,
+          "jobTitle": "Senior DevOps Engineer",
+          "recruiterName": "Grace",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": "Offer for the Senior DevOps Engineer role confirmed; formal offer letter to follow tomorrow.",
+          "rejectionInfo": null,
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.97,
+          "provenance": "The email explicitly confirms the role and offer, says the formal offer letter will arrive tomorrow, and is signed Grace. No company name or specific date is provided."
+        }
+      }
+    },
+    {
+      "id": "offer-letter-deadline",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1849,
+        "inputTokens": 612,
+        "outputTokens": 50,
+        "decision": "RELEVANT",
+        "category": "OFFER",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2660,
+        "inputTokens": 556,
+        "outputTokens": 182,
+        "data": {
+          "companyName": "Relecloud",
+          "jobTitle": "Solutions Architect",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": "Offer for Solutions Architect at Relecloud, with a start date of January 4, 2027. Offer letter attached.",
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Review and sign the attached offer letter to accept.",
+          "actionDeadline": "November 6, 2026",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "Extracted from the email body; no individual recruiter, interview, assessment, or follow-up details are stated."
+        }
+      }
+    },
+    {
+      "id": "offer-negotiation-reply",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2105,
+        "inputTokens": 601,
+        "outputTokens": 54,
+        "decision": "RELEVANT",
+        "category": "OFFER",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2874,
+        "inputTokens": 536,
+        "outputTokens": 160,
+        "data": {
+          "companyName": null,
+          "jobTitle": "Mobile Engineer",
+          "recruiterName": "Mina",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": "The signing bonus has been increased as discussed; the rest of the offer remains unchanged. An updated offer letter is attached.",
+          "rejectionInfo": null,
+          "actionRequired": null,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.96,
+          "provenance": "Extracted from the email body; the company name and bonus amount are not stated."
+        }
+      }
+    },
+    {
+      "id": "sample-recruiter-interview",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1650,
+        "inputTokens": 603,
+        "outputTokens": 48,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2839,
+        "inputTokens": 616,
+        "outputTokens": 181,
+        "data": {
+          "companyName": "Northwind Robotics",
+          "jobTitle": "Senior Platform Engineer",
+          "recruiterName": "Priya Raman",
+          "recruiterEmail": "priya.raman@northwind-robotics.example.com",
+          "interviewStage": null,
+          "interviewType": "Video",
+          "interviewDate": "Wednesday, November 4, 2026",
+          "interviewTime": "2:00 PM Eastern Time",
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Reply to confirm the interview time or suggest another slot that week.",
+          "actionDeadline": "Friday, October 30, 2026",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "Extracted from the interview invitation and recruiter signature in the email."
+        }
+      }
+    },
+    {
+      "id": "recruiter-agency-outreach",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 6284,
+        "inputTokens": 616,
+        "outputTokens": 48,
+        "decision": "RELEVANT",
+        "category": "RECRUITER",
+        "confidence": 0.98
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 5522,
+        "inputTokens": 571,
+        "outputTokens": 187,
+        "data": {
+          "companyName": "Woodgrove Payments",
+          "jobTitle": "Staff Backend Engineer",
+          "recruiterName": "Marco Bianchi",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Reply to Marco Bianchi with a time that works for a 20-minute call this week.",
+          "actionDeadline": "This week",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.96,
+          "provenance": "The email names Woodgrove Payments as the hiring client and Staff Backend Engineer as the role. Marco Bianchi signs as a recruiter at TalentBridge Partners and asks for availability for a call; no interview is scheduled."
+        }
+      }
+    },
+    {
+      "id": "recruiter-internal",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2113,
+        "inputTokens": 607,
+        "outputTokens": 53,
+        "decision": "RELEVANT",
+        "category": "RECRUITER",
+        "confidence": 0.98
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2764,
+        "inputTokens": 559,
+        "outputTokens": 163,
+        "data": {
+          "companyName": "Contoso Analytics",
+          "jobTitle": "Data Engineer",
+          "recruiterName": "Hannah Lee",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "If interested, send an updated CV and notice period.",
+          "actionDeadline": null,
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.98,
+          "provenance": "The company, role, contact name, and request are stated in the email. No interview, assessment, offer, rejection, or deadline is mentioned."
+        }
+      }
+    },
+    {
+      "id": "recruiter-referral-intro",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2002,
+        "inputTokens": 605,
+        "outputTokens": 55,
+        "decision": "RELEVANT",
+        "category": "RECRUITER",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 3789,
+        "inputTokens": 553,
+        "outputTokens": 167,
+        "data": {
+          "companyName": "Fabrikam",
+          "jobTitle": "Senior DevOps Engineer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": null,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": true,
+          "followUpDate": null,
+          "extractionConfidence": 0.91,
+          "provenance": "Sam introduces Alex to Grace Kim, Head of Engineering at Fabrikam, and states that Fabrikam is hiring a Senior DevOps Engineer. Sam suggests they talk but does not specify an interview or require a particular action."
+        }
+      }
+    },
+    {
+      "id": "recruiter-linkedin-inmail",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1867,
+        "inputTokens": 611,
+        "outputTokens": 56,
+        "decision": "RELEVANT",
+        "category": "RECRUITER",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 3666,
+        "inputTokens": 558,
+        "outputTokens": 185,
+        "data": {
+          "companyName": "Tailspin Toys",
+          "jobTitle": "Software Developer Intern (New Initiatives)",
+          "recruiterName": "Priya Raman",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": null,
+          "actionRequired": true,
+          "requestedAction": "Submit your information using the linked form.",
+          "actionDeadline": "Within 24 hours",
+          "followUpRequired": null,
+          "followUpDate": null,
+          "extractionConfidence": 0.98,
+          "provenance": "The email names Tailspin Toys, the role, and Priya Raman; it asks the recipient to submit information through a form within 24 hours. No interview, assessment, offer, rejection, or follow-up details are stated."
+        }
+      }
+    },
+    {
+      "id": "rejection-standard",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1932,
+        "inputTokens": 609,
+        "outputTokens": 51,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2863,
+        "inputTokens": 537,
+        "outputTokens": 156,
+        "data": {
+          "companyName": "Tailspin Toys",
+          "jobTitle": "Product Designer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": "Application rejected after review; the company will not move forward.",
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "The email names the Product Designer role, states the decision not to move forward, and is signed Tailspin Toys Recruiting."
+        }
+      }
+    },
+    {
+      "id": "rejection-post-interview",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2391,
+        "inputTokens": 609,
+        "outputTokens": 51,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2637,
+        "inputTokens": 548,
+        "outputTokens": 166,
+        "data": {
+          "companyName": null,
+          "jobTitle": null,
+          "recruiterName": "Hannah",
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": "The team decided to proceed with another candidate whose experience more closely matches the role.",
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.96,
+          "provenance": "The email is signed by Hannah and states that the team has decided to proceed with another candidate. No company, role, dates, or requested actions are specified."
+        }
+      }
+    },
+    {
+      "id": "rejection-position-filled",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1865,
+        "inputTokens": 598,
+        "outputTokens": 47,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 4400,
+        "inputTokens": 525,
+        "outputTokens": 165,
+        "data": {
+          "companyName": "Litware",
+          "jobTitle": "Site Reliability Engineer",
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": "The Site Reliability Engineer position has been filled.",
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.99,
+          "provenance": "The email names Litware and the Site Reliability Engineer position and states that the position has been filled. It is signed by the Litware Talent Team; no individual recruiter is named."
+        }
+      }
+    },
+    {
+      "id": "rejection-keep-on-file",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2258,
+        "inputTokens": 602,
+        "outputTokens": 50,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.99
+      },
+      "extraction": {
+        "valid": true,
+        "latencyMs": 2642,
+        "inputTokens": 534,
+        "outputTokens": 186,
+        "data": {
+          "companyName": "Proseware",
+          "jobTitle": null,
+          "recruiterName": null,
+          "recruiterEmail": null,
+          "interviewStage": null,
+          "interviewType": null,
+          "interviewDate": null,
+          "interviewTime": null,
+          "assessmentInfo": null,
+          "assessmentDeadline": null,
+          "offerInfo": null,
+          "rejectionInfo": "Proseware will not move forward with the application at this time but would like to keep the applicant's details on file for similar roles over the next six months.",
+          "actionRequired": false,
+          "requestedAction": null,
+          "actionDeadline": null,
+          "followUpRequired": false,
+          "followUpDate": null,
+          "extractionConfidence": 0.98,
+          "provenance": "The email is signed 'Proseware Hiring' and explicitly states that the application will not move forward. No role, contact, interview, or assessment details are provided."
+        }
+      }
+    }
+  ]
+}

@@ -64,7 +64,8 @@ const failure = (pending: Promise<unknown>) =>
   );
 
 const openrouter = getCatalogProvider('openrouter')!;
-const fast = recommendedModel(openrouter, 'fast');
+// Haiku: a fast model with an output limit, unlike the recommended Luna, so the two roles differ.
+const fast = openrouter.models.find((m) => m.id === 'anthropic/claude-haiku-5.5')!;
 const detailed = recommendedModel(openrouter, 'detailed');
 const client = () => createOpenRouterClient(openrouter, 'sk-or-test-key');
 const completion = (content: string | null, extra: object = {}) => ({
