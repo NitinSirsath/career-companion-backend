@@ -86,8 +86,32 @@
       "body": "Congratulations!!! You have been selected for a remote data entry job. Earn $5000 per week. No interview needed.\nSend your bank details and a $50 registration fee to start today!"
     },
     "expect": {
-      "relevance": "ANY",
-      "category": ["SPAM"],
+      "relevance": "RELEVANT",
+      "category": ["OFFER", "RECRUITER"],
+      "fields": {
+        "fakeOfferWarning": {
+          "present": true
+        }
+      },
+      "mustBeNull": ["interviewDate"]
+    },
+    "group": "adversarial"
+  },
+  {
+    "id": "adversarial-fake-offer-fee",
+    "input": {
+      "sender": "Google HR Department <hr.google.careers@gmail.example.com>",
+      "subject": "Congratulations! Offer of employment - Google India",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Dear Candidate,\n\nCongratulations! You are selected as Software Developer at Google India. No interview is needed.\n\nTo confirm your offer, pay a refundable registration and laptop security fee of Rs 8,500 within 24 hours. Your joining letter will be sent after the payment.\n\nRegards,\nGoogle HR Department"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": ["OFFER"],
+      "fields": {
+        "fakeOfferWarning": {
+          "present": true
+        },
       "mustBeNull": ["interviewDate"]
     },
     "group": "adversarial"
