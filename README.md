@@ -157,15 +157,16 @@ curl -X PATCH http://localhost:3000/api/applications/<id>/status \
 
 ### User-provided AI (ADR-0001)
 
-Every AI call uses the session or job user's own provider key, from a curated code catalog (`src/contracts/aiCatalog.ts`, synced to the frontend). There is no server AI key. Providers stay `hidden`, so they are not offered in production, until they are certified (docs repo `docs/ai/provider-evaluation.md`).
+Every AI call uses the session or job user's own provider key, from a curated code catalog (`src/contracts/aiCatalog.ts`, synced to the frontend). There is no server AI key. A user can connect several providers, one key each, and exactly one is active: it does all AI work (`ai_configurations`). The others wait in `ai_saved_providers` and are called only for a check, a key change or a model change the user starts. Nothing switches the active provider by itself. Providers stay `hidden`, so they are not offered in production, until they are certified (docs repo `docs/ai/provider-evaluation.md`).
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/ai/settings` | Status and configuration. It never includes the key in any form. |
-| `PUT /api/ai/settings` | Create, replace key, change models or switch provider. Verifies first. 422 `AI_ACCESS_REJECTED` saves nothing. |
-| `POST /api/ai/settings/check` | Re-verify the saved key ("Check again"). |
-| `POST /api/ai/settings/sample-test` | Run both capabilities on a built-in synthetic email. |
-| `DELETE /api/ai/settings` | Remove the configuration and its key. |
+| `GET /api/ai/settings` | The active setup, and every connected provider in `connections`. It never includes a key in any form. |
+| `PUT /api/ai/providers/:provider` | Connect a provider, replace its key or change its models. Verifies first; 422 `AI_ACCESS_REJECTED` saves nothing. The first provider becomes active; a later one stays inactive unless `makeActive` is true. |
+| `POST /api/ai/providers/:provider/activate` | Make a connected provider the active one. The one it replaces stays connected. 409 `AI_PROVIDER_NOT_READY` when its last check found a key problem. |
+| `POST /api/ai/providers/:provider/check` | Check a connected provider's key again ("Check key"). |
+| `DELETE /api/ai/providers/:provider` | Remove its key. For the active one, `?then=<provider>` makes that one active, and `none` (the default) leaves no provider active. |
+| `POST /api/ai/settings/sample-test` | Run both capabilities on a built-in synthetic email, with the active provider. |
 | `POST /api/ai/waiting/read` | "Read waiting mails now". During a pause it sends one waiting mail as a test; the others follow only if it works. With no pause it offers the waiting mail again. Answers with the AI settings. |
 | `POST /api/emails/:id/retry` | Gains `{ acceptPossibleDuplicateCharge: true }` for approving one more attempt after 409 `AI_RETRY_NEEDS_APPROVAL`. |
 

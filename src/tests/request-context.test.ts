@@ -42,7 +42,7 @@ describe('request context', () => {
   it('logs a failed request once, with its path, status, user and request ID', async () => {
     const logs = capture();
     const response = await request(app)
-      .put('/api/ai/settings?source=test')
+      .put('/api/ai/providers/gemini?source=test')
       .set('X-Development-User', EMAIL)
       .send({ provider: 42 });
 
@@ -51,7 +51,7 @@ describe('request context', () => {
       expect.objectContaining({
         level: 'error',
         method: 'PUT',
-        path: '/api/ai/settings',
+        path: '/api/ai/providers/gemini',
         status: response.status,
         userId,
         requestId: response.headers['x-request-id'],
