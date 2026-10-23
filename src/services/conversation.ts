@@ -2,7 +2,7 @@
  * Job-mail conversations: what the Mails page lists and opens. Reads only stored metadata and AI
  * results; the email text itself is read live from Gmail by `mailbox.ts`.
  */
-import { Prisma } from '@prisma/client';
+import { Prisma, type AIProcessingResult } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import {
   deriveStatus,
@@ -25,7 +25,7 @@ import {
   isEmailId,
   type ConversationRow,
 } from './conversationQuery';
-import { requestOf } from './emailRequest';
+import { FAKE_OFFER_NEXT_STEP, requestOf } from './emailRequest';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 type Mail = Prisma.EmailGetPayload<{ include: { aiProcessingResult: true } }>;
@@ -187,12 +187,12 @@ function toConversation(
     sentCount: row.sentCount,
     isNew: row.isNew,
     category: row.category as MailCategory | null,
-    company: results.find((result) => result.companyName)?.companyName ?? null,
-    role: results.find((result) => result.jobTitle)?.jobTitle ?? null,
+    company: newestOf(results, 'companyName'),
+    role: newestOf(results, 'jobTitle'),
     interview: scheduled ? { date: scheduled.interviewDate, time: scheduled.interviewTime } : null,
-    assessmentDeadline:
-      results.find((result) => result.assessmentDeadline)?.assessmentDeadline ?? null,
+    assessmentDeadline: newestOf(results, 'assessmentDeadline'),
     request: toRequest(row, thread),
+    fakeOfferWarning: newestOf(results, 'fakeOfferWarning'),
     link: linkOf(latest, application),
     application: application && {
       id: application.id,
@@ -206,6 +206,14 @@ function toConversation(
     },
     analyzedBy: provenance ? { provider: provenance.provider, model: provenance.model } : null,
   };
+}
+
+/** The newest value the AI read for one field; `results` are newest first. */
+function newestOf(
+  results: AIProcessingResult[],
+  field: 'companyName' | 'jobTitle' | 'assessmentDeadline' | 'fakeOfferWarning',
+) {
+  return results.find((result) => result[field])?.[field] ?? null;
 }
 
 function toRequest(row: ConversationRow, thread: Mail[]): ConversationRequest | null {
@@ -231,7 +239,7 @@ function linkOf(latest: Mail, application: ApplicationSummary | null): Conversat
   return latest.matchState === 'IGNORED' ? 'IGNORED' : 'UNLINKED';
 }
 
-/** What the AI read from one email, passed on as it stands. */
+/** What the AI read from one email, passed on as it stands, except a fake offer's request. */
 const READ_FIELDS = [
   'recruiterName',
   'recruiterEmail',
@@ -246,6 +254,7 @@ const READ_FIELDS = [
   'requestedAction',
   'actionDeadline',
   'followUpDate',
+  'fakeOfferWarning',
 ] as const;
 type ReadFields = Record<(typeof READ_FIELDS)[number], string | null>;
 
@@ -254,6 +263,9 @@ function toMail(mail: Mail): ConversationMail {
   const read = Object.fromEntries(
     READ_FIELDS.map((field) => [field, result?.[field] ?? null]),
   ) as ReadFields;
+  // A mail that asks for money never shows its own request: the safe next step replaces it.
+  if (read.fakeOfferWarning)
+    Object.assign(read, { requestedAction: FAKE_OFFER_NEXT_STEP, actionDeadline: null });
   return {
     id: mail.id,
     gmailMessageId: mail.gmailMessageId,
