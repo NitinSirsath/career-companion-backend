@@ -1,0 +1,1683 @@
+{
+  "createdAt": "2026-10-22T19:19:02.480Z",
+  "provider": "openrouter",
+  "models": {
+    "fast": "anthropic/claude-haiku-5.5",
+    "detailed": "anthropic/claude-sonnet-5.5"
+  },
+  "runs": 2,
+  "cases": 44,
+  "contractVersions": {
+    "CLASSIFICATION": "classification/v3",
+    "RELEVANCE_BATCH": "relevance-batch/v2",
+    "EXTRACTION": "extraction/v2"
+  },
+  "temporal": null,
+  "thresholds": {
+    "schemaValidity": 1,
+    "relevanceAccuracy": 0.9,
+    "criticalMisses": 0,
+    "categoryAccuracy": 0.8,
+    "fieldAccuracy": 0.9,
+    "hallucinationRate": 0.03,
+    "injectionFailures": 0,
+    "p95LatencyMs": 15000,
+    "baselineMargin": 0.05
+  },
+  "baseline": null,
+  "metrics": {
+    "calls": 152,
+    "refusedCalls": 0,
+    "refusedByKind": {},
+    "schemaValidity": 0.5789473684210527,
+    "relevanceAccuracy": 1,
+    "criticalMisses": 0,
+    "categoryAccuracy": 1,
+    "fieldAccuracy": 0,
+    "hallucinationRate": 0,
+    "injectionFailures": 0,
+    "p95LatencyMs": 2288,
+    "inputTokens": 110884,
+    "outputTokens": 9295
+  },
+  "outcome": "FAIL",
+  "passed": false,
+  "failures": [
+    "schema validity 0.5789473684210527",
+    "field accuracy 0"
+  ],
+  "results": [
+    {
+      "id": "adversarial-prompt-injection",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1812,
+        "inputTokens": 1273,
+        "outputTokens": 118,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1134,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "adversarial-non-english",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2090,
+        "inputTokens": 1299,
+        "outputTokens": 108,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.98
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 919,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "adversarial-long-thread",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1843,
+        "inputTokens": 1291,
+        "outputTokens": 128,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1099,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "adversarial-fake-recruiter-spam",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2432,
+        "inputTokens": 1267,
+        "outputTokens": 123,
+        "decision": "IRRELEVANT",
+        "category": "SPAM",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1085,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "application-received-ats",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2132,
+        "inputTokens": 1258,
+        "outputTokens": 106,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.95
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 955,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "application-received-portal",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2600,
+        "inputTokens": 1267,
+        "outputTokens": 111,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.95
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1081,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "application-received-short",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1770,
+        "inputTokens": 1238,
+        "outputTokens": 104,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.95
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1181,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "assessment-take-home",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1638,
+        "inputTokens": 1263,
+        "outputTokens": 115,
+        "decision": "RELEVANT",
+        "category": "ASSESSMENT",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1221,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "assessment-coding-test",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1821,
+        "inputTokens": 1280,
+        "outputTokens": 112,
+        "decision": "RELEVANT",
+        "category": "ASSESSMENT",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1162,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "assessment-personality",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1943,
+        "inputTokens": 1261,
+        "outputTokens": 117,
+        "decision": "RELEVANT",
+        "category": "ASSESSMENT",
+        "confidence": 0.95
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1434,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "assessment-reminder",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1944,
+        "inputTokens": 1249,
+        "outputTokens": 99,
+        "decision": "RELEVANT",
+        "category": "ASSESSMENT",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1229,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "follow-up-recruiter-check-in",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1866,
+        "inputTokens": 1233,
+        "outputTokens": 126,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.93
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1279,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "follow-up-documents",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1776,
+        "inputTokens": 1242,
+        "outputTokens": 94,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.85
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1302,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "follow-up-thank-you-reply",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1864,
+        "inputTokens": 1239,
+        "outputTokens": 102,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.9
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1233,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "interview-invite-timezone",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1548,
+        "inputTokens": 1276,
+        "outputTokens": 111,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1199,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "interview-choose-slot",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1448,
+        "inputTokens": 1267,
+        "outputTokens": 96,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1128,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "interview-reschedule",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1840,
+        "inputTokens": 1268,
+        "outputTokens": 103,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1332,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "interview-onsite-panel",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1797,
+        "inputTokens": 1282,
+        "outputTokens": 92,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1910,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "interview-video-link",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 3130,
+        "inputTokens": 1285,
+        "outputTokens": 90,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1357,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "interview-reminder",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1889,
+        "inputTokens": 1263,
+        "outputTokens": 90,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1387,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "irrelevant-receipt",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2120,
+        "inputTokens": 1236,
+        "outputTokens": 81,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "irrelevant-bank-alert",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1569,
+        "inputTokens": 1237,
+        "outputTokens": 76,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "irrelevant-friend",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1612,
+        "inputTokens": 1217,
+        "outputTokens": 77,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "irrelevant-saas-notification",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1689,
+        "inputTokens": 1229,
+        "outputTokens": 83,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "irrelevant-travel",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1564,
+        "inputTokens": 1246,
+        "outputTokens": 87,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "irrelevant-newsletter",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1609,
+        "inputTokens": 1212,
+        "outputTokens": 88,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "irrelevant-calendar",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2020,
+        "inputTokens": 1250,
+        "outputTokens": 71,
+        "decision": "IRRELEVANT",
+        "confidence": 0.98
+      }
+    },
+    {
+      "id": "alert-job-board-digest",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1638,
+        "inputTokens": 1280,
+        "outputTokens": 96,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "alert-career-newsletter",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2047,
+        "inputTokens": 1236,
+        "outputTokens": 92,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "alert-company-careers",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1742,
+        "inputTokens": 1245,
+        "outputTokens": 110,
+        "decision": "IRRELEVANT",
+        "confidence": 0.93
+      }
+    },
+    {
+      "id": "alert-linkedin-recommended",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2047,
+        "inputTokens": 1297,
+        "outputTokens": 132,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "alert-linkedin-sponsored",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2402,
+        "inputTokens": 1275,
+        "outputTokens": 119,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "offer-verbal-follow-up",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2379,
+        "inputTokens": 1265,
+        "outputTokens": 123,
+        "decision": "RELEVANT",
+        "category": "OFFER",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 888,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "offer-letter-deadline",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1784,
+        "inputTokens": 1254,
+        "outputTokens": 110,
+        "decision": "RELEVANT",
+        "category": "OFFER",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1558,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "offer-negotiation-reply",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1759,
+        "inputTokens": 1258,
+        "outputTokens": 111,
+        "decision": "RELEVANT",
+        "category": "OFFER",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 953,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "sample-recruiter-interview",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1439,
+        "inputTokens": 1263,
+        "outputTokens": 91,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1379,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "recruiter-agency-outreach",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2052,
+        "inputTokens": 1288,
+        "outputTokens": 121,
+        "decision": "RELEVANT",
+        "category": "RECRUITER",
+        "confidence": 0.95
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1431,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "recruiter-internal",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1635,
+        "inputTokens": 1272,
+        "outputTokens": 109,
+        "decision": "RELEVANT",
+        "category": "RECRUITER",
+        "confidence": 0.93
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1128,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "recruiter-referral-intro",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1797,
+        "inputTokens": 1287,
+        "outputTokens": 128,
+        "decision": "RELEVANT",
+        "category": "RECRUITER",
+        "confidence": 0.9
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1173,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "recruiter-linkedin-inmail",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1768,
+        "inputTokens": 1276,
+        "outputTokens": 133,
+        "decision": "RELEVANT",
+        "category": "RECRUITER",
+        "confidence": 0.95
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1294,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "rejection-standard",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2129,
+        "inputTokens": 1265,
+        "outputTokens": 106,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1362,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "rejection-post-interview",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1877,
+        "inputTokens": 1262,
+        "outputTokens": 113,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1602,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "rejection-position-filled",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1765,
+        "inputTokens": 1247,
+        "outputTokens": 89,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.93
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1311,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "rejection-keep-on-file",
+      "run": 1,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1458,
+        "inputTokens": 1244,
+        "outputTokens": 88,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 896,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "adversarial-prompt-injection",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1559,
+        "inputTokens": 1273,
+        "outputTokens": 107,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1200,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "adversarial-non-english",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2431,
+        "inputTokens": 1299,
+        "outputTokens": 123,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1369,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "adversarial-long-thread",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1732,
+        "inputTokens": 1291,
+        "outputTokens": 114,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1045,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "adversarial-fake-recruiter-spam",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1926,
+        "inputTokens": 1267,
+        "outputTokens": 118,
+        "decision": "IRRELEVANT",
+        "category": "SPAM",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1298,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "application-received-ats",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1775,
+        "inputTokens": 1258,
+        "outputTokens": 106,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.93
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1293,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "application-received-portal",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1807,
+        "inputTokens": 1267,
+        "outputTokens": 117,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.95
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1304,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "application-received-short",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1491,
+        "inputTokens": 1238,
+        "outputTokens": 102,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.95
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1068,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "assessment-take-home",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1725,
+        "inputTokens": 1263,
+        "outputTokens": 97,
+        "decision": "RELEVANT",
+        "category": "ASSESSMENT",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1448,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "assessment-coding-test",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1593,
+        "inputTokens": 1280,
+        "outputTokens": 123,
+        "decision": "RELEVANT",
+        "category": "ASSESSMENT",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 973,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "assessment-personality",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1809,
+        "inputTokens": 1261,
+        "outputTokens": 117,
+        "decision": "RELEVANT",
+        "category": "ASSESSMENT",
+        "confidence": 0.95
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1161,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "assessment-reminder",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1697,
+        "inputTokens": 1249,
+        "outputTokens": 99,
+        "decision": "RELEVANT",
+        "category": "ASSESSMENT",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1334,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "follow-up-recruiter-check-in",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2288,
+        "inputTokens": 1233,
+        "outputTokens": 124,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.95
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1217,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "follow-up-documents",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2673,
+        "inputTokens": 1242,
+        "outputTokens": 156,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.8
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1477,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "follow-up-thank-you-reply",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1751,
+        "inputTokens": 1239,
+        "outputTokens": 105,
+        "decision": "RELEVANT",
+        "category": "FOLLOW_UP",
+        "confidence": 0.9
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1282,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "interview-invite-timezone",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1838,
+        "inputTokens": 1276,
+        "outputTokens": 115,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1339,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "interview-choose-slot",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1939,
+        "inputTokens": 1267,
+        "outputTokens": 107,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1218,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "interview-reschedule",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1195,
+        "inputTokens": 1268,
+        "outputTokens": 101,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 970,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "interview-onsite-panel",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2204,
+        "inputTokens": 1282,
+        "outputTokens": 98,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1684,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "interview-video-link",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1461,
+        "inputTokens": 1285,
+        "outputTokens": 95,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1316,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "interview-reminder",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1729,
+        "inputTokens": 1263,
+        "outputTokens": 96,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1040,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "irrelevant-receipt",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1620,
+        "inputTokens": 1236,
+        "outputTokens": 86,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "irrelevant-bank-alert",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1592,
+        "inputTokens": 1237,
+        "outputTokens": 73,
+        "decision": "IRRELEVANT",
+        "confidence": 0.98
+      }
+    },
+    {
+      "id": "irrelevant-friend",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1261,
+        "inputTokens": 1217,
+        "outputTokens": 85,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "irrelevant-saas-notification",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1853,
+        "inputTokens": 1229,
+        "outputTokens": 80,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "irrelevant-travel",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1822,
+        "inputTokens": 1246,
+        "outputTokens": 81,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "irrelevant-newsletter",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1519,
+        "inputTokens": 1212,
+        "outputTokens": 77,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "irrelevant-calendar",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1811,
+        "inputTokens": 1250,
+        "outputTokens": 73,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "alert-job-board-digest",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2025,
+        "inputTokens": 1280,
+        "outputTokens": 83,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "alert-career-newsletter",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2117,
+        "inputTokens": 1236,
+        "outputTokens": 122,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "alert-company-careers",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1558,
+        "inputTokens": 1245,
+        "outputTokens": 107,
+        "decision": "IRRELEVANT",
+        "confidence": 0.93
+      }
+    },
+    {
+      "id": "alert-linkedin-recommended",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2014,
+        "inputTokens": 1297,
+        "outputTokens": 147,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "alert-linkedin-sponsored",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1747,
+        "inputTokens": 1275,
+        "outputTokens": 101,
+        "decision": "IRRELEVANT",
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "offer-verbal-follow-up",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1875,
+        "inputTokens": 1265,
+        "outputTokens": 121,
+        "decision": "RELEVANT",
+        "category": "OFFER",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 974,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "offer-letter-deadline",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1788,
+        "inputTokens": 1254,
+        "outputTokens": 103,
+        "decision": "RELEVANT",
+        "category": "OFFER",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1124,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "offer-negotiation-reply",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1738,
+        "inputTokens": 1258,
+        "outputTokens": 115,
+        "decision": "RELEVANT",
+        "category": "OFFER",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1473,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "sample-recruiter-interview",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1397,
+        "inputTokens": 1263,
+        "outputTokens": 97,
+        "decision": "RELEVANT",
+        "category": "INTERVIEW",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1124,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "recruiter-agency-outreach",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1946,
+        "inputTokens": 1288,
+        "outputTokens": 126,
+        "decision": "RELEVANT",
+        "category": "RECRUITER",
+        "confidence": 0.95
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1260,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "recruiter-internal",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1637,
+        "inputTokens": 1272,
+        "outputTokens": 109,
+        "decision": "RELEVANT",
+        "category": "RECRUITER",
+        "confidence": 0.92
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1343,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "recruiter-referral-intro",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2191,
+        "inputTokens": 1287,
+        "outputTokens": 164,
+        "decision": "RELEVANT",
+        "category": "RECRUITER",
+        "confidence": 0.85
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1867,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "recruiter-linkedin-inmail",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1889,
+        "inputTokens": 1276,
+        "outputTokens": 137,
+        "decision": "RELEVANT",
+        "category": "RECRUITER",
+        "confidence": 0.95
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1081,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "rejection-standard",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 2041,
+        "inputTokens": 1265,
+        "outputTokens": 108,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1334,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "rejection-post-interview",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1968,
+        "inputTokens": 1262,
+        "outputTokens": 104,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1209,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "rejection-position-filled",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1959,
+        "inputTokens": 1247,
+        "outputTokens": 88,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.93
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1254,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    {
+      "id": "rejection-keep-on-file",
+      "run": 2,
+      "classification": {
+        "valid": true,
+        "latencyMs": 1393,
+        "inputTokens": 1244,
+        "outputTokens": 109,
+        "decision": "RELEVANT",
+        "category": "REJECTION",
+        "confidence": 0.97
+      },
+      "extraction": {
+        "valid": false,
+        "error": "INVALID_REQUEST",
+        "status": 400,
+        "latencyMs": 1125,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    }
+  ]
+}
