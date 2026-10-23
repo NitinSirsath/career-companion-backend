@@ -66,7 +66,8 @@ function filterConditions(filters: ConversationFilters, pattern: string | null):
 }
 
 /**
- * Job-related emails grouped into conversations. A request is DONE when its application action
+ * Job-related emails grouped into conversations. A mail with a fake offer warning always asks for
+ * something: the safe next step that replaces its own request (see `requestOf`). A request is DONE when its application action
  * is finished, or, while it has no action, when the user marked it done; REPLIED when the user
  * sent a message after it, unless they reopened it later; otherwise OPEN.
  */
@@ -77,7 +78,8 @@ function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql):
              e."requestUserState", e."requestUserStateAt",
              COALESCE(e."threadId", e.id::text) AS key,
              r.category::text AS category,
-             (COALESCE(r."actionRequired", FALSE) OR COALESCE(r."followUpRequired", FALSE)) AS asks,
+             (COALESCE(r."actionRequired", FALSE) OR COALESCE(r."followUpRequired", FALSE)
+               OR r."fakeOfferWarning" IS NOT NULL) AS asks,
              ${hit} AS hit
       FROM emails e
       LEFT JOIN ai_processing_results r ON r."emailId" = e.id
@@ -166,7 +168,8 @@ export async function repliedRequests(
       JOIN ai_processing_results r ON r."emailId" = e.id
       WHERE e."userId" = ${userId}::uuid AND e."relevanceState" = 'RELEVANT'
         AND COALESCE(e."threadId", e.id::text) = ANY(${keys}::text[])
-        AND (COALESCE(r."actionRequired", FALSE) OR COALESCE(r."followUpRequired", FALSE))
+        AND (COALESCE(r."actionRequired", FALSE) OR COALESCE(r."followUpRequired", FALSE)
+          OR r."fakeOfferWarning" IS NOT NULL)
     )
     SELECT q.id, MAX(o."sentAt") AS "repliedAt"
     FROM requests q

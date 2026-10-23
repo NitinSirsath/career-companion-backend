@@ -6,12 +6,18 @@ import {
   AI_CONTRACT_VERSIONS,
   AIContract,
   CLASSIFICATION_CONTRACT,
+  CLASSIFICATION_V3_CONTRACT,
   EXTRACTION_CONTRACT,
+  EXTRACTION_V3_CONTRACT,
+  EXTRACTION_V4_CONTRACT,
+  EXTRACTION_V5_CONTRACT,
   LEGACY_CLASSIFICATION_CONTRACT,
   LEGACY_CONTRACT_VERSIONS,
   LEGACY_RELEVANCE_BATCH_CONTRACT,
   RELEVANCE_BATCH_CONTRACT,
+  RELEVANCE_BATCH_V2_CONTRACT,
   classificationContractFor,
+  extractionContractFor,
   relevanceBatchContractFor,
 } from '../services/ai/contracts';
 import { TerminalAIError } from '../services/ai/errors';
@@ -35,7 +41,7 @@ IMPORTANT DECISION RULES:
 Return your decision as a structured JSON object according to the schema.
   `.trim(),
 
-  [AI_CONTRACT_VERSIONS.EXTRACTION]: `
+  'extraction/v2': `
 You are an AI assistant that extracts structured job application data from an email body.
 Extract all requested fields. If information is missing, use null.
 Do not invent or assume information.
@@ -202,9 +208,14 @@ const nativeJobExtractionSchema: Schema = {
 const FINGERPRINTS: Record<string, string> = {
   'classification/v2': '8a9118222ad635794c226677775f917c897a8a220872b73c15c05e0bab6a3239',
   'classification/v3': '547cbad83e73e6535ef1313d840b684f22ec2dc314137067479025aad5668c2a',
+  'classification/v4': '7c6bf16b4feecdd41329b4647cae87cce57267b8adeb843d1e724e6ec40239fb',
   'relevance-batch/v1': 'ce9d4cbecbba3ff9d6b35755deb50ab1563e5776bbbed7d85550dd36364e25e2',
   'relevance-batch/v2': 'afc1aa14379866a752596ab41b5298ce475abfdaddd986f3d51310e3ab5ff41a',
+  'relevance-batch/v3': '9f6f34da7400bed1bfa103ad7fa086ad84b30cff9d9d8ab6000feea3f190ec4a',
   'extraction/v2': '2919427b2419d8601aba25567f970f3b708072e3609fbf356e32c199ed02d7b5',
+  'extraction/v3': '4b56e0d5642f6c0d0d56f1a41270d3ef79fb70489e2f1ed943a6e83599cf132f',
+  'extraction/v4': '91f0d8230dc2a5eba1e9982db78fe2334e3065c645bc9151d2ee451aaac2c8f0',
+  'extraction/v5': 'ddb702fadae9b164f275fef965a92ac3058fa899aa204e78c93cc050322e60ec',
 };
 const fingerprint = (contract: AIContract<unknown>) =>
   createHash('sha256')
@@ -220,7 +231,7 @@ describe('provider-neutral AI contracts', () => {
     expect(LEGACY_CLASSIFICATION_CONTRACT.instructions).toBe(
       PROMPTS[LEGACY_CONTRACT_VERSIONS.CLASSIFICATION],
     );
-    expect(EXTRACTION_CONTRACT.instructions).toBe(PROMPTS[AI_CONTRACT_VERSIONS.EXTRACTION]);
+    expect(EXTRACTION_CONTRACT.instructions).toBe(PROMPTS['extraction/v2']);
   });
 
   it('derives the Gemini schema equal to the former hand-written copy', () => {
@@ -232,10 +243,15 @@ describe('provider-neutral AI contracts', () => {
 
   it.each([
     LEGACY_CLASSIFICATION_CONTRACT,
+    CLASSIFICATION_V3_CONTRACT,
     CLASSIFICATION_CONTRACT,
     LEGACY_RELEVANCE_BATCH_CONTRACT,
+    RELEVANCE_BATCH_V2_CONTRACT,
     RELEVANCE_BATCH_CONTRACT,
     EXTRACTION_CONTRACT,
+    EXTRACTION_V3_CONTRACT,
+    EXTRACTION_V4_CONTRACT,
+    EXTRACTION_V5_CONTRACT,
   ])('keeps $version bound to one prompt and schema', (contract) => {
     expect(fingerprint(contract as AIContract<unknown>)).toBe(FINGERPRINTS[contract.version]);
   });
@@ -243,13 +259,16 @@ describe('provider-neutral AI contracts', () => {
 
 describe('strict relevance contracts', () => {
   it('uses new versions for the strict rules', () => {
-    expect(CLASSIFICATION_CONTRACT.version).toBe('classification/v3');
-    expect(RELEVANCE_BATCH_CONTRACT.version).toBe('relevance-batch/v2');
-    expect(AI_CONTRACT_VERSIONS.CLASSIFICATION).toBe('classification/v3');
-    expect(AI_CONTRACT_VERSIONS.RELEVANCE_BATCH).toBe('relevance-batch/v2');
+    expect(CLASSIFICATION_V3_CONTRACT.version).toBe('classification/v3');
+    expect(RELEVANCE_BATCH_V2_CONTRACT.version).toBe('relevance-batch/v2');
   });
 
-  it.each([CLASSIFICATION_CONTRACT, RELEVANCE_BATCH_CONTRACT])(
+  it.each([
+    CLASSIFICATION_V3_CONTRACT,
+    RELEVANCE_BATCH_V2_CONTRACT,
+    CLASSIFICATION_CONTRACT,
+    RELEVANCE_BATCH_CONTRACT,
+  ])(
     '$version marks platform job discovery IRRELEVANT and keeps LinkedIn outreach RELEVANT',
     (contract) => {
       const text = contract.instructions;
@@ -266,10 +285,80 @@ describe('strict relevance contracts', () => {
 
   it('resolves stored versions and never guesses an unknown one', () => {
     expect(classificationContractFor('classification/v2')).toBe(LEGACY_CLASSIFICATION_CONTRACT);
-    expect(classificationContractFor('classification/v3')).toBe(CLASSIFICATION_CONTRACT);
+    expect(classificationContractFor('classification/v3')).toBe(CLASSIFICATION_V3_CONTRACT);
+    expect(classificationContractFor('classification/v4')).toBe(CLASSIFICATION_CONTRACT);
     expect(relevanceBatchContractFor('relevance-batch/v1')).toBe(LEGACY_RELEVANCE_BATCH_CONTRACT);
-    expect(relevanceBatchContractFor('relevance-batch/v2')).toBe(RELEVANCE_BATCH_CONTRACT);
+    expect(relevanceBatchContractFor('relevance-batch/v2')).toBe(RELEVANCE_BATCH_V2_CONTRACT);
+    expect(relevanceBatchContractFor('relevance-batch/v3')).toBe(RELEVANCE_BATCH_CONTRACT);
+    expect(extractionContractFor('extraction/v2')).toBe(EXTRACTION_CONTRACT);
+    expect(extractionContractFor('extraction/v3')).toBe(EXTRACTION_V3_CONTRACT);
+    expect(extractionContractFor('extraction/v4')).toBe(EXTRACTION_V4_CONTRACT);
+    expect(extractionContractFor('extraction/v5')).toBe(EXTRACTION_V5_CONTRACT);
     expect(() => classificationContractFor('classification/v9')).toThrow(TerminalAIError);
     expect(() => relevanceBatchContractFor('relevance-batch/v9')).toThrow(TerminalAIError);
+    expect(() => extractionContractFor('extraction/v9')).toThrow(TerminalAIError);
+  });
+});
+
+describe('job offers that ask for money', () => {
+  const RULE = 'JOB OFFERS THAT ASK FOR MONEY:';
+
+  it('uses new versions for new mails', () => {
+    expect(AI_CONTRACT_VERSIONS).toEqual({
+      CLASSIFICATION: 'classification/v4',
+      RELEVANCE_BATCH: 'relevance-batch/v3',
+      EXTRACTION: 'extraction/v4',
+    });
+    expect(CLASSIFICATION_CONTRACT.version).toBe('classification/v4');
+    expect(RELEVANCE_BATCH_CONTRACT.version).toBe('relevance-batch/v3');
+    expect(EXTRACTION_V4_CONTRACT.version).toBe('extraction/v4');
+    expect(EXTRACTION_V5_CONTRACT.version).toBe('extraction/v5');
+  });
+
+  it.each([CLASSIFICATION_CONTRACT, RELEVANCE_BATCH_CONTRACT])(
+    '$version keeps such an offer RELEVANT, after the strict rules and with the same schema',
+    (contract) => {
+      const frozen =
+        contract === CLASSIFICATION_CONTRACT
+          ? CLASSIFICATION_V3_CONTRACT
+          : RELEVANCE_BATCH_V2_CONTRACT;
+      expect(contract.instructions).toContain(RULE);
+      expect(contract.instructions).toContain('is RELEVANT, even when it looks fake');
+      expect(contract.instructions).toContain('Never mark such an email IRRELEVANT');
+      expect(contract.instructions.indexOf(RULE)).toBeGreaterThan(
+        contract.instructions.indexOf('LINKEDIN RULES'),
+      );
+      expect(contract.schema).toBe(frozen.schema);
+      expect(frozen.instructions).not.toContain(RULE);
+    },
+  );
+
+  it('extraction/v4 and v5 add only the warning field and its instructions', () => {
+    const keys = (contract: AIContract<unknown>) =>
+      Object.keys((z.toJSONSchema(contract.schema) as { properties: object }).properties);
+    const v2 = EXTRACTION_CONTRACT as AIContract<unknown>;
+    const v3 = EXTRACTION_V3_CONTRACT as AIContract<unknown>;
+    expect(keys(EXTRACTION_V4_CONTRACT as AIContract<unknown>)).toEqual([
+      ...keys(v2),
+      'fakeOfferWarning',
+    ]);
+    expect(keys(EXTRACTION_V5_CONTRACT as AIContract<unknown>)).toEqual([
+      ...keys(v3),
+      'fakeOfferWarning',
+    ]);
+    expect(keys(v2)).not.toContain('fakeOfferWarning');
+    expect(keys(v3)).not.toContain('fakeOfferWarning');
+    for (const [contract, base] of [
+      [EXTRACTION_V4_CONTRACT, EXTRACTION_CONTRACT],
+      [EXTRACTION_V5_CONTRACT, EXTRACTION_V3_CONTRACT],
+    ] as const) {
+      expect(contract.instructions.startsWith(`${base.instructions}\nfakeOfferWarning: `)).toBe(
+        true,
+      );
+      expect(contract.instructions).toMatch(
+        /Never put paying money or sending bank, card or ID details in requestedAction\.$/,
+      );
+      expect(base.instructions).not.toContain('fakeOfferWarning');
+    }
   });
 });

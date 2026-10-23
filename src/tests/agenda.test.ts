@@ -111,15 +111,18 @@ it('only stores verified bounded excerpts', () => {
   expect(verifiedCandidates([candidate], 'Unrelated message')[0].evidence).toBeNull();
   expect(() => candidateEnvelope(Array(6).fill(candidate))).toThrow();
 });
-it('pins v2 held/completed/pending claims and keeps selected v3 after disable', async () => {
-  for (const status of ['PENDING', 'PROCESSING', 'UNKNOWN', 'FAILED', 'COMPLETED'] as const) {
-    await prisma.aIOperation.deleteMany({ where: { emailId } });
-    await prisma.aIOperation.create({
-      data: { emailId, operation: 'extraction', version: 'extraction/v2', status },
-    });
-    expect((await selectExtractionContract(userId, emailId)).version).toBe('extraction/v2');
-    expect(await prisma.aIOperation.count({ where: { emailId, operation: 'extraction' } })).toBe(1);
-  }
+it('pins v2/v3 held/completed/pending claims and keeps selected v5 after disable', async () => {
+  for (const version of ['extraction/v2', 'extraction/v3'])
+    for (const status of ['PENDING', 'PROCESSING', 'UNKNOWN', 'FAILED', 'COMPLETED'] as const) {
+      await prisma.aIOperation.deleteMany({ where: { emailId } });
+      await prisma.aIOperation.create({
+        data: { emailId, operation: 'extraction', version, status },
+      });
+      expect((await selectExtractionContract(userId, emailId)).version).toBe(version);
+      expect(await prisma.aIOperation.count({ where: { emailId, operation: 'extraction' } })).toBe(
+        1,
+      );
+    }
   await prisma.aIOperation.deleteMany({ where: { emailId } });
   expect(
     (
@@ -128,15 +131,17 @@ it('pins v2 held/completed/pending claims and keeps selected v3 after disable', 
         selectExtractionContract(userId, emailId),
       ])
     ).map((c) => c.version),
-  ).toEqual(['extraction/v3', 'extraction/v3']);
+  ).toEqual(['extraction/v5', 'extraction/v5']);
   vi.stubEnv('AGENDA_EXTRACTION_V3_ENABLED', 'false');
-  expect((await selectExtractionContract(userId, emailId)).version).toBe('extraction/v3');
+  expect((await selectExtractionContract(userId, emailId)).version).toBe('extraction/v5');
+  await prisma.aIOperation.deleteMany({ where: { emailId } });
+  expect((await selectExtractionContract(userId, emailId)).version).toBe('extraction/v4');
 });
-it('adopts completed v2/v3 without fetching Gmail or calling a provider', async () => {
+it('adopts completed v2 to v5 without fetching Gmail or calling a provider', async () => {
   const fetch = vi
     .spyOn(gmailFetcher, 'fetchMessageMetadata')
     .mockRejectedValue(Error('Unexpected fetch'));
-  for (const version of ['extraction/v2', 'extraction/v3']) {
+  for (const version of ['extraction/v2', 'extraction/v3', 'extraction/v4', 'extraction/v5']) {
     await prisma.aIProcessingResult.update({
       where: { emailId },
       data: { contractVersion: version },

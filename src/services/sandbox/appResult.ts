@@ -8,6 +8,7 @@ import { prisma } from '../../db/prisma';
 import { UserAccess, getAccessState } from '../ai/access';
 import { STATUS_STEP_SELECT, aiStatusOf } from '../ai/mailStatus';
 import { SENT_LABELS } from './message';
+import { FAKE_OFFER_NEXT_STEP } from '../emailRequest';
 
 type Mail = Pick<SandboxMessage, 'id' | 'labelIds'>;
 
@@ -36,6 +37,7 @@ const synced = (userId: string, ids: string[]) =>
           companyName: true,
           jobTitle: true,
           requestedAction: true,
+          fakeOfferWarning: true,
           processingStatus: true,
         },
       },
@@ -55,16 +57,23 @@ function receivedResult(mail: SyncedMail | undefined, access: UserAccess): Sandb
       aiStatus,
     });
   if (mail.relevanceState !== 'RELEVANT') return result('NOT_JOB_MAIL');
-  return result('JOB_MAIL', {
-    job: {
-      category: mail.aiProcessingResult?.category ?? null,
-      company: mail.aiProcessingResult?.companyName ?? null,
-      role: mail.aiProcessingResult?.jobTitle ?? null,
-      requestedAction: mail.aiProcessingResult?.requestedAction ?? null,
-      conversationKey: mail.threadId ?? mail.gmailMessageId,
-      application: mail.application,
-    },
-  });
+  return result('JOB_MAIL', { job: jobOf(mail) });
+}
+
+/** What the AI read from a job mail, and where the mail went. */
+function jobOf(mail: SyncedMail): SandboxMailResult['job'] {
+  const read = mail.aiProcessingResult;
+  const fakeOfferWarning = read?.fakeOfferWarning ?? null;
+  return {
+    category: read?.category ?? null,
+    company: read?.companyName ?? null,
+    role: read?.jobTitle ?? null,
+    // A mail that asks for money never shows its own request.
+    requestedAction: fakeOfferWarning ? FAKE_OFFER_NEXT_STEP : (read?.requestedAction ?? null),
+    fakeOfferWarning,
+    conversationKey: mail.threadId ?? mail.gmailMessageId,
+    application: mail.application,
+  };
 }
 
 /** The result for every given mail, by message ID. */

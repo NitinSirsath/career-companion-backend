@@ -326,6 +326,9 @@ model AIProcessingResult {
   actionDeadline     String?
   followUpRequired   Boolean?
   followUpDate       String?
+  /// Set when the email asks for money or bank, card or ID details to get or keep a job: the
+  /// signs the AI saw. The app then shows a safe next step instead of the email's request.
+  fakeOfferWarning   String?
 
   scheduleCandidates   Json?
   extractionConfidence Float?

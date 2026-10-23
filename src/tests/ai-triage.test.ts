@@ -11,6 +11,7 @@ import {
 import {
   AI_CONTRACT_VERSIONS,
   LEGACY_CONTRACT_VERSIONS,
+  STRICT_V1_CONTRACT_VERSIONS,
   buildRelevanceBatchInput,
   mapBatchResults,
   RelevanceBatchItemSchema,
@@ -1204,5 +1205,118 @@ describe('strict relevance rules apply to new mails only', () => {
     expect(
       await prisma.aIProcessingResult.findUnique({ where: { emailId: old.id } }),
     ).toMatchObject({ contractVersion: LEGACY.CLASSIFICATION, relevanceDecision: 'RELEVANT' });
+  });
+});
+
+describe('the rule for job offers that ask for money applies to new mails only', () => {
+  const V1 = STRICT_V1_CONTRACT_VERSIONS;
+  const linkedin = 'Recruiter <inmail-hit-reply@linkedin.com>';
+  const answerAll = async (input: { items: { key?: string }[] }) => ({
+    data: {
+      results: input.items.map((item) => ({
+        key: item.key,
+        decision: 'RELEVANT',
+        confidence: 0.9,
+        category: 'OFFER',
+      })),
+    },
+    usage: { inputTokens: 1, outputTokens: 1 },
+    version: 'fixture',
+    model: 'fixture-fast',
+  });
+  const single = {
+    data: { decision: 'RELEVANT', category: 'OFFER', confidence: 0.9, reasoning: 'fixture' },
+    usage: { inputTokens: 1, outputTokens: 1 },
+    version: 'fixture',
+    model: 'fixture-fast',
+  };
+  const ready = () => {
+    vi.mocked(getAccessState).mockResolvedValue({
+      state: 'READY',
+      reason: null,
+      modelId: null,
+      resumesAt: null,
+      pauses: [],
+    });
+    vi.mocked(resolveAIAccess).mockResolvedValue(provider);
+  };
+  const pinned = async (gmailMessageId: string, version: string, sender?: string) => {
+    const email = await prisma.email.create({ data: { userId, gmailMessageId, sender } });
+    await prisma.aIOperation.create({
+      data: { emailId: email.id, operation: 'classification', version, status: 'PENDING' },
+    });
+    return email;
+  };
+
+  it('starts new mails on classification/v4 and relevance-batch/v3', () => {
+    expect(AI_CONTRACT_VERSIONS.CLASSIFICATION).toBe('classification/v4');
+    expect(AI_CONTRACT_VERSIONS.RELEVANCE_BATCH).toBe('relevance-batch/v3');
+  });
+
+  it('triage keeps an email on relevance-batch/v2, under the strict Social rule, and starts a new one on v3', async () => {
+    const old = await pinned('fee-old-batch', V1.RELEVANCE_BATCH, linkedin);
+    const fresh = await prisma.email.create({
+      data: { userId, gmailMessageId: 'fee-new-batch', sender: linkedin },
+    });
+    vi.mocked(fetchMessageMetadata).mockResolvedValue({
+      labelIds: ['INBOX', 'CATEGORY_SOCIAL'],
+      snippet: 'fixture',
+    });
+    ready();
+    classify.mockImplementation(answerAll);
+    await runTriage(userId);
+    expect(new Set(classify.mock.calls.map(([, version]) => version))).toEqual(
+      new Set([V1.RELEVANCE_BATCH, AI_CONTRACT_VERSIONS.RELEVANCE_BATCH]),
+    );
+    expect(
+      (await prisma.aIOperation.findMany({ where: { emailId: old.id } })).map((row) => row.version),
+    ).toEqual([V1.RELEVANCE_BATCH]);
+    expect(
+      await prisma.aIProcessingResult.findUnique({ where: { emailId: old.id } }),
+    ).toMatchObject({ contractVersion: V1.RELEVANCE_BATCH, deterministic: false });
+    expect(
+      await prisma.aIProcessingResult.findUnique({ where: { emailId: fresh.id } }),
+    ).toMatchObject({ contractVersion: AI_CONTRACT_VERSIONS.RELEVANCE_BATCH });
+  });
+
+  it('classifyOne keeps an email on relevance-batch/v2', async () => {
+    const old = await pinned('fee-old-one', V1.RELEVANCE_BATCH);
+    await prisma.email.update({ where: { id: old.id }, data: { processingState: 'PROCESSING' } });
+    ready();
+    classify.mockImplementation(answerAll);
+    const out = await classifyOne(userId, old.id, {
+      sender: null,
+      subject: 'x',
+      labels: [],
+      snippet: null,
+    });
+    expect(out.version).toBe(V1.RELEVANCE_BATCH);
+    expect(classify.mock.calls[0][1]).toBe(V1.RELEVANCE_BATCH);
+  });
+
+  it('the per-email path keeps an email on classification/v3 and starts a new one on v4', async () => {
+    process.env.AI_TRIAGE_BATCH_ENABLED = 'false';
+    ready();
+    classifySingle.mockResolvedValue({
+      ...single,
+      data: { ...single.data, decision: 'IRRELEVANT' },
+    });
+    const old = await pinned('fee-old-single', V1.CLASSIFICATION);
+    const fresh = await prisma.email.create({ data: { userId, gmailMessageId: 'fee-new-single' } });
+    await processEmail(userId, old.id);
+    await processEmail(userId, fresh.id);
+    expect(classifySingle.mock.calls.map(([, version]) => version)).toEqual([
+      V1.CLASSIFICATION,
+      AI_CONTRACT_VERSIONS.CLASSIFICATION,
+    ]);
+    expect(
+      (await prisma.aIOperation.findMany({ where: { emailId: old.id } })).map((row) => row.version),
+    ).toEqual([V1.CLASSIFICATION]);
+    expect(
+      await prisma.aIProcessingResult.findUnique({ where: { emailId: old.id } }),
+    ).toMatchObject({ contractVersion: V1.CLASSIFICATION });
+    expect(
+      await prisma.aIProcessingResult.findUnique({ where: { emailId: fresh.id } }),
+    ).toMatchObject({ contractVersion: AI_CONTRACT_VERSIONS.CLASSIFICATION });
   });
 });

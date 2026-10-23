@@ -32,6 +32,7 @@ function result(fields: Partial<AIProcessingResult>): AIProcessingResult {
     actionDeadline: null,
     followUpRequired: null,
     followUpDate: null,
+    fakeOfferWarning: null,
     scheduleCandidates: null,
     extractionConfidence: null,
     provenance: null,

@@ -109,7 +109,10 @@ export const SandboxMailResultSchema = z.object({
       category: MailCategorySchema.nullable(),
       company: z.string().nullable(),
       role: z.string().nullable(),
+      /** For a mail with `fakeOfferWarning`, the safe next step instead of the mail's request. */
       requestedAction: z.string().nullable(),
+      /** Set when the mail looks like a fake job offer that asks for money: the signs the AI saw. */
+      fakeOfferWarning: z.string().nullable(),
       /** Opens the conversation on the Mails page. */
       conversationKey: z.string(),
       application: z

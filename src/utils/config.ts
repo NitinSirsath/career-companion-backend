@@ -143,7 +143,10 @@ export function parseAI_SHOW_HIDDEN_PROVIDERS(value: string | undefined): boolea
 export const showHiddenProviders = () =>
   parseAI_SHOW_HIDDEN_PROVIDERS(process.env.AI_SHOW_HIDDEN_PROVIDERS);
 
-/** Off until extraction/v3 is qualified. Turning it off only stops new selection and projection. */
+/**
+ * Off until the extraction with interview times is qualified. On, new mails use extraction/v5
+ * (v3 plus the fake offer warning). Turning it off only stops new selection and projection.
+ */
 export const agendaExtractionV3Enabled = () => process.env.AGENDA_EXTRACTION_V3_ENABLED === 'true';
 
 // ─── Discord notifications ──────────────────────────────────────────────────

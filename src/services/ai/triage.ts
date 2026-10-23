@@ -18,6 +18,7 @@ import {
   AI_CONTRACT_VERSIONS,
   CLASSIFICATION_VERSIONS,
   RELEVANCE_BATCH_VERSIONS,
+  usesStrictRules,
   AIResult,
   RelevanceClassifierInput,
   RelevanceBatchItem,
@@ -677,9 +678,7 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
           signal,
         });
         const labels = gmail.labelIds ?? [];
-        if (
-          autoIrrelevant(labels, email.sender, version === AI_CONTRACT_VERSIONS.RELEVANCE_BATCH)
-        ) {
+        if (autoIrrelevant(labels, email.sender, usesStrictRules(version))) {
           await markDeterministicIrrelevant(userId, email.id);
           handled.add(email.id);
           processed++;

@@ -7,15 +7,19 @@ import { AIAccess, resolveAIAccess } from './access';
 import {
   AI_CONTRACT_VERSIONS,
   CLASSIFICATION_VERSIONS,
-  LEGACY_CONTRACT_VERSIONS,
+  EXTRACTION_VERSIONS,
+  FAKE_OFFER_EXTRACTION_VERSIONS,
   RELEVANCE_BATCH_VERSIONS,
+  SCHEDULE_EXTRACTION_VERSIONS,
   classificationContractFor,
+  extractionContractFor,
+  usesStrictRules,
   CLASSIFICATION_INPUT_LIMITS as LIMITS,
   EXTRACTION_BODY_LIMIT,
-  EXTRACTION_CONTRACT,
-  EXTRACTION_V3_CONTRACT,
+  EXTRACTION_V5_CONTRACT,
   JobExtractionSchema,
   JobExtractionV3Schema,
+  JobExtractionV4Schema,
   AIContract,
   JobExtractionResult,
   RelevanceClassifierInput,
@@ -71,7 +75,7 @@ export async function processEmail(
   if (!email) throw new TerminalAIError('Email unavailable');
   const result = email.aiProcessingResult;
   // Adopt existing completed work; neither a deployment nor a sync is reprocessing consent.
-  const extracted = ['extraction/v2', 'extraction/v3'].includes(result?.contractVersion ?? '');
+  const extracted = EXTRACTION_VERSIONS.includes(result?.contractVersion ?? '');
   if (result && (result.processingStatus === 'COMPLETED' || extracted)) {
     await finishEmail(userId, emailId, result.relevanceDecision);
     return;
@@ -98,9 +102,7 @@ async function classificationPlan(email: EmailWithResult) {
     CLASSIFICATION_VERSIONS.includes(row.version),
   )?.version;
   // New mails only: an email that started on the legacy rules finishes on them.
-  const strictRules = !ledger.some((row) =>
-    (Object.values(LEGACY_CONTRACT_VERSIONS) as string[]).includes(row.version),
-  );
+  const strictRules = ledger.every((row) => usesStrictRules(row.version));
   const useBatch = hasBatchRow || (triageBatchEnabled() && !perEmailVersion);
 
   const operations = await prisma.aIOperation.count({ where: { emailId: email.id } });
@@ -212,6 +214,7 @@ async function extract(run: EmailRun) {
   const emailId = email.id;
   const body = await fetchMessageBody(userId, email.gmailMessageId, run.options);
   const contract = await selectExtractionContract(userId, emailId);
+  const schedule = SCHEDULE_EXTRACTION_VERSIONS.includes(contract.version);
   const extraction = await runOperation({
     userId,
     emailId,
@@ -224,11 +227,12 @@ async function extract(run: EmailRun) {
         version: contract.version,
         receivedAt: email.receivedAt?.toISOString() ?? null,
       });
-      if (contract.version === 'extraction/v3') {
+      if (schedule) {
         const parsed = JobExtractionV3Schema.parse(output.data);
         return {
           ...output,
           data: {
+            ...output.data,
             ...parsed,
             scheduleCandidates: verifiedCandidates(parsed.scheduleCandidates, bounded),
           },
@@ -241,11 +245,17 @@ async function extract(run: EmailRun) {
     where: { emailId },
     data: {
       ...JobExtractionSchema.parse(extraction.data),
-      ...(contract.version === 'extraction/v3'
+      ...(schedule
         ? {
             scheduleCandidates: candidateEnvelope(
               JobExtractionV3Schema.parse(extraction.data).scheduleCandidates,
             ),
+          }
+        : {}),
+      ...(FAKE_OFFER_EXTRACTION_VERSIONS.includes(contract.version)
+        ? {
+            fakeOfferWarning:
+              JobExtractionV4Schema.parse(extraction.data).fakeOfferWarning?.trim() || null,
           }
         : {}),
       ...provenance(extraction, email.aiProcessingResult),
@@ -283,17 +293,18 @@ export async function selectExtractionContract(
     if (!(await tx.email.findFirst({ where: { id: emailId, userId } })))
       throw new TerminalAIError('Email unavailable');
     const rows = await tx.aIOperation.findMany({ where: { emailId, operation: 'extraction' } });
-    if (
-      rows.length > 1 ||
-      rows.some((row) => !['extraction/v2', 'extraction/v3'].includes(row.version))
-    )
+    if (rows.length > 1 || rows.some((row) => !EXTRACTION_VERSIONS.includes(row.version)))
       throw new TerminalAIError(
         'The AI details of this email have conflicting versions; Career Companion must check it',
       );
+    // New mails only: an email that started on an older version (v2, v3) finishes on it.
     const version =
-      rows[0]?.version ?? (agendaExtractionV3Enabled() ? 'extraction/v3' : 'extraction/v2');
+      rows[0]?.version ??
+      (agendaExtractionV3Enabled()
+        ? EXTRACTION_V5_CONTRACT.version
+        : AI_CONTRACT_VERSIONS.EXTRACTION);
     if (!rows.length)
       await tx.aIOperation.create({ data: { emailId, operation: 'extraction', version } });
-    return version === 'extraction/v3' ? EXTRACTION_V3_CONTRACT : EXTRACTION_CONTRACT;
+    return extractionContractFor(version);
   });
 }

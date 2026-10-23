@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { prisma } from '../db/prisma';
 import { processEmailJob } from '../jobs/emailProcessingJob';
 import { EmailProcessingJobData } from '../services/enqueue';
-import { JobExtractionSchema } from '../services/ai/contracts';
+import { JobExtractionV4Schema } from '../services/ai/contracts';
 import { ProviderFailure } from '../services/ai/errors';
 import { fetchMessageBody, fetchMessageMetadata } from '../services/gmailFetcher';
 import { createProviderClient } from '../services/ai/providers';
@@ -17,8 +17,8 @@ vi.mock('../services/enqueue', async (importOriginal) => ({
   enqueueNotificationJob: vi.fn(),
 }));
 
-const extraction = JobExtractionSchema.parse({
-  ...Object.fromEntries(Object.keys(JobExtractionSchema.shape).map((key) => [key, null])),
+const extraction = JobExtractionV4Schema.parse({
+  ...Object.fromEntries(Object.keys(JobExtractionV4Schema.shape).map((key) => [key, null])),
   companyName: 'Northwind Robotics',
   jobTitle: 'Platform Engineer',
   interviewStage: 'First round',
@@ -145,7 +145,7 @@ describe('Gmail → user-provided AI → application pipeline', () => {
       },
     ]);
     expect(working.calls('email_relevance')).toHaveLength(1);
-    expect(working.calls('job_extraction')).toHaveLength(1);
+    expect(working.calls('job_extraction_v4')).toHaveLength(1);
 
     // Not set up: waits as PENDING; nothing was claimed or sent.
     expect(await prisma.email.findUniqueOrThrow({ where: { id: waitingEmail } })).toMatchObject({
@@ -197,11 +197,11 @@ describe('Gmail → user-provided AI → application pipeline', () => {
       processingState: 'COMPLETED',
     });
     expect(fixed.calls('email_relevance')).toHaveLength(0);
-    expect(fixed.calls('job_extraction')).toHaveLength(1);
+    expect(fixed.calls('job_extraction_v4')).toHaveLength(1);
   });
 });
 
-it('runs extraction/v3 through the shared provider boundary and persists verified candidates once', async () => {
+it('runs extraction/v5 through the shared provider boundary and persists verified candidates once', async () => {
   vi.stubEnv('AGENDA_EXTRACTION_V3_ENABLED', 'true');
   try {
     const provider = {
@@ -211,6 +211,7 @@ it('runs extraction/v3 through the shared provider boundary and persists verifie
             ? relevant
             : {
                 ...extraction,
+                fakeOfferWarning: '   ',
                 scheduleCandidates: [
                   {
                     kind: 'INTERVIEW',
@@ -231,7 +232,8 @@ it('runs extraction/v3 through the shared provider boundary and persists verifie
     const emailId = await newEmail(ready);
     await processEmailJob(job(ready, emailId));
     const result = await prisma.aIProcessingResult.findUniqueOrThrow({ where: { emailId } });
-    expect(result.contractVersion).toBe('extraction/v3');
+    expect(result.contractVersion).toBe('extraction/v5');
+    expect(result.fakeOfferWarning).toBeNull();
     expect(result.scheduleCandidates).toMatchObject({
       version: 'agenda/v1',
       candidates: [
@@ -245,7 +247,7 @@ it('runs extraction/v3 through the shared provider boundary and persists verifie
       contract: { version: string };
       input: string;
     };
-    expect(sent.contract.version).toBe('extraction/v3');
+    expect(sent.contract.version).toBe('extraction/v5');
     expect(JSON.parse(sent.input).receivedAt).toBeNull();
     expect(await prisma.agendaItem.count({ where: { emailId } })).toBe(1);
     vi.stubEnv('AGENDA_EXTRACTION_V3_ENABLED', 'false');
@@ -254,4 +256,74 @@ it('runs extraction/v3 through the shared provider boundary and persists verifie
   } finally {
     vi.unstubAllEnvs();
   }
+});
+
+describe('the warning for a job offer that asks for money', () => {
+  const offer = { ...relevant, category: 'OFFER' };
+  const feeOffer = (fakeOfferWarning: string | null) => ({
+    ...extraction,
+    actionRequired: true,
+    requestedAction: 'Pay the laptop security fee of Rs 8,500',
+    actionDeadline: 'within 24 hours',
+    fakeOfferWarning,
+  });
+  const run = async (fakeOfferWarning: string | null) => {
+    const provider = fakeProviderClient({
+      classification: offer,
+      extraction: feeOffer(fakeOfferWarning),
+    });
+    vi.mocked(createProviderClient).mockReturnValue(provider);
+    const emailId = await newEmail(ready);
+    await processEmailJob(job(ready, emailId));
+    return { emailId, provider };
+  };
+
+  it('a new mail is read with classification/v4 and extraction/v4, and the warning is stored trimmed', async () => {
+    const { emailId, provider } = await run('  It asks for a fee of Rs 8,500.  ');
+    expect(provider.generateStructured.mock.calls.map(([sent]) => sent.contract.version)).toEqual([
+      'classification/v4',
+      'extraction/v4',
+    ]);
+    expect(await prisma.aIProcessingResult.findUniqueOrThrow({ where: { emailId } })).toMatchObject(
+      {
+        contractVersion: 'extraction/v4',
+        fakeOfferWarning: 'It asks for a fee of Rs 8,500.',
+      },
+    );
+  });
+
+  it('stores an empty warning as none', async () => {
+    const { emailId } = await run('   ');
+    expect(
+      (await prisma.aIProcessingResult.findUniqueOrThrow({ where: { emailId } })).fakeOfferWarning,
+    ).toBeNull();
+  });
+
+  it('a mail with a warning is never linked automatically and makes no action', async () => {
+    const { emailId } = await run('It asks for a fee of Rs 8,500.');
+    const email = await prisma.email.findUniqueOrThrow({ where: { id: emailId } });
+    expect(email).toMatchObject({ relevanceState: 'RELEVANT', matchState: 'UNMATCHED' });
+    expect(email.applicationId).toBeNull();
+    expect(await prisma.action.count({ where: { emailId } })).toBe(0);
+    expect(await prisma.applicationEvent.count({ where: { emailId } })).toBe(0);
+  });
+
+  it('an email that started on extraction/v2 finishes on it and stores no warning', async () => {
+    const provider = fakeProviderClient({
+      classification: offer,
+      extraction: feeOffer('It asks for a fee.'),
+    });
+    vi.mocked(createProviderClient).mockReturnValue(provider);
+    const emailId = await newEmail(ready);
+    await prisma.aIOperation.create({
+      data: { emailId, operation: 'extraction', version: 'extraction/v2' },
+    });
+    await processEmailJob(job(ready, emailId));
+    const [, sent] = provider.generateStructured.mock.calls.map(([request]) => request);
+    expect(sent.contract.version).toBe('extraction/v2');
+    expect(sent.contract.instructions).not.toContain('fakeOfferWarning');
+    expect(await prisma.aIProcessingResult.findUniqueOrThrow({ where: { emailId } })).toMatchObject(
+      { contractVersion: 'extraction/v2', fakeOfferWarning: null },
+    );
+  });
 });

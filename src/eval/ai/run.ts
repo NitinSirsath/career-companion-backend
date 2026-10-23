@@ -17,6 +17,8 @@ import {
   CLASSIFICATION_INPUT_LIMITS as LIMITS,
   mapBatchResults,
   EXTRACTION_BODY_LIMIT,
+  EXTRACTION_VERSIONS,
+  SCHEDULE_EXTRACTION_VERSIONS,
 } from '../../services/ai/contracts';
 import { evaluateCall } from './call';
 import { createProviderClient } from '../../services/ai/providers';
@@ -81,10 +83,11 @@ async function main() {
   if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 25)
     throw new Error('--batch-size must be 1-25');
 
-  const extractionVersion = option('extraction-version') ?? 'extraction/v2';
-  if (!['extraction/v2', 'extraction/v3'].includes(extractionVersion))
+  const extractionVersion = option('extraction-version') ?? AI_CONTRACT_VERSIONS.EXTRACTION;
+  if (!EXTRACTION_VERSIONS.includes(extractionVersion))
     throw new Error('Unsupported extraction version');
-  const cases = [...loadDataset(), ...(extractionVersion === 'extraction/v3' ? temporalCases : [])];
+  const withTimes = SCHEDULE_EXTRACTION_VERSIONS.includes(extractionVersion);
+  const cases = [...loadDataset(), ...(withTimes ? temporalCases : [])];
   const models = { fast: catalogModel('fast', fast), detailed: catalogModel('detailed', detailed) };
   const ai = bindCapabilities(createProviderClient(provider, apiKey), models);
   const results: CaseRun[] = [];
@@ -201,7 +204,7 @@ async function main() {
 
   const metrics = score(cases, results);
   const failed = failures(metrics, baseline);
-  const temporal = extractionVersion === 'extraction/v3' ? scoreTemporal(results, runs) : null;
+  const temporal = withTimes ? scoreTemporal(results, runs) : null;
   const baseOutcome = evaluationOutcome(metrics, baseline);
   const outcome = worstOutcome(baseOutcome, temporal?.outcome);
   const createdAt = new Date().toISOString();

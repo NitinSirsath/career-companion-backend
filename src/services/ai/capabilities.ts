@@ -7,8 +7,8 @@ import {
   RelevanceBatchEnvelopeSchema,
   classificationContractFor,
   relevanceBatchContractFor,
-  EXTRACTION_CONTRACT,
-  EXTRACTION_V3_CONTRACT,
+  extractionContractFor,
+  SCHEDULE_EXTRACTION_VERSIONS,
   EmailAnalyzer,
   RelevanceClassifier,
 } from './contracts';
@@ -63,15 +63,14 @@ export function bindCapabilities(client: ProviderClient, models: BoundModels): A
       },
     },
     analyzer: {
-      extractJobData: (body, options) =>
-        options?.version === 'extraction/v3'
-          ? run(
-              client,
-              EXTRACTION_V3_CONTRACT,
-              models.detailed,
-              JSON.stringify({ receivedAt: options.receivedAt, body }),
-            )
-          : run(client, EXTRACTION_CONTRACT, models[EXTRACTION_CONTRACT.role], body),
+      extractJobData: (body, options) => {
+        const contract = extractionContractFor(options?.version ?? AI_CONTRACT_VERSIONS.EXTRACTION);
+        // The versions that read times also get the received time; the others get the body only.
+        const input = SCHEDULE_EXTRACTION_VERSIONS.includes(contract.version)
+          ? JSON.stringify({ receivedAt: options?.receivedAt ?? null, body })
+          : body;
+        return run(client, contract, models[contract.role], input);
+      },
     },
   };
 }
