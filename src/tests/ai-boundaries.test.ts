@@ -17,8 +17,10 @@ const using = (pattern: RegExp) =>
 
 describe('credential boundaries (BYO AI plan §8)', () => {
   it('opens a sealed key only where a provider call or verification needs it', () => {
+    // connections.ts verifies the key of a connected provider that is not active.
     expect(using(/\bopenApiKey\b/)).toEqual([
       'services/ai/access.ts',
+      'services/ai/connections.ts',
       'services/ai/credentials.ts',
       'services/ai/settings.ts',
     ]);
@@ -27,6 +29,7 @@ describe('credential boundaries (BYO AI plan §8)', () => {
   it('reads the sealed key column only in those same modules', () => {
     expect(using(/\bencryptedApiKey\b/)).toEqual([
       'services/ai/access.ts',
+      'services/ai/connections.ts',
       'services/ai/settings.ts',
     ]);
   });
