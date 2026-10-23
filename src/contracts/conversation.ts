@@ -36,7 +36,10 @@ export const ConversationRequestSchema = z.object({
   emailId: z.uuid(),
   state: RequestStateSchema,
   kind: z.enum(['ACTION', 'FOLLOW_UP']),
-  /** The request in the AI's words; null for a plain follow-up or when the AI gave none. */
+  /**
+   * The request in the AI's words; null for a plain follow-up or when the AI gave none. For a mail
+   * with a fake offer warning, the safe next step, with no deadline.
+   */
   text: z.string().nullable(),
   deadline: IsoDateTime.nullable(),
   deadlinePrecision: z.enum(['DATE', 'DATETIME']).nullable(),
@@ -70,6 +73,12 @@ export const ConversationSchema = z.object({
   interview: z.object({ date: z.string().nullable(), time: z.string().nullable() }).nullable(),
   assessmentDeadline: z.string().nullable(),
   request: ConversationRequestSchema.nullable(),
+  /**
+   * Set when a received mail of the conversation looks like a fake job offer that asks for money
+   * or bank, card or ID details: the newest such warning, in the AI's words. `request` then holds
+   * the safe next step, never the mail's own request.
+   */
+  fakeOfferWarning: z.string().nullable(),
   link: ConversationLinkSchema,
   application: z
     .object({
@@ -123,9 +132,12 @@ export const ConversationMailSchema = z.object({
   assessmentDeadline: z.string().nullable(),
   offerInfo: z.string().nullable(),
   rejectionInfo: z.string().nullable(),
+  /** For a mail with `fakeOfferWarning`, the safe next step instead of the mail's request. */
   requestedAction: z.string().nullable(),
   actionDeadline: z.string().nullable(),
   followUpDate: z.string().nullable(),
+  /** Set when the mail looks like a fake job offer that asks for money: the signs the AI saw. */
+  fakeOfferWarning: z.string().nullable(),
   analyzedBy: AnalyzedBySchema.nullable(),
 });
 export type ConversationMail = z.infer<typeof ConversationMailSchema>;
