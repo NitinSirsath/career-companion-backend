@@ -108,7 +108,7 @@ async function classificationPlan(email: EmailWithResult) {
   const operations = await prisma.aIOperation.count({ where: { emailId: email.id } });
   if (result && !operations)
     throw new TerminalAIError(
-      'An older AI result for this email is incomplete; Career Companion must check it',
+      'An older AI result for this email is incomplete; NorthList must check it',
     );
 
   // The batched check already decided this email; only extraction is left.
@@ -295,7 +295,7 @@ export async function selectExtractionContract(
     const rows = await tx.aIOperation.findMany({ where: { emailId, operation: 'extraction' } });
     if (rows.length > 1 || rows.some((row) => !EXTRACTION_VERSIONS.includes(row.version)))
       throw new TerminalAIError(
-        'The AI details of this email have conflicting versions; Career Companion must check it',
+        'The AI details of this email have conflicting versions; NorthList must check it',
       );
     // New mails only: an email that started on an older version (v2, v3) finishes on it.
     const version =

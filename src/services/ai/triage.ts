@@ -564,7 +564,7 @@ export async function classifyOne(
   });
   if (rows.length > 1)
     throw new TerminalAIError(
-      'The AI sorting of this email has conflicting versions; Career Companion must check it',
+      'The AI sorting of this email has conflicting versions; NorthList must check it',
     );
   const row = rows[0] ?? null;
   // New mails only: an email that started on an older version stays on it.

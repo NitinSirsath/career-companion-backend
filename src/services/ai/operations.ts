@@ -400,8 +400,7 @@ async function recordFailure(err: unknown, call: FailedCall): Promise<unknown> {
   return outcome.thrown;
 }
 
-const OWN_ERROR_MESSAGE =
-  'An error in Career Companion stopped this AI step; Career Companion must check it';
+const OWN_ERROR_MESSAGE = 'An error in NorthList stopped this AI step; NorthList must check it';
 
 /**
  * Refusals restore the claim; no answer in time uses it and is tried again; unusable outcomes are

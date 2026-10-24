@@ -182,7 +182,7 @@ const sendNotAllowed = () =>
   new AppError(
     403,
     'GMAIL_SEND_NOT_ALLOWED',
-    'Career Companion may read your Gmail but not send from it. Allow sending to reply from here.',
+    'NorthList may read your Gmail but not send from it. Allow sending to reply from here.',
   );
 
 async function assertMaySend(userId: string): Promise<void> {

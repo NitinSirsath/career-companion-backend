@@ -125,7 +125,7 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
     setupSteps: [
       'Sign in to Google AI Studio with your Google account.',
       'Choose "Create API key" and copy the key.',
-      'Paste the key below. Career Companion stores it encrypted and never shows it again.',
+      'Paste the key below. NorthList stores it encrypted and never shows it again.',
       'Optional: turn on billing in Google AI Studio to move from the free tier to paid usage.',
     ],
     disclosure: {
@@ -211,7 +211,7 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
       'Sign in to the OpenAI Platform. This is separate from a ChatGPT subscription.',
       'Add a payment method or credit under Billing.',
       'Create a secret key under "API keys" and copy it.',
-      'Paste the key below. Career Companion stores it encrypted and never shows it again.',
+      'Paste the key below. NorthList stores it encrypted and never shows it again.',
     ],
     disclosure: {
       version: 'openai-draft-2026-10',
@@ -269,7 +269,7 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
       'Sign in to the Anthropic Console. This is separate from a Claude app subscription.',
       'Add credit or a payment method under Billing.',
       'Create an API key under "API keys" and copy it.',
-      'Paste the key below. Career Companion stores it encrypted and never shows it again.',
+      'Paste the key below. NorthList stores it encrypted and never shows it again.',
     ],
     disclosure: {
       version: 'anthropic-draft-2026-10',
@@ -330,14 +330,14 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
       'Sign in at openrouter.ai and add credit under Credits.',
       'Under Keys, create an API key (not a Management key). Give it a credit limit of at least $5, or none: GPT-6 Sol needs about $1.50 of the limit free for each request.',
       'Keep "Input & Output Logging" (workspace Observability) and the "1% data discount" (Privacy) turned off.',
-      'Paste the key below. Career Companion stores it encrypted and never shows it again.',
+      'Paste the key below. NorthList stores it encrypted and never shows it again.',
     ],
     disclosure: {
       version: 'openrouter-2026-10-23',
       summary:
         'Your emails go to OpenRouter under your own account. OpenRouter passes each request to one server that runs the model you chose.',
       training:
-        'Career Companion asks OpenRouter to use only servers that keep nothing, so they cannot train on it. OpenRouter says it does not train on it and keeps only usage numbers, unless you turn on prompt logging in your OpenRouter account.',
+        'NorthList asks OpenRouter to use only servers that keep nothing, so they cannot train on it. OpenRouter says it does not train on it and keeps only usage numbers, unless you turn on prompt logging in your OpenRouter account.',
       residency:
         'OpenRouter is based in the US. Claude Haiku 5.5 and Gemini 3.8 Flash run on Google servers, and GPT-6 Luna and GPT-6 Sol on Microsoft Azure servers, in the US or Europe. OpenRouter picks the server for each request.',
       reviewedOn: '2026-10-23',
@@ -410,7 +410,7 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
   // that key is set and the free AI is switched on. GPT-6 Luna for both steps, with no choice.
   {
     id: 'career-companion',
-    displayName: 'Career Companion free AI',
+    displayName: 'NorthList free AI',
     protocol: 'openrouter',
     baseUrl: 'https://openrouter.ai/api/v1',
     status: 'supported',
@@ -422,9 +422,9 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
     disclosure: {
       version: 'career-companion-free-2026-10-24',
       summary:
-        "Your emails go to OpenRouter on Career Companion's account. OpenRouter passes each request to GPT-6 Luna.",
+        "Your emails go to OpenRouter on NorthList's account. OpenRouter passes each request to GPT-6 Luna.",
       training:
-        'Career Companion asks OpenRouter to use only servers that keep nothing, so they cannot train on your mail.',
+        'NorthList asks OpenRouter to use only servers that keep nothing, so they cannot train on your mail.',
       residency:
         'OpenRouter is based in the US. GPT-6 Luna runs on Microsoft Azure servers in the US or Europe. OpenRouter picks the server for each request.',
       reviewedOn: '2026-10-24',

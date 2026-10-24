@@ -82,7 +82,7 @@ export async function alertOwnerOfFreePause(): Promise<void> {
       });
       if (!claimed.count) continue;
       const sent = await sendOwnerAlert(
-        `Career Companion free AI is paused for every user on it. ${ALERTS[pause.reason] ?? ''} Their mails wait and are tried again every hour.`,
+        `NorthList free AI is paused for every user on it. ${ALERTS[pause.reason] ?? ''} Their mails wait and are tried again every hour.`,
       );
       logEvent('free_ai_owner_alerted', { model: pause.model, reason: pause.reason, sent });
     }
