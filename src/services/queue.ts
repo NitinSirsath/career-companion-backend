@@ -4,6 +4,9 @@ import { databaseUrl } from '../utils/config';
 import { errorCategory } from '../utils/errorCategory';
 import { logError } from '../utils/log';
 
+/** pg-boss keeps its jobs in this database schema. */
+export const QUEUE_SCHEMA = 'pgboss';
+
 export const QUEUE_NAMES = [
   'email-processing-job',
   'discord-notification-job',
@@ -28,7 +31,7 @@ let starting: Promise<PgBoss> | undefined;
 export function getQueue(): Promise<PgBoss> {
   if (!starting) {
     starting = (async () => {
-      const boss = new PgBoss({ connectionString: databaseUrl(), schema: 'pgboss' });
+      const boss = new PgBoss({ connectionString: databaseUrl(), schema: QUEUE_SCHEMA });
       boss.on('error', (error) => logError('queue_error', errorCategory(error)));
       try {
         await boss.start();
