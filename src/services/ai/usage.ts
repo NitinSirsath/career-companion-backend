@@ -65,6 +65,15 @@ export async function blockingPause(
     : null;
 }
 
+/**
+ * Makes sure the user has a counts row for the day. Mails read at the same time (the mail reader
+ * works on up to 3 at once) may both find none: inserting with ON CONFLICT DO NOTHING lets the
+ * second one wait and go on, where an upsert failed it on the unique key.
+ */
+export async function ensureUsageDay(db: Prisma.TransactionClient, userId: string, day: string) {
+  await db.aIUsageDay.createMany({ data: [{ userId, day }], skipDuplicates: true });
+}
+
 export function nextUtcMidnight(now: Date): Date {
   const next = new Date(now);
   next.setUTCHours(24, 0, 0, 0);
@@ -282,7 +291,6 @@ async function pauseFreeAI(
     consecutiveFailures: failures + 1,
   });
   return resumesAt;
-}
 }
 
 /** When a pause from a failure ends: the provider's daily reset, or the cooldown from the failure. */
