@@ -145,8 +145,10 @@ const NETWORK_CODES: Partial<Record<FakeAiError, string>> = {
   'no-connection': 'ENOTFOUND',
   'line-dropped': 'ECONNRESET',
 };
+// The free AI runs the OpenRouter adapter: one row per adapter, the users' own providers.
+const OWN_KEY_PROVIDERS = AI_PROVIDER_IDS.filter((id) => id !== 'career-companion');
 const byProvider = FAULTS.flatMap((fault) =>
-  AI_PROVIDER_IDS.map(
+  OWN_KEY_PROVIDERS.map(
     (providerId, i) => [fault, providerId, KINDS_TODAY[fault][i], CAUSES[fault][i]] as const,
   ),
 );
@@ -404,6 +406,7 @@ describe('the fake-error command never runs outside dev mode and sends nothing',
         openai: { call: 'PROVIDER_BUSY', check: 'INCONCLUSIVE' },
         anthropic: { call: 'PROVIDER_BUSY', check: 'INCONCLUSIVE' },
         openrouter: { call: 'PROVIDER_BUSY', check: 'INCONCLUSIVE' },
+        'career-companion': { call: 'PROVIDER_BUSY', check: 'INCONCLUSIVE' },
       },
       sent: [],
     });
