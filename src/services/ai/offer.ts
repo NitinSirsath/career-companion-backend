@@ -8,7 +8,8 @@ import { prisma } from '../../db/prisma';
 import { enqueueEmailProcessingJob, enqueueRelevanceTriage } from '../enqueue';
 import { ModelPause, getAccessState } from './access';
 import { triageBatchEnabled } from './triage';
-import { resumeAfterPause } from './usage';
+import { isFreeAIPause } from './freeAI';
+import { resumeAfterPause, resumeWhenWaitEnds } from './usage';
 import { logEvent } from '../../utils/log';
 
 export const REOFFER_LIMIT = 100;
@@ -66,12 +67,15 @@ export async function reofferPendingEmails(
 ): Promise<number> {
   const access = await getAccessState(userId);
   if (access.state !== 'READY') {
-    if (access.reason === 'SAFETY_LIMIT') await resumeAfterPause(userId, access.resumesAt);
+    await resumeWhenWaitEnds(userId, access);
     return 0;
   }
-  const waiting = (await waitingEmails(userId)).filter(
-    (email) => !waitsForPause(access.pauses, email),
-  );
+  const pending = await waitingEmails(userId);
+  // Mail held by the free AI's shared pause is read when it ends: nothing of this user started it.
+  for (const pause of access.pauses.filter((p) => isFreeAIPause(p.reason)))
+    if (pending.some((email) => waitsForPause([pause], email)))
+      await resumeAfterPause(userId, pause.resumesAt);
+  const waiting = pending.filter((email) => !waitsForPause(access.pauses, email));
   let triageQueued = false;
   for (const email of waiting) {
     await guard?.();
