@@ -6,7 +6,7 @@
  * the current setup untouched. The key is write-only: it is sealed on save, opened only to verify
  * or call, and never returned, logged or echoed.
  */
-import { AIAccessIssue, AIModelPause, Prisma } from '@prisma/client';
+import { AIAccessIssue, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { AppError } from '../../errors';
 import {
@@ -19,6 +19,7 @@ import {
 } from '../../contracts/aiCatalog';
 import type {
   AIConnection,
+  AIFailure,
   AISampleTestResponse,
   AISettingsResponse,
   CheckAIProviderResponse,
@@ -36,27 +37,30 @@ import {
   isOffered,
   modelsFor,
   offeredProvider,
+  ModelPause,
   resolveAIAccess,
-  runningPauses,
+  setupPauses,
   stateOf,
   withPause,
 } from './access';
 import { CLASSIFICATION_INPUT_LIMITS as LIMITS, EXTRACTION_BODY_LIMIT } from './contracts';
-import { AIAccessError, ProviderFailure, isRefusal } from './errors';
+import { AIAccessError, ProviderFailure, RefusalKind, isRefusal } from './errors';
 import { failureRecord, latestFailure, readFailure, shownPause } from './failures';
 import { needsYourOk } from './mailStatus';
 import { SAMPLE_EMAIL } from './sampleEmail';
 import { CredentialUnreadableError, openApiKey, sealApiKey } from './credentials';
+import { freeReason, isFreeAI, noFreeAIKey } from './freeAI';
 import { createProviderClient, VerifyResult } from './providers';
 import {
   MAX_DAILY_VERIFICATIONS,
+  afterProviderFailure,
+  dailyCallLimit,
+  ensureUsageDay,
   nextUtcMidnight,
   noteProviderFailure,
   noteProviderSuccess,
   recordTokens,
   reserveUserCall,
-  resumeAfterPause,
-  userDailyCallLimit,
   utcDay,
 } from './usage';
 import { logEvent, logError } from '../../utils/log';
@@ -78,11 +82,10 @@ export type SaveRequest = Omit<SaveAIProviderRequest, 'makeActive'> & { provider
  */
 function shownAccess(
   config: SavedState | null,
-  pauseRows: AIModelPause[],
+  pauses: ModelPause[],
   callsToday: number,
   now: Date,
 ): AISettingsResponse['access'] {
-  const pauses = runningPauses(config, pauseRows, now);
   const access = withPause(
     deriveAccess(config, callsToday, now),
     blockingPause(
@@ -106,9 +109,12 @@ function shownAccess(
 
 export async function readSettings(userId: string): Promise<AISettingsResponse> {
   const now = new Date();
-  const [config, pauseRows, usage, waitingEmails, needsOk, saved] = await Promise.all([
-    prisma.aIConfiguration.findUnique({ where: { userId }, select: CONFIGURATION_STATE }),
-    prisma.aIModelPause.findMany({ where: { userId } }),
+  const config = await prisma.aIConfiguration.findUnique({
+    where: { userId },
+    select: CONFIGURATION_STATE,
+  });
+  const [{ pauses, rows: pauseRows }, usage, waitingEmails, needsOk, saved] = await Promise.all([
+    setupPauses(userId, config, now),
     prisma.aIUsageDay.findUnique({ where: { userId_day: { userId, day: utcDay(now) } } }),
     prisma.email.count({ where: { userId, processingState: 'PENDING' } }),
     needsYourOk(userId, now),
@@ -120,7 +126,7 @@ export async function readSettings(userId: string): Promise<AISettingsResponse> 
   ]);
   const provider = config ? AI_CATALOG.find((p) => p.id === config.provider) : undefined;
   const models = config ? shownModels(provider, config) : null;
-  const access = shownAccess(config, pauseRows, usage?.calls ?? 0, now);
+  const access = shownAccess(config, pauses, usage?.calls ?? 0, now);
   const consentCurrent = provider?.disclosure.version === config?.consentDisclosure;
   const active: AIConnection[] = config
     ? [
@@ -148,14 +154,9 @@ export async function readSettings(userId: string): Promise<AISettingsResponse> 
       readFailure(config?.accessFailure),
       ...pauseRows.map((row) => readFailure(row.lastFailure)),
     ]),
-    usageToday: {
-      day: utcDay(now),
-      calls: usage?.calls ?? 0,
-      inputTokens: usage?.inputTokens ?? 0,
-      outputTokens: usage?.outputTokens ?? 0,
-    },
+    usageToday: usageToday(usage, now),
     safetyLimit: {
-      callsPerDay: userDailyCallLimit(),
+      callsPerDay: dailyCallLimit(config?.provider),
       resetsAt: nextUtcMidnight(now).toISOString(),
     },
     waitingEmails,
@@ -169,14 +170,21 @@ export async function readSettings(userId: string): Promise<AISettingsResponse> 
   };
 }
 
+/** Career Companion's own counts for today. */
+const usageToday = (
+  usage: { calls: number; inputTokens: number; outputTokens: number } | null,
+  now: Date,
+): AISettingsResponse['usageToday'] => ({
+  day: utcDay(now),
+  calls: usage?.calls ?? 0,
+  inputTokens: usage?.inputTokens ?? 0,
+  outputTokens: usage?.outputTokens ?? 0,
+});
+
 /** Counts one key check against the user's daily cap. */
 export async function reserveVerification(userId: string, now: Date) {
   const day = utcDay(now);
-  await prisma.aIUsageDay.upsert({
-    where: { userId_day: { userId, day } },
-    create: { userId, day },
-    update: {},
-  });
+  await ensureUsageDay(prisma, userId, day);
   const reserved = await prisma.aIUsageDay.updateMany({
     where: { userId, day, verifications: { lt: MAX_DAILY_VERIFICATIONS } },
     data: { verifications: { increment: 1 } },
@@ -248,7 +256,7 @@ export function checkSaveRequest(
 }
 
 /** Opens the saved key for a save that keeps it. A key that cannot be read must be entered again. */
-export function savedKey(userId: string, saved: { encryptedApiKey: string } | null): string {
+export function savedKey(userId: string, saved: { encryptedApiKey: string | null } | null): string {
   // checkSaveRequest already requires a new key when there is no saved setup to keep.
   if (!saved) throw new Error('No saved AI key to keep');
   try {
@@ -405,6 +413,7 @@ export async function checkSettings(userId: string): Promise<CheckAIProviderResp
     select: { ...CONFIGURATION_STATE, encryptedApiKey: true },
   });
   if (!config) throw new AppError(404, 'AI_NOT_CONFIGURED', 'AI is not set up.');
+  if (isFreeAI(config.provider)) throw noFreeAIKey();
   const provider = offeredProvider(config.provider);
   if (!provider)
     throw new AppError(
@@ -486,6 +495,26 @@ const unavailable = (err: AIAccessError, modelId: string | null) =>
   });
 
 /**
+ * What the sample test answers to a refusal: a pause (409), or a key, billing or model problem
+ * (422). On the free AI, every refusal pauses it for everyone: never a problem of the user's key.
+ */
+function refusedError(
+  provider: string,
+  kind: RefusalKind,
+  pause: { resumesAt: Date | null; failure: AIFailure; modelId: string },
+): AppError {
+  const { resumesAt, failure, modelId } = pause;
+  if (isFreeAI(provider))
+    return unavailable(new AIAccessError(freeReason(kind), resumesAt, failure), modelId);
+  if (kind === 'RATE_LIMITED' || kind === 'PROVIDER_BUSY')
+    return unavailable(new AIAccessError(kind, resumesAt, failure), modelId);
+  return new AppError(422, 'AI_ACCESS_REJECTED', 'The provider refused this key or model.', {
+    reason: kind,
+    modelId: kind === 'MODEL_UNAVAILABLE' ? modelId : null,
+  });
+}
+
+/**
  * Runs both capabilities on the built-in synthetic email (never the user's mail) with the saved
  * configuration, and returns the validated result. Real calls on the user's account: they count
  * toward the safety limit, and refusals update access state like any call. Nothing is persisted
@@ -511,7 +540,9 @@ export async function runSampleTest(userId: string): Promise<AISampleTestRespons
     }>,
   ) => {
     try {
-      await prisma.$transaction((tx) => reserveUserCall(tx, { userId, model: model.id }, now));
+      await prisma.$transaction((tx) =>
+        reserveUserCall(tx, { userId, provider: access.provider, model: model.id }, now),
+      );
     } catch (err) {
       if (err instanceof AIAccessError) throw unavailable(err, model.id);
       throw err;
@@ -553,13 +584,8 @@ export async function runSampleTest(userId: string): Promise<AISampleTestRespons
             failure,
           }),
         );
-        await resumeAfterPause(userId, resumesAt);
-        if (kind === 'RATE_LIMITED' || kind === 'PROVIDER_BUSY')
-          throw unavailable(new AIAccessError(kind, resumesAt, failure), model.id);
-        throw new AppError(422, 'AI_ACCESS_REJECTED', 'The provider refused this key or model.', {
-          reason: kind,
-          modelId: kind === 'MODEL_UNAVAILABLE' ? model.id : null,
-        });
+        await afterProviderFailure(access, resumesAt);
+        throw refusedError(access.provider, kind, { resumesAt, failure, modelId: model.id });
       }
       if (err instanceof ProviderFailure && err.usage) await recordTokens(userId, now, err.usage);
       throw new AppError(
