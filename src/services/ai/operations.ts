@@ -22,7 +22,7 @@ import {
   noteProviderSuccess,
   recordTokens,
   reserveUserCall,
-  resumeAfterPause,
+  afterProviderFailure,
 } from './usage';
 import { logDebug, logError, logEvent, logWarn } from '../../utils/log';
 
@@ -282,7 +282,11 @@ async function claimAttempt(
         },
       });
       if (claim.count !== 1) throw new RetryableAIError('AI operation not ready');
-      await reserveUserCall(tx, { userId, model: call.model, emailId }, now);
+      await reserveUserCall(
+        tx,
+        { userId, provider: call.provider, model: call.model, emailId },
+        now,
+      );
     })
     .catch((err: unknown) => {
       if (err instanceof AIAccessError)
@@ -390,7 +394,7 @@ async function recordFailure(err: unknown, call: FailedCall): Promise<unknown> {
   const outcome = await prisma.$transaction((tx) =>
     recordOutcome(tx, failure, call, { failedAt, record }),
   );
-  await resumeAfterPause(call.access.userId, outcome.resumesAt);
+  await afterProviderFailure(call.access, outcome.resumesAt);
   if (outcome.thrown instanceof AIProviderError) outcome.thrown.operationStage = call.operation;
   logFailure(err, call, { durationMs, result: outcome.next, resumesAt: outcome.resumesAt });
   return outcome.thrown;
