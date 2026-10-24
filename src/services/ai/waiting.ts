@@ -3,6 +3,7 @@
  */
 import type { ReadWaitingMailResponse } from '../../contracts/ai';
 import { getAccessState } from './access';
+import { isFreeAIPause } from './freeAI';
 import { offerTestMail, reofferPendingEmails } from './offer';
 import { readSettings } from './settings';
 import { logEvent } from '../../utils/log';
@@ -16,7 +17,8 @@ import { logEvent } from '../../utils/log';
  * does not get longer, and the test's result is kept. With no mail waiting for a paused model,
  * the waiting mail is offered again. Every try is a real call and counts toward the daily safety
  * limit. Nothing is offered while a test mail waits for its answer, access needs the user (key,
- * billing, model), the daily safety limit is reached, or Career Companion has paused AI.
+ * billing, model), the daily safety limit is reached, or Career Companion has paused AI. The free
+ * AI's shared pause is not tested: its waiting mail is offered again and waits for it.
  */
 export async function readWaitingNow(userId: string): Promise<ReadWaitingMailResponse> {
   const access = await getAccessState(userId);
@@ -30,10 +32,10 @@ export async function readWaitingNow(userId: string): Promise<ReadWaitingMailRes
     });
     return readSettings(userId);
   }
+  // The free AI's shared pause has no test: it ends by itself for everyone on it.
+  const own = access.pauses.filter((pause) => !isFreeAIPause(pause.reason));
   const testEmailId =
-    access.state === 'READY' && access.pauses.length
-      ? await offerTestMail(userId, access.pauses)
-      : null;
+    access.state === 'READY' && own.length ? await offerTestMail(userId, own) : null;
   if (testEmailId)
     logEvent('ai_read_waiting_requested', {
       userId,
