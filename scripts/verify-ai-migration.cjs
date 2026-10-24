@@ -22,12 +22,14 @@ const NEW_MIGRATIONS = [
   '20261014100000_ai_model_pauses',
   '20261015100000_ai_failure_details',
   '20261022100000_ai_saved_providers',
+  '20261024100000_free_ai',
 ];
 const NEW_UNIQUES = [
   'ai_configurations_pkey',
   'ai_usage_days_pkey',
   'ai_model_pauses_pkey',
   'ai_saved_providers_pkey',
+  'free_ai_pauses_pkey',
 ];
 const backend = path.resolve(__dirname, '..');
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-ai-migrate-'));
@@ -97,11 +99,18 @@ async function freshLane(url) {
   const savedPlaintextRejected = await rejected(db, saveOther, [user, 'sk-plaintext']);
   await db.query(saveOther, [user, 'v1:aXY=:Y3Q=']);
   const savedSecondRejected = await rejected(db, saveOther, [user, 'v1:aXY=:Y3Q=']);
+  // The free AI holds no key; every other provider must hold one.
+  const saveFree = `INSERT INTO ai_saved_providers ("userId", provider, "encryptedApiKey", "consentDisclosure", "consentedAt", "updatedAt") VALUES ($1, $2, $3, 'free-2026-10', now(), now())`;
+  const missingKeyRejected = await rejected(db, saveFree, [user, 'anthropic', null]);
+  const freeKeyRejected = await rejected(db, saveFree, [user, 'career-companion', 'v1:aXY=:Y3Q=']);
+  await db.query(saveFree, [user, 'career-companion', null]);
   await db.query('ROLLBACK');
   assert(plaintextRejected, 'an unsealed key must be rejected');
   assert(secondRejected, 'a second configuration for the same user must be rejected');
   assert(savedPlaintextRejected, 'an unsealed key of another provider must be rejected');
   assert(savedSecondRejected, 'a second key for the same provider must be rejected');
+  assert(missingKeyRejected, 'a provider other than the free AI must hold a key');
+  assert(freeKeyRejected, 'the free AI must hold no key');
   const { uniques } = await integrity(db);
   for (const name of NEW_UNIQUES) assert(uniques.includes(name), `missing ${name}`);
   await db.end();
@@ -109,6 +118,7 @@ async function freshLane(url) {
     unsealedKeyRejected: true,
     oneConfigurationPerUser: true,
     oneSavedKeyPerProvider: true,
+    keyOnlyForOwnProviders: true,
   };
 }
 
