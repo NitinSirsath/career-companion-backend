@@ -136,7 +136,11 @@ JOIN applications a ON a.id = x."applicationId" WHERE e."userId" <> a."userId";
 | `GMAIL_TOKEN_ENCRYPTION_KEY` | Existing AES-256 key; preserve it to read existing encrypted tokens. |
 | `AI_USER_DAILY_CALL_LIMIT` | Integer 0–5000, default 500, **per user** per UTC day (BYO AI). Every call sent counts, including refused calls, retries and sample tests. 0 pauses all AI calls for everyone (kill switch). It is Career Companion's own safeguard, not a provider quota or a currency budget. |
 | `AI_CREDENTIAL_ENCRYPTION_KEY` | 64 hex characters (32 bytes), dedicated to users' AI provider keys. Required in production and must differ from `GMAIL_TOKEN_ENCRYPTION_KEY` (startup check). Back it up: losing it makes every stored AI key unreadable (users see "Enter your API key again"). |
-| `AI_DAILY_CALL_LIMIT`, `GEMINI_API_KEY`, `GEMINI_RELEVANCE_MODEL`, `GEMINI_EXTRACTION_MODEL` | **Removed** (BYO AI). Production startup refuses to start while any of them is set: there is no server AI key, and models come from the code catalog. |
+| `AI_DAILY_CALL_LIMIT`, `GEMINI_API_KEY`, `GEMINI_RELEVANCE_MODEL`, `GEMINI_EXTRACTION_MODEL` | **Removed** (BYO AI). Production startup refuses to start while any of them is set: models come from the code catalog. |
+| `FREE_AI_OPENROUTER_KEY` | The free AI (owner, 24 Oct 2026): Career Companion's own OpenRouter key, the only server AI key. A secret, never stored per user or logged. Empty: the free AI is not offered. Its credit limit on openrouter.ai is the free AI's budget ($10 a month). |
+| `FREE_AI_ENABLED` | `false` stops the free AI for everyone: its users' mails wait (`FREE_AI_OFF`). Empty or `true`: on. |
+| `AI_FREE_DAILY_CALL_LIMIT` | Integer 0–5000, default 250 (about 200 mails), per free AI user per UTC day. Users on their own key keep `AI_USER_DAILY_CALL_LIMIT`. |
+| `AI_EMAIL_WORKER_CONCURRENCY` | 1 to 3, default 3: mails the mail reader works on at once, for all users together. Picked by the free AI load test (24 Oct 2026: 10 users with 50 mails each read in 10 minutes at 3, 30 at 1, no busy answer). |
 | `DISCORD_USER_ID` | Owner of the existing `DISCORD_WEBHOOK_URL`; no owner means delivery is skipped. Other users never use this webhook. |
 | `MCP_ALLOWED_HOSTS` | Required in production (ADR-0002): comma-separated hostnames, no scheme or port, that the `Host` header may name on `/mcp`. Outside production it defaults to `localhost,127.0.0.1,[::1]`. |
 | `MCP_ALLOWED_ORIGINS` | Hostnames a present `Origin` may name on `/mcp`. Default empty: requests with any `Origin` are rejected; requests without one pass. |
@@ -208,7 +212,8 @@ New deadlines use explicit parsing anchored to the email's received UTC date (on
 Check `/ready` for all workers registered; `/health` only proves the HTTP process is up. Logs include worker_registered, workers_ready, *_worker_start_failed, worker_start_gave_up and queue_error. Startup retries failed workers only, then exits 1. Driver errors include category and allowlisted code, never messages or stacks. Readiness intentionally does not probe database availability after startup.
 
 2026-10-03: Scheduled Gmail fan-out uses the existing per-user request/attempt
-claims. It runs twice daily in Asia/Kolkata with startup and missed-slot catch-up.
+claims. It runs every hour in Asia/Kolkata (twice daily until 24 Oct 2026) with startup and
+missed-slot catch-up.
 Registration participates in bounded startup retries and readiness. The local
 crash harness (`scripts/test-gmail-crash.cjs`) verifies SIGKILL recovery on an empty
 explicit `*_crash_test` database. Neither harness evidence nor registration proves
