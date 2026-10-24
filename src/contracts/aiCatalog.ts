@@ -13,7 +13,13 @@ export const AI_ROLES = ['fast', 'detailed'] as const;
 /** `fast` runs relevance screening; `detailed` runs job-data extraction. */
 export type AIRole = (typeof AI_ROLES)[number];
 
-export const AI_PROVIDER_IDS = ['gemini', 'openai', 'anthropic', 'openrouter'] as const;
+export const AI_PROVIDER_IDS = [
+  'gemini',
+  'openai',
+  'anthropic',
+  'openrouter',
+  'career-companion',
+] as const;
 export type AIProviderId = (typeof AI_PROVIDER_IDS)[number];
 
 export interface CatalogModel {
@@ -54,9 +60,15 @@ export interface CatalogProvider {
   /** Fixed endpoint. No user input ever decides where a key or email content is sent. */
   baseUrl: string;
   status: 'supported' | 'hidden';
-  costModel: 'FREE_TIER_AVAILABLE' | 'PAID_ONLY';
+  /**
+   * `user`: the user's own key (ADR-0001). `career_companion`: the free AI, which runs on Career
+   * Companion's own OpenRouter key (owner, 24 Oct 2026); the user has no key and no model choice.
+   */
+  keyOwner: 'user' | 'career_companion';
+  costModel: 'FREE_TIER_AVAILABLE' | 'PAID_ONLY' | 'FREE';
   recommendedNote: string;
-  links: { apiKeys: string; billing: string; dataUse: string };
+  /** No key or billing page for the free AI. */
+  links: { apiKeys: string | null; billing: string | null; dataUse: string };
   setupSteps: readonly string[];
   disclosure: {
     /** Recorded with each user's consent. Change it whenever the text changes. */
@@ -77,6 +89,24 @@ export const AI_SUBSCRIPTION_NOTE =
 export const AI_DATA_SENT_SUMMARY =
   'For each new email: sender, subject, Gmail labels and a short preview (up to 1,000 characters). For job-related emails, also the email text (up to 8,000 characters). Nothing else from your mailbox is sent.';
 
+const GPT_6_LUNA: CatalogModel = {
+  id: 'openai/gpt-6-luna',
+  displayName: 'GPT-6 Luna',
+  roles: ['fast', 'detailed'],
+  recommendedFor: ['fast', 'detailed'],
+  temperature: null,
+  reasoning: { enabled: false },
+  structuredOutput: 'openai_json_schema',
+  timeoutMs: 60_000,
+  retiresOn: null,
+  evaluation: {
+    date: '2026-10-22',
+    report:
+      'src/eval/ai/reports/2026-10-22T19-22-12-192Z_openrouter_openai_gpt-6-luna_openai_gpt-6-luna.json',
+  },
+  noOutputLimit: true,
+};
+
 export const AI_CATALOG: readonly CatalogProvider[] = [
   {
     id: 'gemini',
@@ -84,6 +114,7 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
     protocol: 'gemini',
     baseUrl: 'https://generativelanguage.googleapis.com',
     status: 'hidden',
+    keyOwner: 'user',
     costModel: 'FREE_TIER_AVAILABLE',
     recommendedNote: 'Quickest start: a free tier is available.',
     links: {
@@ -168,6 +199,7 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
     protocol: 'openai',
     baseUrl: 'https://api.openai.com/v1',
     status: 'hidden',
+    keyOwner: 'user',
     costModel: 'PAID_ONLY',
     recommendedNote: 'Good if you already pay for the OpenAI API.',
     links: {
@@ -225,6 +257,7 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
     protocol: 'anthropic',
     baseUrl: 'https://api.anthropic.com',
     status: 'hidden',
+    keyOwner: 'user',
     costModel: 'PAID_ONLY',
     recommendedNote: 'Good if you already pay for the Claude API.',
     links: {
@@ -284,6 +317,7 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
     protocol: 'openrouter',
     baseUrl: 'https://openrouter.ai/api/v1',
     status: 'supported',
+    keyOwner: 'user',
     costModel: 'PAID_ONLY',
     recommendedNote:
       'One key for several small, low-cost models. Prepaid credit; small amounts work.',
@@ -335,23 +369,7 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
       // sent; OpenRouter then holds the worst case on the key's credit limit before each call (about
       // $0.07 for Luna, $1.30 for Sol). Azure's safety filter blocks an email that tries to give the
       // AI orders: the answer is unusable and the mail waits for the user (owner exception).
-      {
-        id: 'openai/gpt-6-luna',
-        displayName: 'GPT-6 Luna',
-        roles: ['fast', 'detailed'],
-        recommendedFor: ['fast', 'detailed'],
-        temperature: null,
-        reasoning: { enabled: false },
-        structuredOutput: 'openai_json_schema',
-        timeoutMs: 60_000,
-        retiresOn: null,
-        evaluation: {
-          date: '2026-10-22',
-          report:
-            'src/eval/ai/reports/2026-10-22T19-22-12-192Z_openrouter_openai_gpt-6-luna_openai_gpt-6-luna.json',
-        },
-        noOutputLimit: true,
-      },
+      GPT_6_LUNA,
       // Detailed only. It always thinks; under 60 s it sometimes gave no answer in time.
       {
         id: 'google/gemini-3.8-flash',
@@ -388,6 +406,30 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
       },
     ],
   },
+  // The free AI (owner, 24 Oct 2026): OpenRouter on Career Companion's own key, offered only while
+  // that key is set and the free AI is switched on. GPT-6 Luna for both steps, with no choice.
+  {
+    id: 'career-companion',
+    displayName: 'Career Companion free AI',
+    protocol: 'openrouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    status: 'supported',
+    keyOwner: 'career_companion',
+    costModel: 'FREE',
+    recommendedNote: 'Free, runs on OpenRouter. Shared by everyone, so it can be slow sometimes.',
+    links: { apiKeys: null, billing: null, dataUse: 'https://openrouter.ai/privacy' },
+    setupSteps: [],
+    disclosure: {
+      version: 'career-companion-free-2026-10-24',
+      summary:
+        "Your emails go to OpenRouter on Career Companion's account. OpenRouter passes each request to GPT-6 Luna.",
+      training:
+        'Career Companion asks OpenRouter to use only servers that keep nothing, so they cannot train on your mail.',
+      residency:
+        'OpenRouter is based in the US. GPT-6 Luna runs on Microsoft Azure servers in the US or Europe. OpenRouter picks the server for each request.',
+      reviewedOn: '2026-10-24',
+    },
+    models: [GPT_6_LUNA],
 ];
 
 export function getCatalogProvider(id: string): CatalogProvider | undefined {
