@@ -215,7 +215,6 @@ export async function setupPauses(
   }
   const rows = await prisma.aIModelPause.findMany({ where: { userId } });
   return { pauses: runningPauses(config, rows, now), rows };
-
 }
 
 /** Of the pauses on models these roles use, the one that ends last. */
