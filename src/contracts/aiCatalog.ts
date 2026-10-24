@@ -430,6 +430,7 @@ export const AI_CATALOG: readonly CatalogProvider[] = [
       reviewedOn: '2026-10-24',
     },
     models: [GPT_6_LUNA],
+  },
 ];
 
 export function getCatalogProvider(id: string): CatalogProvider | undefined {
