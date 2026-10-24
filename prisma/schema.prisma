@@ -553,7 +553,8 @@ model AIConfiguration {
   userId            String         @id @db.Uuid
   /// Catalog provider ID (code catalog, not a database catalog).
   provider          String
-  encryptedApiKey   String
+  /// null only for the free AI ('career-companion'), which runs on Career Companion's own key.
+  encryptedApiKey   String?
   /// null follows the catalog's recommended model for the role.
   fastModel         String?
   detailedModel     String?
@@ -585,7 +586,8 @@ model AISavedProvider {
   userId            String         @db.Uuid
   /// Catalog provider ID.
   provider          String
-  encryptedApiKey   String
+  /// null only for the free AI ('career-companion').
+  encryptedApiKey   String?
   /// null follows the catalog's recommended model for the role.
   fastModel         String?
   detailedModel     String?
@@ -628,6 +630,25 @@ model AIModelPause {
 
   @@id([userId, model])
   @@map("ai_model_pauses")
+}
+
+/// One model's pause on the free AI (owner, 24 Oct 2026), shared by every user on it: OpenRouter was
+/// busy or limited Career Companion's key, the key's credit ran out, or the key or the model failed.
+/// A success on the model removes its row.
+model FreeAIPause {
+  /// Catalog model ID.
+  model               String        @id
+  reason              AIAccessIssue
+  resumesAt           DateTime
+  /// Busy answers in a row: each makes the next pause longer.
+  consecutiveFailures Int           @default(1)
+  /// The exact failure that started or last extended the pause (contract AIFailure).
+  lastFailure         Json?
+  /// When the owner was told about a credit, key or model problem; null until then.
+  alertedAt           DateTime?
+  updatedAt           DateTime      @updatedAt
+
+  @@map("free_ai_pauses")
 }
 
 /// Career Companion's own per-user counts for one UTC day. `calls` is the safety limit counter.
