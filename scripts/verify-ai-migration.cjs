@@ -23,6 +23,7 @@ const NEW_MIGRATIONS = [
   '20261015100000_ai_failure_details',
   '20261022100000_ai_saved_providers',
   '20261024100000_free_ai',
+  '20261024200000_ai_operation_completed_index',
 ];
 const NEW_UNIQUES = [
   'ai_configurations_pkey',
