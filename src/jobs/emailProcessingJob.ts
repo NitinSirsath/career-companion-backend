@@ -4,8 +4,9 @@ import { getQueue } from '../services/queue';
 import { AIAccessError, AIProviderError, TerminalAIError } from '../services/ai/errors';
 import { releaseClaimsAtStart } from '../services/ai/operations';
 import { processEmail } from '../services/ai/pipeline';
-import { endTest, resumeAfterPause } from '../services/ai/usage';
+import { endTest, resumeWhenWaitEnds } from '../services/ai/usage';
 import { markEmailProcessing, recordEmailFailure, returnEmailToPending } from '../services/email';
+import { emailWorkerConcurrency } from '../utils/config';
 import { logDebug, logEvent, logWarn, logError } from '../utils/log';
 
 /**
@@ -93,10 +94,11 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
       // email returns to PENDING with no error fields, the job is acknowledged, and no email
       // attempt is used. The reason lives once, on the user's AI configuration or the model's
       // pause. A call with no answer in time comes here too, so its next try after the pause is
-      // not dropped. Our own daily limit ends at midnight UTC: the mail is read then, by itself.
+      // not dropped. Our own daily limit ends at midnight UTC, and the free AI's shared pause at
+      // its end: the mail is read then, by itself.
       await returnEmailToPending(userId, emailId);
       await withdrawDelivery(job.id);
-      if (err.reason === 'SAFETY_LIMIT') await resumeAfterPause(userId, err.resumesAt);
+      await resumeWhenWaitEnds(userId, err);
       logEvent('job_waiting_for_ai', {
         jobId: job.id,
         emailId,
@@ -135,9 +137,11 @@ export async function processEmailJob(job: JobWithMetadata<EmailProcessingJobDat
  * Delivery invariant: exactly one job per callback. Installed pg-boss 12.31 already
  * defaults to batchSize=1; registration states it explicitly. If more than one job is ever
  * delivered, the callback fails so pg-boss retries every delivered job — none is acknowledged
- * without an attempted, attributable outcome.
+ * without an attempted, attributable outcome. `localConcurrency` runs up to that many callbacks at
+ * once, one job each, for all users together (AI_EMAIL_WORKER_CONCURRENCY, picked by a load test).
  */
-export const EMAIL_WORKER_OPTIONS = { includeMetadata: true, batchSize: 1 } as const;
+export const emailWorkerOptions = () =>
+  ({ includeMetadata: true, batchSize: 1, localConcurrency: emailWorkerConcurrency() }) as const;
 
 export async function handleEmailJobs(jobs: JobWithMetadata<EmailProcessingJobData>[]) {
   if (jobs.length !== 1) {
@@ -154,6 +158,11 @@ export async function handleEmailJobs(jobs: JobWithMetadata<EmailProcessingJobDa
 export async function startEmailProcessingWorker() {
   const queue = await getQueue();
   await releaseClaimsAtStart();
-  await queue.work(EMAIL_PROCESSING_JOB, EMAIL_WORKER_OPTIONS, handleEmailJobs);
-  logDebug('worker_registered', { queue: EMAIL_PROCESSING_JOB, batchSize: 1 });
+  const options = emailWorkerOptions();
+  await queue.work(EMAIL_PROCESSING_JOB, options, handleEmailJobs);
+  logDebug('worker_registered', {
+    queue: EMAIL_PROCESSING_JOB,
+    batchSize: 1,
+    localConcurrency: options.localConcurrency,
+  });
 }
