@@ -153,7 +153,7 @@ export const DEFAULT_FREE_AI_DAILY_CALL_LIMIT = 250;
 /** AI calls per free AI user per UTC day, 0–5000. Users on their own key keep their own limit. */
 export function parseAI_FREE_DAILY_CALL_LIMIT(value: string | undefined): number {
   if (value === undefined || value === '') return DEFAULT_FREE_AI_DAILY_CALL_LIMIT;
-  if (!/^\\d+$/.test(value) || Number(value) > 5000)
+  if (!/^\d+$/.test(value) || Number(value) > 5000)
     throw new Error('Invalid AI_FREE_DAILY_CALL_LIMIT: must be an integer from 0 to 5000');
   return Number(value);
 }
