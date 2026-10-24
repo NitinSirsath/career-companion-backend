@@ -48,7 +48,8 @@ describe('providers offered in production', () => {
     vi.stubEnv('AI_SHOW_HIDDEN_PROVIDERS', 'true');
     expect(isOffered(hidden)).toBe(true);
     expect(offeredProvider(hidden.id)?.id).toBe(hidden.id);
-    expect(AI_CATALOG.filter(isOffered)).toHaveLength(AI_CATALOG.length);
+    // Every provider but the free AI, which needs its own key on the server.
+    expect(AI_CATALOG.filter(isOffered)).toHaveLength(AI_CATALOG.length - 1);
   });
 
   it('are all of them outside production, with or without the switch', () => {
