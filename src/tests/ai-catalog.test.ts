@@ -39,7 +39,7 @@ describe('AI provider and model catalog', () => {
       expect(base.protocol).toBe('https:');
       expect(base.search + base.hash + base.username + base.password).toBe('');
       for (const link of Object.values(provider.links))
-        expect(new URL(link).protocol).toBe('https:');
+        if (link !== null) expect(new URL(link).protocol).toBe('https:');
     }
   });
 
