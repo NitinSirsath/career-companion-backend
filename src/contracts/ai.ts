@@ -6,6 +6,7 @@
  */
 import { z } from 'zod';
 import { AI_ROLES } from './aiCatalog';
+import { MailCategorySchema } from './conversation';
 
 const IsoDateTime = z.iso.datetime({ offset: true });
 
@@ -320,6 +321,68 @@ export type AISampleTestResponse = z.infer<typeof AISampleTestResponseSchema>;
  */
 export const ReadWaitingMailResponseSchema = AISettingsResponseSchema;
 export type ReadWaitingMailResponse = z.infer<typeof ReadWaitingMailResponseSchema>;
+
+// ─── GET /api/ai/reading ────────────────────────────────────────────────────
+
+/**
+ * Where one of the user's newest mails is now, for the live feed. SORTING: the fast model decides
+ * whether it is a job mail. READING_DETAILS: the detailed model reads a job mail. NOT_JOB and JOB:
+ * the answer. STOPPED: it waits for the user's OK.
+ */
+export const AIReadingStepSchema = z.object({
+  emailId: z.uuid(),
+  subject: z.string().nullable(),
+  step: z.enum(['SORTING', 'READING_DETAILS', 'NOT_JOB', 'JOB', 'STOPPED']),
+  /** The catalog provider and model of the step's call. */
+  provider: z.string().nullable(),
+  model: z.string().nullable(),
+  /** JOB only: what the AI found. */
+  category: MailCategorySchema.nullable(),
+  companyName: z.string().nullable(),
+  jobTitle: z.string().nullable(),
+  at: IsoDateTime,
+});
+export type AIReadingStep = z.infer<typeof AIReadingStepSchema>;
+
+/** A job mail the batch found. Its conversation opens by the mail's ID. */
+export const AIReadingJobMailSchema = z.object({
+  emailId: z.uuid(),
+  category: MailCategorySchema.nullable(),
+  companyName: z.string().nullable(),
+  jobTitle: z.string().nullable(),
+});
+export type AIReadingJobMail = z.infer<typeof AIReadingJobMailSchema>;
+
+/**
+ * "AI is reading your mails" (owner, 24 Oct 2026): how far the AI is with the user's newest
+ * mails. The batch starts at the sync that saved the user's oldest mail not done yet; a mail that
+ * stopped and waits for the user's OK counts as done. Counting only: no AI call.
+ * - NONE: nothing waits. READING: mails are read or wait in line (`inLine`: none of the user's is
+ *   done yet and other users' mails come first). PAUSED: it goes on by itself at `resumesAt` (a
+ *   model's pause, or the daily limit). STOPPED: no known end and nothing for the user to fix (the
+ *   free AI's budget or a problem on Career Companion's side, the free AI off, AI paused).
+ *   NEEDS_YOU: AI not set up, or the user's own key, billing or model.
+ * - `secondsLeft`: an estimate, shown as "about"; null while a pause holds back part of the mail,
+ *   in batch mode, or when the line cannot be read. Never another user's numbers.
+ */
+export const AIReadingStatusResponseSchema = z.object({
+  state: z.enum(['NONE', 'READING', 'PAUSED', 'STOPPED', 'NEEDS_YOU']),
+  reason: AIAccessReasonSchema.nullable(),
+  /** The active provider, and the model a pause or problem is about. */
+  provider: z.string().nullable(),
+  model: z.string().nullable(),
+  notDone: z.number().int(),
+  done: z.number().int(),
+  total: z.number().int(),
+  inLine: z.boolean(),
+  secondsLeft: z.number().int().nullable(),
+  resumesAt: IsoDateTime.nullable(),
+  /** The newest mails the AI works on or answered, up to 10, oldest first. */
+  steps: z.array(AIReadingStepSchema),
+  /** The job mails the batch found: how many, and the newest three. NONE: those of the last batch. */
+  jobMails: z.object({ count: z.number().int(), newest: z.array(AIReadingJobMailSchema) }),
+});
+export type AIReadingStatusResponse = z.infer<typeof AIReadingStatusResponseSchema>;
 
 // ─── Error details ──────────────────────────────────────────────────────────
 
