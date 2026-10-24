@@ -25,6 +25,7 @@ import {
   removeProvider,
   saveProvider,
 } from '../services/ai/connections';
+import { readingStatus } from '../services/ai/readingStatus';
 import { readSettings, runSampleTest } from '../services/ai/settings';
 import { readWaitingNow } from '../services/ai/waiting';
 
@@ -91,6 +92,11 @@ router.post(
     EmptyBody.parse(req.body ?? {});
     return runSampleTest(req.auth!.user.id);
   }),
+);
+
+router.get(
+  '/reading',
+  handle((req) => readingStatus(req.auth!.user.id)),
 );
 
 router.post(
