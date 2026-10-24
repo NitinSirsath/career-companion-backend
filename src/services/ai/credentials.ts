@@ -35,7 +35,9 @@ export function sealApiKey(userId: string, apiKey: string): string {
   return `${FORMAT}:${iv}:${ciphertext}`;
 }
 
-export function openApiKey(userId: string, sealed: string): string {
+/** A setup with no key (only the free AI has none) cannot be opened either. */
+export function openApiKey(userId: string, sealed: string | null): string {
+  if (sealed === null) throw new CredentialUnreadableError();
   const key = loadAICredentialKey();
   const [format, iv, ciphertext, extra] = sealed.split(':');
   if (format !== FORMAT || !iv || !ciphertext || extra !== undefined)
