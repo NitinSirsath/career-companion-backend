@@ -157,7 +157,9 @@ curl -X PATCH http://localhost:3000/api/applications/<id>/status \
 
 ### User-provided AI (ADR-0001)
 
-Every AI call uses the session or job user's own provider key, from a curated code catalog (`src/contracts/aiCatalog.ts`, synced to the frontend). There is no server AI key. A user can connect several providers, one key each, and exactly one is active: it does all AI work (`ai_configurations`). The others wait in `ai_saved_providers` and are called only for a check, a key change or a model change the user starts. Nothing switches the active provider by itself. Providers stay `hidden`, so they are not offered in production, until they are certified (docs repo `docs/ai/provider-evaluation.md`).
+Every AI call uses the session or job user's own provider key, from a curated code catalog (`src/contracts/aiCatalog.ts`, synced to the frontend), except the free AI below. A user can connect several providers, one key each, and exactly one is active: it does all AI work (`ai_configurations`). The others wait in `ai_saved_providers` and are called only for a check, a key change or a model change the user starts. Nothing switches the active provider by itself. Providers stay `hidden`, so they are not offered in production, until they are certified (docs repo `docs/ai/provider-evaluation.md`).
+
+**The free AI** (owner, 24 Oct 2026; ADR-0001 amendment): the catalog provider `career-companion` runs OpenRouter with GPT-6 Luna for both steps on Career Companion's own key (`FREE_AI_OPENROUTER_KEY`), for users who choose it. It is offered only while that key is set and `FREE_AI_ENABLED` is not `false`. Connecting it takes only the consent (`PUT /api/ai/providers/career-companion` with `consentDisclosure`, and `makeActive`); a key, a model choice or "Check key" is refused. Its setup holds no key (`encryptedApiKey` is null, and only for it). One pause per model is shared by everyone on it (`free_ai_pauses`): a busy or rate-limited answer pauses it for all of them, growing as for a user's own model; a used-up credit (402), a refused key or a missing model pauses it for an hour, is never shown as the user's key problem, and tells the owner once on Discord. Access reasons `FREE_AI_BUSY`, `FREE_AI_BUDGET`, `FREE_AI_PROBLEM` and `FREE_AI_OFF`. Mail that meets the shared pause queues its user's read for its end. Its daily limit is `AI_FREE_DAILY_CALL_LIMIT` (default 250 calls, about 200 mails).
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -232,8 +234,9 @@ Workers retry registration with bounded backoff (about two minutes of waits, plu
 
 ### Automatic Gmail sync (Sprint 7)
 
-With the backend running, connected accounts sync at 00:00 and 18:00 in
-`GMAIL_SCHEDULED_SYNC_TZ` (default `Asia/Kolkata`). Startup checks for a missed slot;
+With the backend running, connected accounts sync every hour, on the hour, in
+`GMAIL_SCHEDULED_SYNC_TZ` (default `Asia/Kolkata`). On a host that sleeps when idle (Render's
+free plan), keep it awake with an outside check that calls `/health` every 10 minutes. Startup checks for a missed slot;
 pg-boss also catches a missed slot after suspension. Successful/recent and busy
 accounts are skipped. Set `GMAIL_SCHEDULED_SYNC_ENABLED=false` and restart to
 remove the durable schedule before rolling back scheduling code. Status reports
