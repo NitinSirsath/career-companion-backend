@@ -97,6 +97,12 @@ export const AIAccessReasonSchema = z.enum([
   'PROVIDER_UNAVAILABLE',
   'SAFETY_LIMIT',
   'PAUSED',
+  // The free AI (owner, 24 Oct 2026): one pause for every user on it, never the user's to fix.
+  // Busy or rate limited; Career Companion's credit used up; its key or the model failed; off.
+  'FREE_AI_BUSY',
+  'FREE_AI_BUDGET',
+  'FREE_AI_PROBLEM',
+  'FREE_AI_OFF',
 ]);
 export type AIAccessReason = z.infer<typeof AIAccessReasonSchema>;
 
@@ -112,7 +118,8 @@ export const AIModelPauseSchema = z.object({
   roles: z.array(z.enum(AI_ROLES)),
   /**
    * RATE_LIMITED, PROVIDER_BUSY, or PROVIDER_UNAVAILABLE (older pauses). No answer in time pauses
-   * as PROVIDER_BUSY: `failure.kind` says NO_ANSWER_IN_TIME.
+   * as PROVIDER_BUSY: `failure.kind` says NO_ANSWER_IN_TIME. On the free AI, the shared pause:
+   * FREE_AI_BUSY, FREE_AI_BUDGET or FREE_AI_PROBLEM, with no test.
    */
   reason: AIAccessReasonSchema,
   resumesAt: IsoDateTime,
@@ -221,7 +228,10 @@ export type AISettingsResponse = z.infer<typeof AISettingsResponseSchema>;
  * later one stays inactive unless `makeActive` is true.
  */
 export const SaveAIProviderRequestSchema = z.strictObject({
-  /** Required for a provider not connected yet. Omitted or empty keeps the saved key. */
+  /**
+   * Required for a provider not connected yet. Omitted or empty keeps the saved key. The free AI
+   * takes no key and no model choice: only the consent and `makeActive`.
+   */
   apiKey: z.string().max(512).optional(),
   /** null = recommended; omitted = keep the current choice (connected provider) or recommended. */
   models: z
