@@ -17,6 +17,7 @@ import type {
 } from '../../contracts/ai';
 import { NEEDS_ATTENTION_ISSUES, modelsFor, offeredProvider } from './access';
 import { CredentialUnreadableError, openApiKey, sealApiKey } from './credentials';
+import { isFreeAI, noFreeAIKey } from './freeAI';
 import type { BoundModels } from './capabilities';
 import { reofferPendingEmails } from './offer';
 import { createProviderClient, VerifyResult } from './providers';
@@ -171,6 +172,57 @@ async function saveInactive(
 }
 
 /**
+ * Connects the free AI (owner, 24 Oct 2026): the user agrees to what is sent, and nothing else.
+ * There is no key to verify: it runs on Career Companion's key. The first provider becomes active,
+ * a later one only with `makeActive`, as for any provider. Connecting it again changes nothing.
+ */
+async function connectFreeAI(
+  userId: string,
+  provider: CatalogProvider,
+  request: SaveAIProviderRequest,
+): Promise<SaveAIProviderResponse> {
+  if (request.apiKey !== undefined || request.models !== undefined)
+    throw new AppError(400, 'VALIDATION_ERROR', 'The free AI takes no key and no model choice.');
+  const [active, saved] = await Promise.all([
+    activeProvider(userId),
+    savedSetup(userId, provider.id),
+  ]);
+  const verified = { verification: 'VERIFIED', verificationFailure: null } as const;
+  if (active === provider.id || saved) {
+    const switches = !!request.makeActive && active !== provider.id;
+    return {
+      ...(switches ? await activateProvider(userId, provider.id) : await readSettings(userId)),
+      ...verified,
+    };
+  }
+  if (request.consentDisclosure !== provider.disclosure.version)
+    throw new AppError(400, 'VALIDATION_ERROR', 'Confirm the data-use summary for this provider.');
+  const now = new Date();
+  const setup = {
+    userId,
+    provider: provider.id,
+    encryptedApiKey: null,
+    verifiedAt: now,
+    lastCheckedAt: now,
+    consentDisclosure: provider.disclosure.version,
+    consentedAt: now,
+  };
+  if (active) await prisma.aISavedProvider.create({ data: setup });
+  else await prisma.aIConfiguration.create({ data: setup });
+  logEvent('ai_provider_saved', {
+    userId,
+    provider: provider.id,
+    verification: 'VERIFIED',
+    connected: true,
+    keyChanged: false,
+  });
+  if (active && request.makeActive)
+    return { ...(await activateProvider(userId, provider.id)), ...verified };
+  if (!active) await reofferPendingEmails(userId);
+  return { ...(await readSettings(userId)), ...verified };
+}
+
+/**
  * Connects a provider, replaces its key, or changes its models, after verifying them. The active
  * provider, and the first provider when nothing is active, go to the active setup. Any other is
  * saved as inactive and becomes active only with `makeActive`.
@@ -181,6 +233,7 @@ export async function saveProvider(
   request: SaveAIProviderRequest,
 ): Promise<SaveAIProviderResponse> {
   const provider = offered(providerId);
+  if (isFreeAI(provider.id)) return connectFreeAI(userId, provider, request);
   const { makeActive, ...save } = request;
   const [active, saved] = await Promise.all([
     activeProvider(userId),
@@ -256,6 +309,7 @@ export async function checkProvider(
   userId: string,
   providerId: string,
 ): Promise<CheckAIProviderResponse> {
+  if (isFreeAI(providerId)) throw noFreeAIKey();
   if ((await activeProvider(userId)) === providerId) return checkSettings(userId);
   const saved = await savedSetup(userId, providerId);
   if (!saved) throw notConnected();
