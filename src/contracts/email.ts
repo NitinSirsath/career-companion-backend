@@ -84,6 +84,11 @@ export const EmailAIReasonSchema = z.enum([
   'INVALID_REQUEST',
   'INTERNAL_ERROR',
   'GMAIL_FAILED',
+  // The free AI's shared pause, or the free AI switched off (owner, 24 Oct 2026).
+  'FREE_AI_BUSY',
+  'FREE_AI_BUDGET',
+  'FREE_AI_PROBLEM',
+  'FREE_AI_OFF',
 ]);
 export type EmailAIReason = z.infer<typeof EmailAIReasonSchema>;
 
