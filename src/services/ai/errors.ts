@@ -239,7 +239,11 @@ export type AccessReason =
   | 'PROVIDER_BUSY'
   | 'PROVIDER_UNAVAILABLE'
   | 'SAFETY_LIMIT'
-  | 'PAUSED';
+  | 'PAUSED'
+  | FreeAIReason;
+
+/** The free AI's own reasons: a pause shared by every user on it, or the free AI switched off. */
+export type FreeAIReason = 'FREE_AI_BUSY' | 'FREE_AI_BUDGET' | 'FREE_AI_PROBLEM' | 'FREE_AI_OFF';
 
 /**
  * The user's AI work cannot run now. A waiting condition, not a processing failure: the email
