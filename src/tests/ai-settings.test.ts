@@ -82,8 +82,11 @@ describe('AI settings API: authentication and reading', () => {
     expect(res.body).toMatchObject({
       configured: false,
       provider: null,
-      // Outside production every catalog provider is offered, hidden ones too, in catalog order.
-      offeredProviders: AI_CATALOG.map((provider) => provider.id),
+      // Outside production every catalog provider is offered, hidden ones too, in catalog order;
+      // the free AI only while its key is set (none in tests).
+      offeredProviders: AI_CATALOG.filter((provider) => provider.keyOwner === 'user').map(
+        (provider) => provider.id,
+      ),
       models: null,
       access: { state: 'NOT_SET_UP', reason: 'NOT_SET_UP', verified: false },
       usageToday: { day: utcDay(new Date()), calls: 0 },

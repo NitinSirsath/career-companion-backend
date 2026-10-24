@@ -1,7 +1,8 @@
 import { CronExpressionParser } from 'cron-parser';
 import { gmailScheduleConfig } from '../utils/config';
 export const GMAIL_SCHEDULE_QUEUE = 'gmail-scheduled-sync-job';
-export const GMAIL_SYNC_CRON = '0 0,18 * * *';
+/** Every hour, on the hour (owner, 24 Oct 2026). */
+export const GMAIL_SYNC_CRON = '0 * * * *';
 let registered = false;
 export const isGmailScheduleRegistered = () => registered;
 export const setGmailScheduleRegistered = (value: boolean) => {

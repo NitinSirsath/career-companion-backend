@@ -30,7 +30,8 @@ import {
   noteProviderSuccess,
   recordTokens,
   reserveUserCall,
-  resumeAfterPause,
+  afterProviderFailure,
+  resumeWhenWaitEnds,
 } from './usage';
 import { failureError, failureKind } from './operations';
 import * as config from '../../utils/config';
@@ -319,7 +320,11 @@ async function claimBatch(run: BatchRun, items: Candidate[]) {
       if (claim.count === 1) claimed.push(item);
     }
     if (!claimed.length) throw new RetryableAIError('AI operation not ready');
-    await reserveUserCall(tx, { userId, model: model.id, emailId: onlyEmail(claimed) }, now);
+    await reserveUserCall(
+      tx,
+      { userId, provider: access.provider, model: model.id, emailId: onlyEmail(claimed) },
+      now,
+    );
     if (run.updateEmails)
       await tx.email.updateMany({
         where: {
@@ -537,7 +542,7 @@ async function failBatch(
       return noteProviderFailure(tx, ctx.access, 'OUTCOME_UNKNOWN', failedAt, pause);
     return null;
   });
-  await resumeAfterPause(ctx.userId, resumesAt);
+  await afterProviderFailure(ctx.access, resumesAt);
   logWarn('ai_batch_failed', {
     batchId: ctx.batchId,
     userId: ctx.userId,
@@ -653,7 +658,7 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
   const access = withPause(user, blockingPause(user.pauses, ['fast']));
   if (access.state !== 'READY') {
     // Our own daily limit ends at midnight UTC: the waiting mail is read then, by itself.
-    if (access.reason === 'SAFETY_LIMIT') await resumeAfterPause(userId, access.resumesAt);
+    await resumeWhenWaitEnds(userId, access);
     return { batches: 0, emails: 0, stoppedBy: 'access_not_ready' as const };
   }
   const started = Date.now();
@@ -715,9 +720,9 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
         group.forEach((candidate) => handled.add(candidate.emailId));
         // Nothing was claimed: another run or job holds these emails. Skip them and continue.
         if (err instanceof RetryableAIError) continue;
-        // The daily limit was reached during the run: the waiting mail is read after midnight UTC.
-        if (err instanceof AIAccessError && err.reason === 'SAFETY_LIMIT')
-          await resumeAfterPause(userId, err.resumesAt);
+        // The daily limit was reached during the run, or the free AI paused for everyone: the
+        // waiting mail is read when that ends.
+        if (err instanceof AIAccessError) await resumeWhenWaitEnds(userId, err);
         // Every other AI outcome is already recorded on the ledger and the emails: stop this run.
         if (err instanceof AIProviderError) {
           stoppedBy = 'ai_failure';

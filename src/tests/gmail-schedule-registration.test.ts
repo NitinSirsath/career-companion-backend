@@ -20,7 +20,7 @@ it('registers one durable schedule, one worker and one catch-up; disabling remov
   await startGmailScheduledSync();
   await startGmailScheduledSync();
   expect(await boss.getSchedule(GMAIL_SCHEDULE_QUEUE)).toMatchObject({
-    cron: '0 0,18 * * *',
+    cron: '0 * * * *',
     timezone: 'Asia/Kolkata',
     options: expect.objectContaining({ missed: 'once' }),
   });

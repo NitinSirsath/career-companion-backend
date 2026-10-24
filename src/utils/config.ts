@@ -131,6 +131,48 @@ export function parseAI_USER_DAILY_CALL_LIMIT(value: string | undefined): number
 export const userDailyCallLimit = () =>
   parseAI_USER_DAILY_CALL_LIMIT(process.env.AI_USER_DAILY_CALL_LIMIT);
 
+// ─── The free AI (owner, 24 Oct 2026) ───────────────────────────────────────
+
+/**
+ * Career Companion's own OpenRouter key for the free AI. A secret: never stored per user, logged
+ * or sent to the browser. Unset means the free AI is not offered.
+ */
+export const freeAIOpenRouterKey = () => process.env.FREE_AI_OPENROUTER_KEY?.trim() || undefined;
+
+/** The off switch: `false` stops the free AI for everyone. Empty or `true` leaves it on. */
+export function parseFREE_AI_ENABLED(value: string | undefined): boolean {
+  if (value === undefined || value === '' || value === 'true') return true;
+  if (value === 'false') return false;
+  throw new Error('FREE_AI_ENABLED must be empty, true or false');
+}
+export const freeAIEnabled = () => parseFREE_AI_ENABLED(process.env.FREE_AI_ENABLED);
+
+/** About 200 mails: a job mail takes 2 calls. */
+export const DEFAULT_FREE_AI_DAILY_CALL_LIMIT = 250;
+
+/** AI calls per free AI user per UTC day, 0–5000. Users on their own key keep their own limit. */
+export function parseAI_FREE_DAILY_CALL_LIMIT(value: string | undefined): number {
+  if (value === undefined || value === '') return DEFAULT_FREE_AI_DAILY_CALL_LIMIT;
+  if (!/^\d+$/.test(value) || Number(value) > 5000)
+    throw new Error('Invalid AI_FREE_DAILY_CALL_LIMIT: must be an integer from 0 to 5000');
+  return Number(value);
+}
+export const freeDailyCallLimit = () =>
+  parseAI_FREE_DAILY_CALL_LIMIT(process.env.AI_FREE_DAILY_CALL_LIMIT);
+
+/**
+ * Mails the mail reader works on at once, for all users together: 1 to 3, default 3. The load test
+ * of 24 Oct 2026 (10 users, 50 mails each, the free AI) read them in 10 minutes at 3 instead of 30
+ * at 1, with no busy answer.
+ */
+export function parseAI_EMAIL_WORKER_CONCURRENCY(value: string | undefined): number {
+  if (value === undefined || value === '') return 3;
+  if (!/^[1-3]$/.test(value)) throw new Error('AI_EMAIL_WORKER_CONCURRENCY must be 1, 2 or 3');
+  return Number(value);
+}
+export const emailWorkerConcurrency = () =>
+  parseAI_EMAIL_WORKER_CONCURRENCY(process.env.AI_EMAIL_WORKER_CONCURRENCY);
+
 /**
  * Test deploys only: offer the AI catalog's hidden (uncertified) providers in production too.
  * Empty means off; only `true` turns it on.
@@ -361,7 +403,8 @@ function validateProductionSecrets(env: NodeJS.ProcessEnv) {
     throw new Error('AI_CREDENTIAL_ENCRYPTION_KEY must differ from GMAIL_TOKEN_ENCRYPTION_KEY');
 }
 
-// There is no Career Companion AI key: every AI call uses the user's own access (ADR-0001).
+// Every AI call uses the user's own access (ADR-0001), except the free AI: Career Companion's
+// own OpenRouter key, FREE_AI_OPENROUTER_KEY (ADR-0001 amendment, 24 Oct 2026).
 function validateProductionAI(env: NodeJS.ProcessEnv) {
   for (const key of [
     'GEMINI_API_KEY',
@@ -377,6 +420,9 @@ function validateProductionAI(env: NodeJS.ProcessEnv) {
       'AI_DAILY_CALL_LIMIT (global) was replaced by AI_USER_DAILY_CALL_LIMIT (per user)',
     );
   parseAI_USER_DAILY_CALL_LIMIT(env.AI_USER_DAILY_CALL_LIMIT);
+  parseFREE_AI_ENABLED(env.FREE_AI_ENABLED);
+  parseAI_FREE_DAILY_CALL_LIMIT(env.AI_FREE_DAILY_CALL_LIMIT);
+  parseAI_EMAIL_WORKER_CONCURRENCY(env.AI_EMAIL_WORKER_CONCURRENCY);
 }
 
 /** Settings that still work when missing, but only for local development. */

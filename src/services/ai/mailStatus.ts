@@ -208,7 +208,10 @@ function waitingStatus(mail: StatusMail, access: UserAccess): EmailAIStatus | nu
       ...status,
       model: access.modelId ?? status.model,
       nextTryAt: null,
-      nextStep: access.reason === 'PAUSED' ? 'CAREER_COMPANION' : 'FIX_AI_SETTINGS',
+      nextStep:
+        access.reason === 'PAUSED' || access.reason === 'FREE_AI_OFF'
+          ? 'CAREER_COMPANION'
+          : 'FIX_AI_SETTINGS',
     };
   }
   const pause = blockingPause(access.pauses, [role]);

@@ -6,13 +6,21 @@
  * represent, mirror or predict any provider quota, billing or rate limit. Counts are records of
  * what Career Companion sent, not provider billing data.
  */
-import { AIModelPause, Prisma } from '@prisma/client';
+import { AIAccessIssue, AIModelPause, Prisma } from '@prisma/client';
 import type { AIFailure } from '../../contracts/ai';
 import { prisma } from '../../db/prisma';
 import { enqueueAiResume } from '../enqueue';
 import type { AIUsage } from './contracts';
 import { AIAccessError, FailureKind, QuotaScope, aiSetting } from './errors';
 import { readFailure } from './failures';
+import {
+  alertOwnerOfFreePause,
+  blockingFreePause,
+  freeReason,
+  isFreeAI,
+  isFreeAIPause,
+  isFreeAIProblem,
+} from './freeAI';
 import * as config from '../../utils/config';
 import { logEvent, logWarn } from '../../utils/log';
 
@@ -22,9 +30,15 @@ const RATE_LIMIT_BASE_MS = 60_000;
 const MAX_COOLDOWN_MS = 30 * 60_000;
 const RETRY_AFTER_MIN_MS = 10_000;
 const RETRY_AFTER_MAX_MS = 60 * 60_000;
+/** A credit, key or model problem of the free AI is tried again after an hour. */
+const FREE_AI_PROBLEM_RETRY_MS = 60 * 60_000;
 
-/** AI calls per user per UTC day. 0 pauses all AI calls. */
+/** AI calls per user per UTC day on the user's own key. 0 pauses all AI calls. */
 export const userDailyCallLimit = () => aiSetting(config.userDailyCallLimit);
+
+/** The daily limit for a setup: the free AI has its own, smaller one. */
+export const dailyCallLimit = (provider: string | null | undefined) =>
+  isFreeAI(provider) ? aiSetting(config.freeDailyCallLimit) : userDailyCallLimit();
 
 export const utcDay = (now: Date) => now.toISOString().slice(0, 10);
 
@@ -49,6 +63,15 @@ export async function blockingPause(
   return pause?.resumesAt && pause.resumesAt > now && !isRunningTest(pause, call.emailId)
     ? pause
     : null;
+}
+
+/**
+ * Makes sure the user has a counts row for the day. Mails read at the same time (the mail reader
+ * works on up to 3 at once) may both find none: inserting with ON CONFLICT DO NOTHING lets the
+ * second one wait and go on, where an upsert failed it on the unique key.
+ */
+export async function ensureUsageDay(db: Prisma.TransactionClient, userId: string, day: string) {
+  await db.aIUsageDay.createMany({ data: [{ userId, day }], skipDuplicates: true });
 }
 
 export function nextUtcMidnight(now: Date): Date {
@@ -93,28 +116,46 @@ export function nextPacificMidnight(now: Date): Date {
   return new Date(midnight - zoneOffsetMs(new Date(guess), GOOGLE_QUOTA_ZONE));
 }
 
+/** The free AI's shared pause, or the user's own pause of the model, that stops this call now. */
+async function stoppingPause(
+  tx: Prisma.TransactionClient,
+  call: { userId: string; provider: string; model: string; emailId?: string },
+  now: Date,
+): Promise<AIAccessError | null> {
+  if (isFreeAI(call.provider)) {
+    const shared = await blockingFreePause(tx, call.model, now);
+    return (
+      shared &&
+      new AIAccessError(
+        freeReason(shared.reason),
+        shared.resumesAt,
+        readFailure(shared.lastFailure),
+      )
+    );
+  }
+  const pause = await blockingPause(tx, call, now);
+  return pause && new AIAccessError(pause.reason, pause.resumesAt, readFailure(pause.lastFailure));
+}
+
 /**
  * Reserves one call on a model for the user inside the claim transaction. Throws AIAccessError
  * (rolling back the claim) when Career Companion is paused, the model's pause is running, or the
  * user's safety limit for today is reached. A pause stops only the calls on its own model; while
- * "Read waiting mails now" tests it, its test mail (`emailId`) may still use it.
+ * "Read waiting mails now" tests it, its test mail (`emailId`) may still use it. On the free AI,
+ * the model's pause is the one shared by everyone on it.
  */
 export async function reserveUserCall(
   tx: Prisma.TransactionClient,
-  call: { userId: string; model: string; emailId?: string },
+  call: { userId: string; provider: string; model: string; emailId?: string },
   now: Date,
 ) {
   const { userId } = call;
-  const limit = userDailyCallLimit();
+  const limit = dailyCallLimit(call.provider);
   if (limit === 0) throw new AIAccessError('PAUSED');
-  const pause = await blockingPause(tx, call, now);
-  if (pause) throw new AIAccessError(pause.reason, pause.resumesAt, readFailure(pause.lastFailure));
+  const paused = await stoppingPause(tx, call, now);
+  if (paused) throw paused;
   const day = utcDay(now);
-  await tx.aIUsageDay.upsert({
-    where: { userId_day: { userId, day } },
-    create: { userId, day },
-    update: {},
-  });
+  await ensureUsageDay(tx, userId, day);
   const reserved = await tx.aIUsageDay.updateMany({
     where: { userId, day, calls: { lt: limit } },
     data: { calls: { increment: 1 } },
@@ -141,6 +182,7 @@ export async function recordTokens(userId: string, now: Date, usage: AIUsage | u
 /** The configuration a job resolved; state writes apply only while it is still the saved one. */
 export interface AccessIdentity {
   userId: string;
+  provider: string;
   revision: number;
 }
 
@@ -180,6 +222,7 @@ type PauseKind = Extract<FailureKind, 'RATE_LIMITED' | 'PROVIDER_BUSY' | 'OUTCOM
  * - A daily quota waits until the provider resets it: midnight Pacific time for Google.
  * - The test mail of "Read waiting mails now" that fails this way keeps the failure count: the
  *   pause starts again from the failure, as long as it was, and the result is kept.
+ * - On the free AI, every failure pauses it for everyone on it instead (`pauseFreeAI`).
  */
 export async function noteProviderFailure(
   tx: Prisma.TransactionClient,
@@ -188,6 +231,7 @@ export async function noteProviderFailure(
   failedAt: Date,
   details: PauseDetails,
 ): Promise<Date | null> {
+  if (isFreeAI(access.provider)) return pauseFreeAI(tx, kind, failedAt, details);
   if (kind === 'KEY_REJECTED' || kind === 'ACCOUNT_OR_BILLING' || kind === 'MODEL_UNAVAILABLE') {
     await tx.aIConfiguration.updateMany({
       where: { userId: access.userId, revision: access.revision },
@@ -200,6 +244,53 @@ export async function noteProviderFailure(
     return null;
   }
   return pauseModel(tx, access, { ...details, kind, failedAt });
+}
+
+/**
+ * Records a failure of the free AI for everyone on it, and returns when its shared pause ends.
+ * Busy, rate limited or no answer in time pauses as a user's own model would, growing on the busy
+ * answers in a row. A credit, key or model problem is tried again after an hour, and the owner is
+ * told once (`alertOwnerOfFreePause`); no user is ever asked to fix it.
+ */
+async function pauseFreeAI(
+  tx: Prisma.TransactionClient,
+  kind: Exclude<FailureKind, 'INVALID_OUTPUT' | 'INVALID_REQUEST'>,
+  failedAt: Date,
+  details: PauseDetails,
+): Promise<Date> {
+  const model = details.modelId;
+  const reason: AIAccessIssue = kind === 'OUTCOME_UNKNOWN' ? 'PROVIDER_BUSY' : kind;
+  const problem = isFreeAIProblem(reason);
+  const before = await tx.freeAIPause.findUnique({ where: { model } });
+  const busyBefore = before && !isFreeAIProblem(before.reason) ? before.consecutiveFailures : 0;
+  const failures = problem ? 0 : busyBefore;
+  const resumesAt = problem
+    ? new Date(failedAt.getTime() + FREE_AI_PROBLEM_RETRY_MS)
+    : pauseEnd(failedAt, failures, details);
+  // Another credit, key or model problem than the one the owner was told about is told again.
+  const newProblem =
+    !!before && problem && isFreeAIProblem(before.reason) && before.reason !== reason;
+  const pause = {
+    reason,
+    resumesAt,
+    consecutiveFailures: failures + 1,
+    lastFailure: details.failure,
+    ...(newProblem ? { alertedAt: null } : {}),
+  };
+  // Two users' calls can fail at the same moment: the second waits for the first row, then updates.
+  const created = await tx.freeAIPause.createMany({
+    data: [{ model, ...pause }],
+    skipDuplicates: true,
+  });
+  if (!created.count) await tx.freeAIPause.update({ where: { model }, data: pause });
+  logEvent(before && before.resumesAt > failedAt ? 'free_ai_pause_extended' : 'free_ai_paused', {
+    model,
+    reason,
+    pauseMs: resumesAt.getTime() - failedAt.getTime(),
+    resumesAt,
+    consecutiveFailures: failures + 1,
+  });
+  return resumesAt;
 }
 
 /** When a pause from a failure ends: the provider's daily reset, or the cooldown from the failure. */
@@ -230,13 +321,19 @@ async function pauseModel(
     resumesAt,
     lastFailure: failure.failure,
   } as const;
-  await tx.aIModelPause.upsert({
-    where: key,
-    create: { userId: access.userId, model: failure.modelId, ...pause, consecutiveFailures: 1 },
-    update: test
-      ? { ...pause, testResult: kind }
-      : { ...pause, consecutiveFailures: { increment: 1 }, ...NO_TEST },
+  // Two mails read at the same moment can fail on the same model: the second waits for the first
+  // row, then makes the pause longer, where an upsert failed it on the unique key.
+  const created = await tx.aIModelPause.createMany({
+    data: [{ userId: access.userId, model: failure.modelId, ...pause, consecutiveFailures: 1 }],
+    skipDuplicates: true,
   });
+  if (!created.count)
+    await tx.aIModelPause.update({
+      where: key,
+      data: test
+        ? { ...pause, testResult: kind }
+        : { ...pause, consecutiveFailures: { increment: 1 }, ...NO_TEST },
+    });
   // A failure while the model's pause still runs (a call already under way) makes it longer.
   const extended = !test && !!before?.resumesAt && before.resumesAt > failedAt;
   logEvent(extended ? 'ai_pause_extended' : 'ai_paused', {
@@ -266,11 +363,37 @@ export async function resumeAfterPause(userId: string, resumesAt: Date | null): 
 }
 
 /**
+ * Work that met a wait which ends by itself at a known time, and that nothing else will wake:
+ * Career Companion's daily limit, or the free AI's pause shared by everyone on it. Queues the
+ * user's read for when it ends. A user's own model pause was queued by the failure that started it.
+ */
+export async function resumeWhenWaitEnds(
+  userId: string,
+  wait: { reason: string | null; resumesAt: Date | null },
+): Promise<void> {
+  if (wait.reason === 'SAFETY_LIMIT' || (wait.reason && isFreeAIPause(wait.reason)))
+    await resumeAfterPause(userId, wait.resumesAt);
+}
+
+/**
+ * After the transaction that recorded a provider failure: queues the user's read for when the
+ * pause ends, and on the free AI tells the owner about a credit, key or model problem.
+ */
+export async function afterProviderFailure(
+  access: Pick<AccessIdentity, 'userId' | 'provider'>,
+  resumesAt: Date | null,
+): Promise<void> {
+  await resumeAfterPause(access.userId, resumesAt);
+  if (isFreeAI(access.provider)) await alertOwnerOfFreePause();
+}
+
+/**
  * A successful call confirms the key, and ends that model's pause and resets its growth; other
  * models keep theirs. When the success answers the test of "Read waiting mails now", the other
  * waiting mail follows now. Best effort.
  */
 export async function noteProviderSuccess(access: AccessIdentity, modelId: string) {
+  if (isFreeAI(access.provider)) return endFreePause(modelId);
   try {
     // A call that works proves the key, also when the key check got no answer.
     await prisma.aIConfiguration.updateMany({
@@ -287,6 +410,16 @@ export async function noteProviderSuccess(access: AccessIdentity, modelId: strin
       await resumeAfterPause(access.userId, new Date());
   } catch {
     logWarn('ai_access_state_record_failed', { userId: access.userId });
+  }
+}
+
+/** A call on the free AI worked: its shared pause ends for everyone. Best effort. */
+async function endFreePause(model: string) {
+  try {
+    const { count } = await prisma.freeAIPause.deleteMany({ where: { model } });
+    if (count) logEvent('free_ai_pause_ended', { model });
+  } catch {
+    logWarn('free_ai_pause_not_ended', { model });
   }
 }
 
