@@ -518,6 +518,8 @@ model AIOperation {
   @@unique([emailId, operation, version])
   @@index([status, retryAfter])
   @@index([batchId])
+  /// The reading status counts the mails finished in the last minutes, for all users together.
+  @@index([completedAt])
   @@map("ai_operations")
 }
 
