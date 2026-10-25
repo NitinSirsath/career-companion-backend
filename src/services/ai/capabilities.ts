@@ -15,13 +15,21 @@ import {
   RelevanceClassifier,
 } from './contracts';
 import { ProviderFailure } from './errors';
+import { REPLY_READ_CONTRACT, type ReplyRead, type ReplyReadInput } from './replyRead';
 import type { ProviderClient } from './providers';
 
 export type BoundModels = Record<AIRole, CatalogModel>;
 
+/** What the AI does with the user's own side of a conversation. */
+export interface ReplyCapabilities {
+  /** Which open asks the user's reply settles. */
+  read(input: ReplyReadInput): Promise<AIResult<ReplyRead>>;
+}
+
 export interface AICapabilities {
   classifier: RelevanceClassifier;
   analyzer: EmailAnalyzer;
+  replies: ReplyCapabilities;
 }
 
 async function run<T>(
@@ -91,6 +99,10 @@ export function bindCapabilities(client: ProviderClient, models: BoundModels): A
           extractionInput(body, contract, options),
         );
       },
+    },
+    replies: {
+      read: (input) =>
+        run(client, REPLY_READ_CONTRACT, models[REPLY_READ_CONTRACT.role], JSON.stringify(input)),
     },
   };
 }
