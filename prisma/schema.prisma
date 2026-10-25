@@ -181,13 +181,28 @@ model Email {
 
 /// A message the user sent in a conversation we already hold. Only its IDs and time are stored,
 /// to show that the user replied. It is never classified, matched or sent to AI.
+/// Whether the AI read the user's own reply to see which open asks it settles (owner, 24 Oct 2026).
+enum ReplyReadState {
+  /// The conversation had an open ask when it was sent: the AI reads it.
+  WAITING
+  /// Read. What it settled is closed (YOUR_REPLY)
+  READ
+  /// The AI could not read it (not set up, a key problem, or no answer after three tries).
+  NOT_READ
+}
+
 model OutgoingEmail {
-  id             String   @id @default(uuid()) @db.Uuid
-  userId         String   @db.Uuid
+  id             String          @id @default(uuid()) @db.Uuid
+  userId         String          @db.Uuid
   gmailMessageId String
   threadId       String
   sentAt         DateTime
-  createdAt      DateTime @default(now())
+  createdAt      DateTime        @default(now())
+  /// Null: nothing was open in the conversation when it was sent, so it is not read. The text
+  /// itself is never stored.
+  replyReadState ReplyReadState?
+  replyReadTries Int             @default(0)
+  replyReadAt    DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
