@@ -1,4 +1,5 @@
 import { temporalCases, scoreTemporal } from './temporal';
+import { replyReadCases, scoreReplyRead, type ReplyReadRun } from './replyRead';
 /**
  * Manual provider/model evaluation (BYO AI plan §7). Runs the synthetic dataset through the same
  * contracts, adapters and validation as production. No database, ledger, queue or Gmail access.
@@ -22,6 +23,7 @@ import {
   THREAD_EXTRACTION_VERSIONS,
 } from '../../services/ai/contracts';
 import { canReplyTo } from '../../services/emailRequest';
+import { REPLY_READ_CONTRACT } from '../../services/ai/replyRead';
 import { evaluateCall } from './call';
 import { createProviderClient } from '../../services/ai/providers';
 import {
@@ -214,13 +216,30 @@ async function main() {
       }
     }
   }
+  // The thread versions come with reading the user's own reply: its cases run too.
+  const replyReads: ReplyReadRun[] = [];
+  if (withThread)
+    for (let run = 1; run <= runs; run++)
+      for (const c of replyReadCases) {
+        const read = await timed(() => ai.replies.read(c.input));
+        replyReads.push({
+          id: c.id,
+          run,
+          valid: !!read.value,
+          error: read.error,
+          latencyMs: read.latencyMs,
+          answered: read.value?.data.answeredAsks,
+        });
+        process.stdout.write('.');
+      }
   process.stdout.write('\n');
 
   const metrics = score(cases, results);
   const failed = failures(metrics, baseline);
   const temporal = withTimes ? scoreTemporal(results, runs) : null;
+  const replyRead = withThread ? scoreReplyRead(replyReads, runs) : null;
   const baseOutcome = evaluationOutcome(metrics, baseline);
-  const outcome = worstOutcome(baseOutcome, temporal?.outcome);
+  const outcome = worstOutcome(baseOutcome, temporal?.outcome, replyRead?.outcome);
   const createdAt = new Date().toISOString();
   const report = {
     createdAt,
@@ -228,8 +247,13 @@ async function main() {
     models: { fast: models.fast.id, detailed: models.detailed.id },
     runs,
     cases: cases.length,
-    contractVersions: { ...AI_CONTRACT_VERSIONS, EXTRACTION: extractionVersion },
+    contractVersions: {
+      ...AI_CONTRACT_VERSIONS,
+      EXTRACTION: extractionVersion,
+      ...(withThread ? { REPLY_READ: REPLY_READ_CONTRACT.version } : {}),
+    },
     temporal,
+    replyRead: replyRead && { ...replyRead, results: replyReads },
     thresholds: THRESHOLDS,
     baseline: baselineFile ? path.basename(baselineFile) : null,
     metrics,
