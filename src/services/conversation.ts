@@ -264,7 +264,8 @@ function replyReadOf(row: ConversationRow, replied: boolean): ConversationReques
     return row.lastReadState === 'WAITING' || row.lastReadState === 'NOT_READ'
       ? row.lastReadState
       : null;
-  return row.requestState === 'OPEN' && row.lastReadState === 'READ' ? 'NOT_ANSWERED' : null;}
+  return row.requestState === 'OPEN' && row.lastReadState === 'READ' ? 'NOT_ANSWERED' : null;
+}
 
 /** The user's newest message after the request arrived, if any. */
 const repliedAfter = (row: ConversationRow, mail: Mail) =>
