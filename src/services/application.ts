@@ -14,6 +14,7 @@ import {
 } from '../contracts';
 import { logError } from '../utils/log';
 import { repliedRequests } from './conversationQuery';
+import { closeAsksOfApplication } from './threadAsks';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -287,13 +288,29 @@ export async function getApplication(
   return mapToResponse(userId, app, recent.get(app.id) ?? null);
 }
 
+/** The statuses that close the application's open asks (owner, 24 Oct 2026). */
+const CLOSING_STATUSES: readonly (string | null)[] = ['REJECTED', 'CLOSED'];
+
 /**
  * Owned manual status correction. One transaction locks the application row by id AND owner,
  * compares the manual revision BEFORE no-op detection, then writes only manual fields.
  * Locks no email (compatible with matcher's email → application order), makes no external call,
- * enqueues nothing and never touches aiStatus, events, actions or AI operation/budget records.
+ * enqueues nothing and never touches aiStatus, events or AI operation/budget records.
+ * Setting Rejected or Closed then closes the open asks of its mails, in their own transaction
+ * under the user's match lock (`closeAsksOfApplication`).
  */
 export async function updateUserStatus(
+  userId: string,
+  id: string,
+  request: UpdateApplicationStatusRequest,
+): Promise<{ application: ApplicationResponse; changed: boolean }> {
+  const saved = await saveUserStatus(userId, id, request);
+  if (saved.changed && CLOSING_STATUSES.includes(request.userStatus))
+    await closeAsksOfApplication(userId, id);
+  return saved;
+}
+
+async function saveUserStatus(
   userId: string,
   id: string,
   request: UpdateApplicationStatusRequest,
@@ -459,7 +476,14 @@ export async function getApplicationActions(
       snoozedUntil: true,
       status: true,
       createdAt: true,
-      email: { select: { id: true, threadId: true } },
+      email: {
+        select: {
+          id: true,
+          threadId: true,
+          requestClosedReason: true,
+          aiProcessingResult: { select: { askKind: true } },
+        },
+      },
     },
   });
   const pendingEmails = actions.flatMap((a) =>
@@ -483,6 +507,8 @@ export async function getApplicationActions(
     createdAt: a.createdAt,
     repliedAt:
       a.status === 'PENDING' && a.emailId ? (replied.get(a.emailId)?.toISOString() ?? null) : null,
+    askKind: a.email?.aiProcessingResult?.askKind ?? null,
+    closedReason: a.status === 'COMPLETED' ? (a.email?.requestClosedReason ?? null) : null,
   }));
 }
 
