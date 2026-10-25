@@ -238,6 +238,7 @@ export const ApplicationChoiceDetailsSchema = z.object({
 export type ApplicationChoiceDetails = z.infer<typeof ApplicationChoiceDetailsSchema>;
 
 export const ConversationSeenResponseSchema = z.object({ seen: z.literal(true) });
+
 // ─── POST /api/conversations/:key/reply-draft ───────────────────────────────
 
 /**
