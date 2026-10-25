@@ -15,6 +15,7 @@ import {
 } from './gmailSyncErrors';
 import { acquireSync, withOwnedSync } from './gmailSyncOwnership';
 import { logDebug, logEvent, logError } from '../utils/log';
+import { noteSentForReading } from './replyReading';
 export { GmailAuthError, SyncInProgressError } from './gmailSyncErrors';
 export interface SyncDelivery {
   signal?: AbortSignal;
@@ -219,8 +220,9 @@ const isSentOnly = (m: gmail_v1.Schema$Message) =>
 
 /**
  * Notes the user's own messages in conversations we already hold, so a conversation can show
- * that the user replied. Only IDs and the sent time are stored: the content is never read, and
- * a sent message is never classified, matched or offered to AI.
+ * that the user replied. Only IDs and the sent time are stored, never the content. A sent message
+ * is never classified or matched; in a conversation with an open ask, the AI reads its new text
+ * once to see what it answers (`replyReading.ts`, owner 24 Oct 2026).
  */
 async function recordSentMessages(run: SyncRun, gmail: gmail_v1.Gmail, refs: SentRef[]) {
   if (!refs.length) return;
@@ -244,7 +246,7 @@ async function recordSentMessages(run: SyncRun, gmail: gmail_v1.Gmail, refs: Sen
     const sentAt = message?.internalDate ? new Date(Number(message.internalDate)) : null;
     if (!message || !isSentOnly(message) || !sentAt || isNaN(sentAt.getTime())) continue;
     checkDeadline(run);
-    await withOwnedSync(userId, run.connectionId, run.claim, (tx) => {
+    const recorded = await withOwnedSync(userId, run.connectionId, run.claim, (tx) => {
       checkDeadline(run);
       return tx.outgoingEmail.upsert({
         where: { userId_gmailMessageId: { userId, gmailMessageId: ref.id } },
@@ -252,6 +254,7 @@ async function recordSentMessages(run: SyncRun, gmail: gmail_v1.Gmail, refs: Sen
         update: {},
       });
     });
+    await noteSentForReading(userId, recorded.id);
     run.counts.sent++;
   }
 }
