@@ -185,7 +185,7 @@ model Email {
 enum ReplyReadState {
   /// The conversation had an open ask when it was sent: the AI reads it.
   WAITING
-  /// Read. What it settled is closed (YOUR_REPLY)
+  /// Read. What it settled is closed (YOUR_REPLY).
   READ
   /// The AI could not read it (not set up, a key problem, or no answer after three tries).
   NOT_READ
