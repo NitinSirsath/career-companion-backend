@@ -33,7 +33,7 @@ export function canReplyTo(sender: string | null): boolean {
  */
 function withTellThem(text: string | null, result: RequestFields, sender: string | null) {
   if (!text?.trim() || result.askKind !== 'OUTSIDE_MAIL' || !canReplyTo(sender)) return text;
-  return `${text.trim().replace(/[.!\\s]+$/, '')}, then tell them you did`;
+  return `${text.trim().replace(/[.!\s]+$/, '')}, then tell them you did`;
 }
 
 /**
