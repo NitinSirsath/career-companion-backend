@@ -5,15 +5,18 @@
  *   GET   /api/conversations/:key              one conversation with what the AI read per email
  *   POST  /api/conversations/:key/seen         ends the "new" mark
  *   PATCH /api/conversations/:key/request      the user's answer to the newest request
+ *   POST  /api/conversations/:key/reply-draft  an AI draft of the user's reply, never stored
  *   POST  /api/conversations/:key/application  create or choose the conversation's application
  *
- * No email text is read or returned here; `routes/mailbox.ts` reads it live from Gmail.
+ * No email text is returned here, apart from the AI draft the user asked for; `routes/mailbox.ts`
+ * reads the mails live from Gmail.
  */
 import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
 import {
   ConversationFiltersSchema,
   LinkConversationSchema,
+  ReplyDraftRequestSchema,
   SetRequestStateSchema,
 } from '../contracts/conversation';
 import { requireAuth } from '../middleware/auth';
@@ -24,6 +27,7 @@ import {
   setRequestState,
 } from '../services/conversation';
 import { linkConversation } from '../services/conversationApplication';
+import { writeReplyDraft } from '../services/replyDraft';
 import { createPaginatedResponse, getPaginationParams } from '../utils/pagination';
 
 const router = Router();
@@ -72,6 +76,17 @@ router.patch(
       req.auth!.user.id,
       Key.parse(req.params.key),
       SetRequestStateSchema.parse(req.body),
+    ),
+  ),
+);
+
+router.post(
+  '/:key/reply-draft',
+  handle((req) =>
+    writeReplyDraft(
+      req.auth!.user.id,
+      Key.parse(req.params.key),
+      ReplyDraftRequestSchema.parse(req.body ?? {}),
     ),
   ),
 );
