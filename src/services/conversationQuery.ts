@@ -21,6 +21,8 @@ export interface ConversationRow {
   mailCount: number;
   sentCount: number;
   lastSentAt: Date | null;
+  /** Whether the AI read the user's newest message: WAITING, READ, NOT_READ, or null (not read). */
+  lastReadState: 'WAITING' | 'READ' | 'NOT_READ' | null;
   isNew: boolean;
 }
 
@@ -70,7 +72,8 @@ function filterConditions(filters: ConversationFilters, pattern: string | null):
  * something: the safe next step that replaces its own request (see `requestOf`). A request is DONE when its application action
  * is finished, when something closed it (a newer mail, the user's reply, "I did this" or the
  * application closing), or, while it has no action, when the user marked it done; REPLIED when
- * the user sent a message after it, unless they reopened it later; otherwise OPEN.
+ * the user sent a message after it, unless they reopened it later or the AI read that message
+ * and it did not settle the request; otherwise OPEN.
  */
 function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql): Prisma.Sql {
   return Prisma.sql`
@@ -113,7 +116,9 @@ function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql):
       GROUP BY key
     ),
     sent AS (
-      SELECT "threadId" AS key, MAX("sentAt") AS "lastSentAt", COUNT(*)::int AS "sentCount"
+      SELECT "threadId" AS key, MAX("sentAt") AS "lastSentAt", COUNT(*)::int AS "sentCount",
+             (ARRAY_AGG("replyReadState"::text ORDER BY "sentAt" DESC, id DESC))[1]
+               AS "lastReadState"
       FROM outgoing_emails
       WHERE "userId" = ${userId}::uuid
       GROUP BY "threadId"
@@ -121,7 +126,7 @@ function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql):
     conversations AS (
       SELECT l.key, l."latestEmailId", l."lastReceivedAt", t.category, q."requestEmailId",
              k."applicationId", t."mailCount", t."isNew", t.hit, s."lastSentAt",
-             COALESCE(s."sentCount", 0) AS "sentCount",
+             s."lastReadState", COALESCE(s."sentCount", 0) AS "sentCount",
              CASE
                WHEN q."requestEmailId" IS NULL THEN 'NONE'
                WHEN a.status IN ('COMPLETED', 'DISMISSED') THEN 'DONE'
@@ -129,7 +134,7 @@ function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql):
                WHEN a.status IS NULL AND q."requestUserState" = 'DONE' THEN 'DONE'
                WHEN s."lastSentAt" > q."requestAt" AND NOT COALESCE(
                  q."requestUserState" = 'OPEN' AND q."requestUserStateAt" > s."lastSentAt", FALSE
-               ) THEN 'REPLIED'
+               ) AND s."lastReadState" IS DISTINCT FROM 'READ' THEN 'REPLIED'
                ELSE 'OPEN'
              END AS "requestState"
       FROM latest l
@@ -150,7 +155,8 @@ function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql):
  * When the user replied to each of these emails' requests: the newest message they sent in the
  * thread after the request arrived and before the conversation's next request did. For the newest
  * request that is the mail list's rule; an earlier one keeps the reply it got. A request the user
- * reopened after that reply has none.
+ * reopened after that reply has none, and so does one whose reply the AI read without it settling
+ * the request: it still needs action.
  */
 export async function repliedRequests(
   db: Db,
@@ -182,7 +188,8 @@ export async function repliedRequests(
     GROUP BY q.id, q."requestUserState", q."requestUserStateAt"
     HAVING NOT COALESCE(
       q."requestUserState" = 'OPEN' AND q."requestUserStateAt" > MAX(o."sentAt"), FALSE
-    )`;
+    ) AND (ARRAY_AGG(o."replyReadState"::text ORDER BY o."sentAt" DESC, o.id DESC))[1]
+      IS DISTINCT FROM 'READ'`;
   return new Map(rows.map((row) => [row.id, row.repliedAt]));
 }
 
@@ -212,7 +219,7 @@ export async function conversationRows(
     ${conversationsCte(userId, hit, onlyKey)}
     SELECT c.key, c."latestEmailId", c."lastReceivedAt", c.category, c."requestEmailId",
            c."requestState", c."applicationId", c."mailCount", c."sentCount", c."lastSentAt",
-           c."isNew"
+           c."lastReadState", c."isNew"
     FROM conversations c
     LEFT JOIN applications app ON app.id = c."applicationId"
     ${where}

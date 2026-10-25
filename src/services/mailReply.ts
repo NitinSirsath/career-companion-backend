@@ -19,6 +19,7 @@ import { maySend } from './gmailConnection';
 import { gmailCallOptions } from './googleTransport';
 import { ReplyTarget, mailboxAddress, readGmail, replyTarget } from './mailbox';
 import { usesSandbox } from './testAccounts';
+import { noteSentForReading } from './replyReading';
 
 const READ_BUDGET_MS = 20_000;
 const SEND_BUDGET_MS = 30_000;
@@ -232,7 +233,7 @@ async function recordSent(userId: string, replyId: string, threadId: string, mes
       where: { userId, threadId },
       select: { id: true },
     });
-    await prisma.$transaction([
+    const [, recorded] = await prisma.$transaction([
       prisma.mailReply.update({
         where: replyKey(userId, replyId),
         data: { gmailMessageId: messageId, sentAt },
@@ -248,6 +249,8 @@ async function recordSent(userId: string, replyId: string, threadId: string, mes
           ]
         : []),
     ]);
+    // The AI reads it once when the conversation has an open ask (`replyReading.ts`).
+    if (recorded) await noteSentForReading(userId, recorded.id);
   } catch (err) {
     logError('mail_reply_not_recorded', { userId }, err);
   }

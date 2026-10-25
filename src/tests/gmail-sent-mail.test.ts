@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { prisma } from '../db/prisma';
 import { syncUser } from '../services/gmailSync';
 import { encryptToken } from '../utils/gmailTokenEncryption';
-import { enqueueEmailProcessingJob } from '../services/enqueue';
+import { enqueueEmailProcessingJob, enqueueReplyReading } from '../services/enqueue';
 import { configureAI } from './helpers/aiAccess';
 
 const mocks = vi.hoisted(() => ({
@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../services/enqueue', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/enqueue')>()),
   enqueueEmailProcessingJob: vi.fn(),
+  enqueueReplyReading: vi.fn(),
 }));
 vi.mock('googleapis', () => ({
   google: {
@@ -125,17 +126,58 @@ describe('the user’s own replies', () => {
     );
   });
 
-  it('never stores a sent message as an email, and never offers it to AI', async () => {
+  it('never stores a sent message as an email, never classifies it and keeps no text', async () => {
     await syncUser(userId);
     const emails = await prisma.email.findMany({ where: { userId } });
     expect(emails.map((email) => email.gmailMessageId)).toEqual(['inbound']);
     // Every offer to AI is for the inbox email (it is re-offered while it waits).
     const offered = vi.mocked(enqueueEmailProcessingJob).mock.calls.map(([, emailId]) => emailId);
     expect(new Set(offered)).toEqual(new Set([emails[0].id]));
-    // Only IDs and the time are kept.
-    expect(Object.keys((await outgoing())[0]).sort()).toEqual(
-      ['createdAt', 'gmailMessageId', 'id', 'sentAt', 'threadId', 'userId'].sort(),
+    // Only IDs, the time and whether the AI read it are kept. Nothing was open, so no read.
+    const [sent] = await outgoing();
+    expect(Object.keys(sent).sort()).toEqual(
+      [
+        'createdAt',
+        'gmailMessageId',
+        'id',
+        'replyReadAt',
+        'replyReadState',
+        'replyReadTries',
+        'sentAt',
+        'threadId',
+        'userId',
+      ].sort(),
     );
+    expect(sent.replyReadState).toBeNull();
+    expect(enqueueReplyReading).not.toHaveBeenCalled();
+  });
+
+  it('queues the AI read of a reply in a conversation with an open ask (owner, 24 Oct 2026)', async () => {
+    await prisma.email.create({
+      data: {
+        userId,
+        gmailMessageId: 'asking',
+        threadId: 'thread-1',
+        receivedAt: new Date(SENT_AT - 3_600_000),
+        relevanceState: 'RELEVANT',
+        processingState: 'COMPLETED',
+        aiProcessingResult: {
+          create: {
+            provider: 'gemini',
+            model: 'test-model',
+            contractVersion: 'extraction/v6',
+            processingStatus: 'COMPLETED',
+            relevanceDecision: 'RELEVANT',
+            actionRequired: true,
+            requestedAction: 'Send your free times',
+          },
+        },
+      },
+    });
+    await syncUser(userId);
+    const [sent] = await outgoing();
+    expect(sent.replyReadState).toBe('WAITING');
+    expect(enqueueReplyReading).toHaveBeenCalledWith(userId, sent.id);
   });
 
   it('does not scan sent mail while no conversation is held', async () => {

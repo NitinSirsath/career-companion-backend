@@ -3,6 +3,7 @@ import { evaluateCall } from './call';
 import { baselineMetrics, evaluationOutcome, isRefused } from './score';
 import { describe, expect, it, vi } from 'vitest';
 import { SAMPLE_EMAIL } from '../../services/ai/sampleEmail';
+import { replyReadCases, scoreReplyRead } from './replyRead';
 import {
   CaseRun,
   EvalCase,
@@ -366,5 +367,24 @@ describe('refusal accounting and safe evaluation retries', () => {
       expect(call).toHaveBeenCalledTimes(1);
       expect(sleep).not.toHaveBeenCalled();
     }
+  });
+});
+
+describe("reading the user's own reply", () => {
+  const right = (run = 1) =>
+    replyReadCases.map((c) => ({ id: c.id, run, valid: true, latencyMs: 10, answered: c.answers }));
+
+  it('has cases that close and cases that keep the ask open', () => {
+    expect(replyReadCases.filter((c) => c.answers.length).length).toBeGreaterThanOrEqual(3);
+    expect(replyReadCases.filter((c) => !c.answers.length).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('passes only every case checked with no wrong close', () => {
+    expect(scoreReplyRead([...right(1), ...right(2)], 2).outcome).toBe('PASS');
+    expect(scoreReplyRead(right(1), 2).outcome).toBe('INCONCLUSIVE');
+    const wrong = right().map((r) =>
+      r.id === 'promise-later' ? { ...r, answered: ['ask-0a1b2c3d'] } : r,
+    );
+    expect(scoreReplyRead(wrong, 1)).toMatchObject({ outcome: 'FAIL', wrongCloses: 1 });
   });
 });

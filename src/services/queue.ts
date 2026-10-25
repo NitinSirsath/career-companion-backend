@@ -13,6 +13,7 @@ export const QUEUE_NAMES = [
   'gmail-sync-job',
   'relevance-triage-job',
   'ai-resume-job',
+  'reply-reading-job',
 ] as const;
 
 /**

@@ -253,7 +253,18 @@ function toRequest(row: ConversationRow, thread: Mail[]): ConversationRequest | 
     askKind: mail.aiProcessingResult?.askKind ?? null,
     canReply: canReplyTo(mail.sender),
     ...closureOf(row, mail),
+    replyRead: replyReadOf(row, repliedAfter(row, mail) !== null),
   };
+}
+
+/** What the AI made of the user's reply after the request, as the screens show it. */
+function replyReadOf(row: ConversationRow, replied: boolean): ConversationRequest['replyRead'] {
+  if (!replied) return null;
+  if (row.requestState === 'REPLIED')
+    return row.lastReadState === 'WAITING' || row.lastReadState === 'NOT_READ'
+      ? row.lastReadState
+      : null;
+  return row.requestState === 'OPEN' && row.lastReadState === 'READ' ? 'NOT_ANSWERED' : null;
 }
 
 /** The user's newest message after the request arrived, if any. */
