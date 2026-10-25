@@ -298,7 +298,7 @@ describe('OpenAI adapter', () => {
     await capabilities().analyzer.extractJobData('body');
     expect(create.mock.calls[0][0]).toMatchObject({
       model: 'gpt-5-mini',
-      response_format: { json_schema: { name: 'job_extraction_v4' } },
+      response_format: { json_schema: { name: 'job_extraction_v6' } },
     });
     expect(create.mock.calls[0][1]).toEqual({ timeout: 45_000 });
   });
