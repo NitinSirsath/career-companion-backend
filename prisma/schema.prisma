@@ -112,33 +112,59 @@ enum EmailRequestState {
   OPEN
 }
 
+/// How the user does what a job mail asks (owner, 24 Oct 2026): by answering the mail, or
+/// somewhere else such as a form, a test or a portal.
+enum AskKind {
+  REPLY_BY_MAIL
+  OUTSIDE_MAIL
+}
+
+/// Why a mail's request closed. Reopen clears it.
+enum RequestClosedReason {
+  /// A newer mail of the conversation replaced or moved past it.
+  REPLACED_BY_MAIL
+  /// A newer mail confirmed the user already did it ("thanks, we received your form").
+  CONFIRMED_BY_MAIL
+  /// The user's own reply answered it.
+  YOUR_REPLY
+  /// The user said they did it ("I did this").
+  YOU_SAID_DONE
+  /// The user set the application to Rejected or Closed.
+  APPLICATION_CLOSED
+}
+
 model Email {
-  aiOperations            AIOperation[]
-  aiProcessingResult      AIProcessingResult?
-  id                      String                   @id @default(uuid()) @db.Uuid
-  userId                  String                   @db.Uuid
-  gmailMessageId          String // stable Gmail message ID
-  threadId                String? // Gmail thread ID; stored for future matching
-  subject                 String? // email subject header
-  sender                  String? // From header value
-  receivedAt              DateTime? // message received timestamp
-  relevanceState          EmailRelevanceState      @default(UNPROCESSED)
-  matchState              EmailMatchState          @default(UNMATCHED)
-  matchConfirmedBy        MatchConfirmationSource?
-  processingState         EmailProcessingState     @default(PENDING)
-  processingErrorCategory String?
-  processingErrorDetails  String?
-  processingErrorStage    String?
-  processingRetryable     Boolean?
-  processingFailedAt      DateTime?
+  aiOperations             AIOperation[]
+  aiProcessingResult       AIProcessingResult?
+  id                       String                   @id @default(uuid()) @db.Uuid
+  userId                   String                   @db.Uuid
+  gmailMessageId           String // stable Gmail message ID
+  threadId                 String? // Gmail thread ID; stored for future matching
+  subject                  String? // email subject header
+  sender                   String? // From header value
+  receivedAt               DateTime? // message received timestamp
+  relevanceState           EmailRelevanceState      @default(UNPROCESSED)
+  matchState               EmailMatchState          @default(UNMATCHED)
+  matchConfirmedBy         MatchConfirmationSource?
+  processingState          EmailProcessingState     @default(PENDING)
+  processingErrorCategory  String?
+  processingErrorDetails   String?
+  processingErrorStage     String?
+  processingRetryable      Boolean?
+  processingFailedAt       DateTime?
   /// When the user first opened this email's conversation. Null shows the conversation as new.
-  seenAt                  DateTime?
+  seenAt                   DateTime?
   /// Set only by the user, for the request this email makes. Null means the user gave no answer.
-  requestUserState        EmailRequestState?
-  requestUserStateAt      DateTime?
-  applicationId           String?                  @db.Uuid // nullable FK to Application
-  createdAt               DateTime                 @default(now())
-  updatedAt               DateTime                 @updatedAt
+  requestUserState         EmailRequestState?
+  requestUserStateAt       DateTime?
+  /// Set when something closed this email's request by itself or the user said it is done, with
+  /// when and, for a mail or a reply, that message's Gmail ID. Reopen clears all three.
+  requestClosedReason      RequestClosedReason?
+  requestClosedAt          DateTime?
+  requestClosedByMessageId String?
+  applicationId            String?                  @db.Uuid // nullable FK to Application
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
 
   user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   application Application?       @relation(fields: [applicationId], references: [id], onDelete: SetNull)
@@ -329,6 +355,10 @@ model AIProcessingResult {
   /// Set when the email asks for money or bank, card or ID details to get or keep a job: the
   /// signs the AI saw. The app then shows a safe next step instead of the email's request.
   fakeOfferWarning   String?
+  /// How the user does the request (extraction v6 and v7); null before them or with no request.
+  askKind            AskKind?
+  /// Short replies the user could send, when the mail expects an answer by mail (at most 3).
+  replyChoices       String[] @default([])
 
   scheduleCandidates   Json?
   extractionConfidence Float?
