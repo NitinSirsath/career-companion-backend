@@ -31,6 +31,28 @@ export type MailCategory = z.infer<typeof MailCategorySchema>;
 export const RequestStateSchema = z.enum(['OPEN', 'REPLIED', 'DONE']);
 export type RequestState = z.infer<typeof RequestStateSchema>;
 
+/**
+ * How the user does what a mail asks (owner, 24 Oct 2026): by answering the mail, or somewhere
+ * else such as a form or a test. Null for a mail read before the AI said it.
+ */
+export const AskKindSchema = z.enum(['REPLY_BY_MAIL', 'OUTSIDE_MAIL']);
+export type AskKind = z.infer<typeof AskKindSchema>;
+
+/** Why a request closed. */
+export const RequestClosedReasonSchema = z.enum([
+  /** A newer mail of the conversation replaced or moved past it. */
+  'REPLACED_BY_MAIL',
+  /** A newer mail confirmed the user did it. */
+  'CONFIRMED_BY_MAIL',
+  /** The user's own reply answered it. */
+  'YOUR_REPLY',
+  /** The user said they did it ("I did this"). */
+  'YOU_SAID_DONE',
+  /** The user set the application to Rejected or Closed. */
+  'APPLICATION_CLOSED',
+]);
+export type RequestClosedReason = z.infer<typeof RequestClosedReasonSchema>;
+
 export const ConversationRequestSchema = z.object({
   /** The email that makes the request. */
   emailId: z.uuid(),
@@ -45,6 +67,17 @@ export const ConversationRequestSchema = z.object({
   deadlinePrecision: z.enum(['DATE', 'DATETIME']).nullable(),
   /** The user's newest message after the request; null when there is none. */
   repliedAt: IsoDateTime.nullable(),
+  askKind: AskKindSchema.nullable(),
+  /** False when the sender is a no-reply address: no reply can close the request. */
+  canReply: z.boolean(),
+  /**
+   * Why a DONE request closed, when the app knows: by itself, or the user said so. Null for any
+   * other state, and for one finished another way (an older "Mark done", a dismissed action).
+   */
+  closedReason: RequestClosedReasonSchema.nullable(),
+  closedAt: IsoDateTime.nullable(),
+  /** The Gmail ID of the newer mail or the user's reply that closed it; null otherwise. */
+  closedByMessageId: z.string().nullable(),
 });
 export type ConversationRequest = z.infer<typeof ConversationRequestSchema>;
 
@@ -138,6 +171,8 @@ export const ConversationMailSchema = z.object({
   followUpDate: z.string().nullable(),
   /** Set when the mail looks like a fake job offer that asks for money: the signs the AI saw. */
   fakeOfferWarning: z.string().nullable(),
+  /** How the user does what this mail asks; null when it asks nothing or was read before. */
+  askKind: AskKindSchema.nullable(),
   analyzedBy: AnalyzedBySchema.nullable(),
 });
 export type ConversationMail = z.infer<typeof ConversationMailSchema>;
@@ -151,7 +186,10 @@ export const ConversationDetailSchema = z.object({
 });
 export type ConversationDetail = z.infer<typeof ConversationDetailSchema>;
 
-/** `emailId` names the request the user saw, so an answer never lands on a newer one. */
+/**
+ * `emailId` names the request the user saw, so an answer never lands on a newer one. DONE is "I
+ * did this": refused (409 CLOSES_BY_ITSELF) for a request the user answers by mail. OPEN reopens.
+ */
 export const SetRequestStateSchema = z.strictObject({
   emailId: z.uuid(),
   state: z.enum(['DONE', 'OPEN']),
