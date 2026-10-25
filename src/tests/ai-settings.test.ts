@@ -685,7 +685,7 @@ describe('sample-email test', () => {
     });
     // Only the synthetic sample is sent, never mail from the user's mailbox.
     expect(client.calls('email_relevance')[0][0].input).toContain('Northwind Robotics');
-    expect(client.calls('job_extraction_v4')[0][0].input).toContain('Priya Raman');
+    expect(client.calls('job_extraction_v6')[0][0].input).toContain('Priya Raman');
     expect(await prisma.aIUsageDay.findFirst({ where: { userId } })).toMatchObject({
       calls: 2,
       inputTokens: 20,
@@ -763,7 +763,7 @@ describe('sample-email test', () => {
       details: { state: 'LIMITED', reason: 'PROVIDER_BUSY', resumesAt: resumesAt.toISOString() },
     });
     expect(client.calls('email_relevance')).toHaveLength(1);
-    expect(client.calls('job_extraction_v4')).toHaveLength(0);
+    expect(client.calls('job_extraction_v6')).toHaveLength(0);
     expect(await pauseOf(userId, DETAILED)).toEqual(paused);
   });
 
