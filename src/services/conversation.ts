@@ -25,7 +25,8 @@ import {
   isEmailId,
   type ConversationRow,
 } from './conversationQuery';
-import { FAKE_OFFER_NEXT_STEP, requestOf } from './emailRequest';
+import { canReplyTo, FAKE_OFFER_NEXT_STEP, requestOf } from './emailRequest';
+import { CLOSES_BY_ITSELF, mayCloseByHand, OPEN_AGAIN } from './threadAsks';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 type Mail = Prisma.EmailGetPayload<{ include: { aiProcessingResult: true } }>;
@@ -99,8 +100,10 @@ export async function markConversationSeen(userId: string, key: string) {
 }
 
 /**
- * The user's own answer to the newest request: done, or open again. Where the request already
- * has an application action, that action is finished or reopened too, so every view agrees.
+ * The user's own answer to the newest request: "I did this", or open again. Only a request done
+ * outside mail closes by hand (owner, 24 Oct 2026); reopening clears why it closed. Where the
+ * request already has an application action, that action is finished or reopened too, so every
+ * view agrees.
  */
 export async function setRequestState(
   userId: string,
@@ -114,9 +117,27 @@ export async function setRequestState(
     // A newer email may have replaced the request the user answered.
     if (row.requestEmailId !== request.emailId)
       throw new AppError(409, 'REQUEST_CHANGED', CHANGE_REJECTED);
+    const now = new Date();
+    if (request.state === 'DONE') {
+      const read = await tx.aIProcessingResult.findUnique({
+        where: { emailId: request.emailId },
+        select: { askKind: true },
+      });
+      if (!mayCloseByHand(read?.askKind))
+        throw new AppError(409, 'CLOSES_BY_ITSELF', CLOSES_BY_ITSELF);
+    }
     await tx.email.update({
       where: { id: request.emailId },
-      data: { requestUserState: request.state, requestUserStateAt: new Date() },
+      data:
+        request.state === 'DONE'
+          ? {
+              requestUserState: 'DONE',
+              requestUserStateAt: now,
+              requestClosedReason: 'YOU_SAID_DONE',
+              requestClosedAt: now,
+              requestClosedByMessageId: null,
+            }
+          : { requestUserState: 'OPEN', requestUserStateAt: now, ...OPEN_AGAIN },
     });
     return tx.action.findMany({
       where: {
@@ -218,10 +239,9 @@ function newestOf(
 
 function toRequest(row: ConversationRow, thread: Mail[]): ConversationRequest | null {
   const mail = thread.find((candidate) => candidate.id === row.requestEmailId);
-  const request = mail?.aiProcessingResult && requestOf(mail.aiProcessingResult, mail.receivedAt);
+  const request =
+    mail?.aiProcessingResult && requestOf(mail.aiProcessingResult, mail.receivedAt, mail.sender);
   if (!mail || !request || row.requestState === 'NONE') return null;
-  const repliedAt =
-    row.lastSentAt && mail.receivedAt && row.lastSentAt > mail.receivedAt ? row.lastSentAt : null;
   return {
     emailId: mail.id,
     state: row.requestState,
@@ -229,7 +249,24 @@ function toRequest(row: ConversationRow, thread: Mail[]): ConversationRequest | 
     text: request.text?.trim() || null,
     deadline: request.deadline.deadline?.toISOString() ?? null,
     deadlinePrecision: request.deadline.precision,
-    repliedAt: repliedAt?.toISOString() ?? null,
+    repliedAt: repliedAfter(row, mail)?.toISOString() ?? null,
+    askKind: mail.aiProcessingResult?.askKind ?? null,
+    canReply: canReplyTo(mail.sender),
+    ...closureOf(row, mail),
+  };
+}
+
+/** The user's newest message after the request arrived, if any. */
+const repliedAfter = (row: ConversationRow, mail: Mail) =>
+  row.lastSentAt && mail.receivedAt && row.lastSentAt > mail.receivedAt ? row.lastSentAt : null;
+
+/** Why and when a DONE request closed, and the mail that closed it, when the app knows. */
+function closureOf(row: ConversationRow, mail: Mail) {
+  const closed = row.requestState === 'DONE' && mail.requestClosedReason !== null;
+  return {
+    closedReason: closed ? mail.requestClosedReason : null,
+    closedAt: closed ? (mail.requestClosedAt?.toISOString() ?? null) : null,
+    closedByMessageId: closed ? mail.requestClosedByMessageId : null,
   };
 }
 
@@ -276,6 +313,7 @@ function toMail(mail: Mail): ConversationMail {
     company: result?.companyName ?? null,
     role: result?.jobTitle ?? null,
     ...read,
+    askKind: result?.askKind ?? null,
     analyzedBy: result ? { provider: result.provider, model: result.model } : null,
   };
 }
