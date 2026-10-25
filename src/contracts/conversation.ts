@@ -189,6 +189,11 @@ export const ConversationDetailSchema = z.object({
   mails: z.array(ConversationMailSchema),
   /** When the user's own recorded messages were sent, oldest first. */
   sentAt: z.array(IsoDateTime),
+  /**
+   * Up to three short replies the user could send to the newest job mail, from its AI read
+   * (owner, 24 Oct 2026); empty when it expects no answer by mail or was read before.
+   */
+  replyChoices: z.array(z.string()),
 });
 export type ConversationDetail = z.infer<typeof ConversationDetailSchema>;
 
@@ -233,3 +238,72 @@ export const ApplicationChoiceDetailsSchema = z.object({
 export type ApplicationChoiceDetails = z.infer<typeof ApplicationChoiceDetailsSchema>;
 
 export const ConversationSeenResponseSchema = z.object({ seen: z.literal(true) });
+
+// ─── POST /api/conversations/:key/reply-draft ───────────────────────────────
+
+/**
+ * Asks the AI for a reply draft (owner, 24 Oct 2026): from a reply choice, a one-line hint, or
+ * neither. One call toward the daily limit. 409 AI_ACCESS_UNAVAILABLE when the AI cannot be used
+ * now (its details as for the sample test); 502 AI_DRAFT_FAILED when its answer was unusable.
+ */
+export const ReplyDraftRequestSchema = z.strictObject({
+  choice: z.string().trim().min(1).max(60).optional(),
+  hint: z.string().trim().min(1).max(200).optional(),
+});
+export type ReplyDraftRequest = z.infer<typeof ReplyDraftRequestSchema>;
+
+/**
+ * The draft's structure, as the rich text editor takes it (Tiptap / ProseMirror JSON): only
+ * paragraphs, line breaks, bullet and numbered lists, and text marked bold, italic, underline or
+ * as a link (owner, 25 Oct 2026).
+ */
+export const DraftMarkSchema = z.object({
+  type: z.enum(['bold', 'italic', 'underline', 'link']),
+  /** A link's address: https://, http:// or mailto: only. */
+  attrs: z.object({ href: z.string() }).optional(),
+});
+export type DraftMark = z.infer<typeof DraftMarkSchema>;
+const DraftTextSchema = z.object({
+  type: z.literal('text'),
+  text: z.string().min(1),
+  marks: z.array(DraftMarkSchema).optional(),
+});
+const DraftInlineSchema = z.discriminatedUnion('type', [
+  DraftTextSchema,
+  z.object({ type: z.literal('hardBreak') }),
+]);
+export type DraftInline = z.infer<typeof DraftInlineSchema>;
+const DraftParagraphSchema = z.object({
+  type: z.literal('paragraph'),
+  content: z.array(DraftInlineSchema).optional(),
+});
+export type DraftParagraph = z.infer<typeof DraftParagraphSchema>;
+const DraftListItemSchema = z.object({
+  type: z.literal('listItem'),
+  content: z.array(DraftParagraphSchema),
+});
+const DraftBlockSchema = z.discriminatedUnion('type', [
+  DraftParagraphSchema,
+  z.object({ type: z.literal('bulletList'), content: z.array(DraftListItemSchema) }),
+  z.object({
+    type: z.literal('orderedList'),
+    attrs: z.object({ start: z.number().int().positive() }).optional(),
+    content: z.array(DraftListItemSchema),
+  }),
+]);
+export type DraftBlock = z.infer<typeof DraftBlockSchema>;
+export const DraftDocSchema = z.object({
+  type: z.literal('doc'),
+  content: z.array(DraftBlockSchema),
+});
+export type DraftDoc = z.infer<typeof DraftDocSchema>;
+
+export const ReplyDraftResponseSchema = z.object({
+  /** The draft as plain text, for the plain reply box: no format marks left. */
+  text: z.string(),
+  /** The same draft with its formatting, for the rich text editor. */
+  doc: DraftDocSchema,
+  /** The model that wrote it, by its catalog name. */
+  model: z.string(),
+});
+export type ReplyDraftResponse = z.infer<typeof ReplyDraftResponseSchema>;
