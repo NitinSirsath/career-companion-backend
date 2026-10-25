@@ -484,7 +484,7 @@ export async function removeSettings(userId: string): Promise<{ removed: true }>
 }
 
 /** 409 AI_ACCESS_UNAVAILABLE; a model's pause names the model and the failure behind it. */
-const unavailable = (err: AIAccessError, modelId: string | null) =>
+export const unavailable = (err: AIAccessError, modelId: string | null) =>
   new AppError(409, 'AI_ACCESS_UNAVAILABLE', 'AI access cannot be used right now.', {
     state: stateOf(err.reason),
     reason: err.reason,
