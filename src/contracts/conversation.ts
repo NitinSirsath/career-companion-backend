@@ -78,6 +78,12 @@ export const ConversationRequestSchema = z.object({
   closedAt: IsoDateTime.nullable(),
   /** The Gmail ID of the newer mail or the user's reply that closed it; null otherwise. */
   closedByMessageId: z.string().nullable(),
+  /**
+   * What the AI made of the user's reply after the request (owner, 24 Oct 2026). REPLIED:
+   * WAITING (it reads it now) or NOT_READ (it could not; "Replied" from the send time). OPEN:
+   * NOT_ANSWERED (it read it, and the reply does not settle the request yet). Null otherwise.
+   */
+  replyRead: z.enum(['WAITING', 'NOT_READ', 'NOT_ANSWERED']).nullable(),
 });
 export type ConversationRequest = z.infer<typeof ConversationRequestSchema>;
 
