@@ -208,6 +208,22 @@ export const ApplicationActionListItemSchema = ApplicationActionResponseSchema.e
    * it; null otherwise. A reply never finishes the action by itself.
    */
   repliedAt: z.iso.datetime().nullable(),
+  /**
+   * How the user does a step from a mail: by answering the mail, or somewhere else. Only an
+   * "outside mail" step, or one read before the AI said, can be marked done by hand; a reply
+   * closes the others (owner, 24 Oct 2026). Null for the user's own steps.
+   */
+  askKind: z.enum(['REPLY_BY_MAIL', 'OUTSIDE_MAIL']).nullable(),
+  /** Why a finished step from a mail closed, when something closed it; null otherwise. */
+  closedReason: z
+    .enum([
+      'REPLACED_BY_MAIL',
+      'CONFIRMED_BY_MAIL',
+      'YOUR_REPLY',
+      'YOU_SAID_DONE',
+      'APPLICATION_CLOSED',
+    ])
+    .nullable(),
 });
 export type ApplicationActionListItem = z.infer<typeof ApplicationActionListItemSchema>;
 export type ListApplicationActionsResponse = PaginatedResponse<ApplicationActionListItem>;
