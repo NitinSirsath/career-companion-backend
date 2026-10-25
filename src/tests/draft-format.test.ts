@@ -102,7 +102,7 @@ describe('an AI draft in the small Markdown set (owner, 25 Oct 2026)', () => {
     expect(draft('Rate: 5 * 3 and [your free times]').text).toBe(
       'Rate: 5 * 3 and [your free times]',
     );
-    expect(draft('snake_case_name stays').text).toBe('snake_case_name');
+    expect(draft('snake_case_name stays').text).toBe('snake_case_name stays');
   });
 
   it('drops a bad link whose address holds brackets, with no stray bracket left', () => {
