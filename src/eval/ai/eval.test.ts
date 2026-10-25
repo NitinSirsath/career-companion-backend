@@ -12,9 +12,11 @@ import {
   sameDate,
   score,
   snippetOf,
+  THREAD_DATASET_DIR,
 } from './score';
 
 const cases = loadDataset();
+const threadCases = loadDataset(THREAD_DATASET_DIR);
 
 const RESERVED = /(^|\.)(example\.(com|org|net)|[a-z0-9-]+\.test)$/i;
 const domainsIn = (text: string) => [
@@ -44,7 +46,7 @@ describe('synthetic evaluation dataset', () => {
   });
 
   it('contains no real addresses: every email and URL domain is reserved', () => {
-    for (const c of cases) {
+    for (const c of [...cases, ...threadCases]) {
       const text = [c.input.sender, c.input.subject, c.input.body, c.input.snippet ?? ''].join(
         '\n',
       );
@@ -95,6 +97,34 @@ describe('matching', () => {
     expect(matches(null, { equals: false })).toBe(false);
     expect(matches('An offer', { present: true })).toBe(true);
     expect(matches('', { present: true })).toBe(false);
+  });
+
+  it('matches the closed asks exactly and counts the reply choices', () => {
+    const closed = [{ id: 'ask-1', reason: 'REPLACED' }];
+    expect(matches(closed, { ids: ['ask-1'] })).toBe(true);
+    expect(matches(closed, { ids: [] })).toBe(false);
+    expect(matches([...closed, { id: 'ask-2' }], { ids: ['ask-1'] })).toBe(false);
+    expect(matches(null, { ids: [] })).toBe(true);
+    expect(matches(['Yes', 'No'], { items: { min: 2, max: 3 } })).toBe(true);
+    expect(matches(null, { items: { min: 2, max: 3 } })).toBe(false);
+  });
+});
+
+describe('thread cases (extraction v6 and v7)', () => {
+  it('parse, have unique IDs apart from the main set, and test closing and keeping asks', () => {
+    const ids = new Set(cases.map((c) => c.id));
+    expect(threadCases.length).toBeGreaterThanOrEqual(8);
+    for (const c of threadCases) expect(ids.has(c.id), c.id).toBe(false);
+    const closes = threadCases.filter((c) => {
+      const matcher = c.expect.fields?.closedAsks;
+      return matcher && 'ids' in matcher && matcher.ids.length > 0;
+    });
+    const keeps = threadCases.filter((c) => {
+      const matcher = c.expect.fields?.closedAsks;
+      return matcher && 'ids' in matcher && matcher.ids.length === 0;
+    });
+    expect(closes.length).toBeGreaterThanOrEqual(2);
+    expect(keeps.length).toBeGreaterThanOrEqual(3);
   });
 });
 
