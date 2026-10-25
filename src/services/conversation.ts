@@ -87,6 +87,8 @@ export async function getConversation(userId: string, anyKey: string): Promise<C
     conversation,
     mails: mails.map(toMail),
     sentAt: sent.map((message) => message.sentAt.toISOString()),
+    // The newest job mail is the one a reply answers.
+    replyChoices: mails.at(-1)?.aiProcessingResult?.replyChoices ?? [],
   };
 }
 
