@@ -66,7 +66,7 @@ function inline(text: string, marks: DraftMark[] = [], out: DraftInline[] = []):
       continue;
     }
     // Plain text up to the next possible mark; a lone mark character stays as it is.
-    const next = rest.slice(1).search(/[[*_]/);
+    const next = rest.slice(1).search(/[[\*_]/);
     const take = next === -1 ? rest.length : next + 1;
     push(out, rest.slice(0, take), marks);
     rest = rest.slice(take);
