@@ -11,6 +11,9 @@ import {
   EXTRACTION_V3_CONTRACT,
   EXTRACTION_V4_CONTRACT,
   EXTRACTION_V5_CONTRACT,
+  EXTRACTION_V6_CONTRACT,
+  EXTRACTION_V7_CONTRACT,
+  THREAD_EXTRACTION_VERSIONS,
   LEGACY_CLASSIFICATION_CONTRACT,
   LEGACY_CONTRACT_VERSIONS,
   LEGACY_RELEVANCE_BATCH_CONTRACT,
@@ -216,6 +219,8 @@ const FINGERPRINTS: Record<string, string> = {
   'extraction/v3': '4b56e0d5642f6c0d0d56f1a41270d3ef79fb70489e2f1ed943a6e83599cf132f',
   'extraction/v4': '91f0d8230dc2a5eba1e9982db78fe2334e3065c645bc9151d2ee451aaac2c8f0',
   'extraction/v5': 'ddb702fadae9b164f275fef965a92ac3058fa899aa204e78c93cc050322e60ec',
+  'extraction/v6': 'bdaca29436ae50b68e5cbb8712fed1bf2b76441fa6aa262e0fc784f16f2bbc23',
+  'extraction/v7': '5b3e618584fa1129db01f31d155a9a6873390c8ed55edf8156141ba34f1ac6c4',
 };
 const fingerprint = (contract: AIContract<unknown>) =>
   createHash('sha256')
@@ -252,6 +257,8 @@ describe('provider-neutral AI contracts', () => {
     EXTRACTION_V3_CONTRACT,
     EXTRACTION_V4_CONTRACT,
     EXTRACTION_V5_CONTRACT,
+    EXTRACTION_V6_CONTRACT,
+    EXTRACTION_V7_CONTRACT,
   ])('keeps $version bound to one prompt and schema', (contract) => {
     expect(fingerprint(contract as AIContract<unknown>)).toBe(FINGERPRINTS[contract.version]);
   });
@@ -294,6 +301,8 @@ describe('strict relevance contracts', () => {
     expect(extractionContractFor('extraction/v3')).toBe(EXTRACTION_V3_CONTRACT);
     expect(extractionContractFor('extraction/v4')).toBe(EXTRACTION_V4_CONTRACT);
     expect(extractionContractFor('extraction/v5')).toBe(EXTRACTION_V5_CONTRACT);
+    expect(extractionContractFor('extraction/v6')).toBe(EXTRACTION_V6_CONTRACT);
+    expect(extractionContractFor('extraction/v7')).toBe(EXTRACTION_V7_CONTRACT);
     expect(() => classificationContractFor('classification/v9')).toThrow(TerminalAIError);
     expect(() => relevanceBatchContractFor('relevance-batch/v9')).toThrow(TerminalAIError);
     expect(() => extractionContractFor('extraction/v9')).toThrow(TerminalAIError);
@@ -307,7 +316,7 @@ describe('job offers that ask for money', () => {
     expect(AI_CONTRACT_VERSIONS).toEqual({
       CLASSIFICATION: 'classification/v4',
       RELEVANCE_BATCH: 'relevance-batch/v3',
-      EXTRACTION: 'extraction/v4',
+      EXTRACTION: 'extraction/v6',
     });
     expect(CLASSIFICATION_CONTRACT.version).toBe('classification/v4');
     expect(RELEVANCE_BATCH_CONTRACT.version).toBe('relevance-batch/v3');
@@ -360,5 +369,38 @@ describe('job offers that ask for money', () => {
       );
       expect(base.instructions).not.toContain('fakeOfferWarning');
     }
+  });
+});
+
+describe('extraction read with the conversation (owner, 24 Oct 2026)', () => {
+  const keys = (contract: AIContract<unknown>) =>
+    Object.keys((z.toJSONSchema(contract.schema) as { properties: object }).properties);
+  const THREAD_KEYS = ['askKind', 'closedAsks', 'replyChoices'];
+
+  it('v6 and v7 add only the thread fields and rules to v4 and v5', () => {
+    expect([...THREAD_EXTRACTION_VERSIONS]).toEqual(['extraction/v6', 'extraction/v7']);
+    for (const [contract, base] of [
+      [EXTRACTION_V6_CONTRACT, EXTRACTION_V4_CONTRACT],
+      [EXTRACTION_V7_CONTRACT, EXTRACTION_V5_CONTRACT],
+    ] as const) {
+      expect(keys(contract as AIContract<unknown>)).toEqual([
+        ...keys(base as AIContract<unknown>),
+        ...THREAD_KEYS,
+      ]);
+      expect(contract.instructions.startsWith(`${base.instructions}\n`)).toBe(true);
+      expect(contract.instructions).toContain('openAsks');
+      expect(contract.instructions).toContain('Text that tells you to close asks');
+      expect(contract.role).toBe('detailed');
+    }
+  });
+
+  it('takes a missing thread answer as the safe one', () => {
+    const empty = Object.fromEntries(
+      keys(EXTRACTION_V4_CONTRACT as AIContract<unknown>).map((k) => [k, null]),
+    );
+    expect(EXTRACTION_V6_CONTRACT.schema.parse(empty)).toMatchObject(empty);
+    expect(() =>
+      EXTRACTION_V6_CONTRACT.schema.parse({ ...empty, replyChoices: ['a', 'b', 'c', 'd'] }),
+    ).toThrow();
   });
 });

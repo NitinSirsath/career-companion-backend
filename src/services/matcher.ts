@@ -704,7 +704,7 @@ async function createActionFromEmail(
   aiResult: AIProcessingResult,
   carried: { actionStatus: Action['status']; snoozedUntil: Date | null },
 ) {
-  const request = requestOf(aiResult, email.receivedAt);
+  const request = requestOf(aiResult, email.receivedAt, email.sender);
   if (!request) throw new Error('EMAIL_HAS_NO_REQUEST');
   const parsed = request.deadline;
   if (request.deadlineText?.trim() && !parsed.deadline)

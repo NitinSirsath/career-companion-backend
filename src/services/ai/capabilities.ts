@@ -9,6 +9,8 @@ import {
   relevanceBatchContractFor,
   extractionContractFor,
   SCHEDULE_EXTRACTION_VERSIONS,
+  THREAD_EXTRACTION_VERSIONS,
+  NO_THREAD,
   EmailAnalyzer,
   RelevanceClassifier,
 } from './contracts';
@@ -39,6 +41,23 @@ async function run<T>(
   return { version: contract.version, data: parsed.data, model: model.id, usage };
 }
 
+/**
+ * The versions that read times also get the received time, and the thread versions also the
+ * conversation's open asks; the others get the body only.
+ */
+function extractionInput(
+  body: string,
+  contract: AIContract<unknown>,
+  options: Parameters<EmailAnalyzer['extractJobData']>[1],
+): string {
+  const receivedAt = options?.receivedAt ?? null;
+  if (THREAD_EXTRACTION_VERSIONS.includes(contract.version))
+    return JSON.stringify({ receivedAt, body, ...(options?.thread ?? NO_THREAD) });
+  if (SCHEDULE_EXTRACTION_VERSIONS.includes(contract.version))
+    return JSON.stringify({ receivedAt, body });
+  return body;
+}
+
 /** Feature-facing capabilities bound to one provider client and the models for each role. */
 export function bindCapabilities(client: ProviderClient, models: BoundModels): AICapabilities {
   return {
@@ -65,11 +84,12 @@ export function bindCapabilities(client: ProviderClient, models: BoundModels): A
     analyzer: {
       extractJobData: (body, options) => {
         const contract = extractionContractFor(options?.version ?? AI_CONTRACT_VERSIONS.EXTRACTION);
-        // The versions that read times also get the received time; the others get the body only.
-        const input = SCHEDULE_EXTRACTION_VERSIONS.includes(contract.version)
-          ? JSON.stringify({ receivedAt: options?.receivedAt ?? null, body })
-          : body;
-        return run(client, contract, models[contract.role], input);
+        return run(
+          client,
+          contract,
+          models[contract.role],
+          extractionInput(body, contract, options),
+        );
       },
     },
   };

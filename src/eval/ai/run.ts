@@ -19,7 +19,9 @@ import {
   EXTRACTION_BODY_LIMIT,
   EXTRACTION_VERSIONS,
   SCHEDULE_EXTRACTION_VERSIONS,
+  THREAD_EXTRACTION_VERSIONS,
 } from '../../services/ai/contracts';
+import { canReplyTo } from '../../services/emailRequest';
 import { evaluateCall } from './call';
 import { createProviderClient } from '../../services/ai/providers';
 import {
@@ -32,6 +34,7 @@ import {
   loadDataset,
   score,
   snippetOf,
+  THREAD_DATASET_DIR,
 } from './score';
 
 const REPORTS_DIR = path.join(__dirname, 'reports');
@@ -87,7 +90,12 @@ async function main() {
   if (!EXTRACTION_VERSIONS.includes(extractionVersion))
     throw new Error('Unsupported extraction version');
   const withTimes = SCHEDULE_EXTRACTION_VERSIONS.includes(extractionVersion);
-  const cases = [...loadDataset(), ...(withTimes ? temporalCases : [])];
+  const withThread = THREAD_EXTRACTION_VERSIONS.includes(extractionVersion);
+  const cases = [
+    ...loadDataset(),
+    ...(withThread ? loadDataset(THREAD_DATASET_DIR) : []),
+    ...(withTimes ? temporalCases : []),
+  ];
   const models = { fast: catalogModel('fast', fast), detailed: catalogModel('detailed', detailed) };
   const ai = bindCapabilities(createProviderClient(provider, apiKey), models);
   const results: CaseRun[] = [];
@@ -180,6 +188,12 @@ async function main() {
             ai.analyzer.extractJobData(c.input.body.slice(0, EXTRACTION_BODY_LIMIT), {
               version: extractionVersion,
               receivedAt: c.input.receivedAt ?? null,
+              thread: withThread
+                ? {
+                    senderCanReply: c.input.senderCanReply ?? canReplyTo(c.input.sender),
+                    openAsks: c.input.openAsks ?? [],
+                  }
+                : undefined,
             }),
           );
           result.extraction = {

@@ -10,6 +10,37 @@ import {
 import { lockUser, LOCK_NAMESPACE } from '../utils/advisoryLock';
 import { AppError, CHANGE_REJECTED } from '../errors';
 import { suppressNotifications } from './notificationSuppression';
+import { CLOSES_BY_ITSELF, mayCloseByHand, OPEN_AGAIN } from './threadAsks';
+
+/**
+ * A step from a mail follows the mail's request, so the Mails page agrees: "done" by hand only
+ * for a request done outside mail, which then closes as "you said you did it"; open again clears
+ * why it closed. A dismissed step changes nothing on the mail.
+ */
+async function followRequest(tx: Prisma.TransactionClient, emailId: string, status: string) {
+  const now = new Date();
+  if (status === 'COMPLETED') {
+    const read = await tx.aIProcessingResult.findUnique({
+      where: { emailId },
+      select: { askKind: true },
+    });
+    if (!mayCloseByHand(read?.askKind))
+      throw new AppError(409, 'CLOSES_BY_ITSELF', CLOSES_BY_ITSELF);
+    await tx.email.updateMany({
+      where: { id: emailId, requestClosedReason: null },
+      data: { requestClosedReason: 'YOU_SAID_DONE', requestClosedAt: now },
+    });
+    await tx.email.update({
+      where: { id: emailId },
+      data: { requestUserState: 'DONE', requestUserStateAt: now },
+    });
+  }
+  if (status === 'PENDING')
+    await tx.email.update({
+      where: { id: emailId },
+      data: { requestUserState: 'OPEN', requestUserStateAt: now, ...OPEN_AGAIN },
+    });
+}
 
 const context = {
   application: { select: { companyName: true, jobTitle: true } },
@@ -87,11 +118,11 @@ export async function updateActionStatus(
   status: string,
   revision?: number,
 ) {
-  return mutate(userId, id, revision, async (_tx, row) =>
-    row.status === status
-      ? {}
-      : { status, ...(status !== 'PENDING' ? { snoozedUntil: null } : {}) },
-  );
+  return mutate(userId, id, revision, async (tx, row) => {
+    if (row.status === status) return {};
+    if (row.emailId) await followRequest(tx, row.emailId, status);
+    return { status, ...(status !== 'PENDING' ? { snoozedUntil: null } : {}) };
+  });
 }
 export async function createFollowUp(
   userId: string,

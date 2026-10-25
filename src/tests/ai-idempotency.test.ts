@@ -186,8 +186,8 @@ describe('Durable AI external-effect boundary', () => {
     await processEmail(userId, emailId);
     await processEmail(userId, emailId);
     expect(client.calls('email_relevance')).toHaveLength(1);
-    expect(client.calls('job_extraction_v4')).toHaveLength(1);
-    expect(client.calls('job_extraction_v4')[0][0].input).toHaveLength(8000);
+    expect(client.calls('job_extraction_v6')).toHaveLength(1);
+    expect(JSON.parse(client.calls('job_extraction_v6')[0][0].input).body).toHaveLength(8000);
     expect(
       (await prisma.aIProcessingResult.findUniqueOrThrow({ where: { emailId } })).relevanceDecision,
     ).toBe('UNCERTAIN');
@@ -212,6 +212,6 @@ describe('Durable AI external-effect boundary', () => {
     await expect(processEmail(userId, emailId)).rejects.toThrow('domain failure');
     await processEmail(userId, emailId);
     expect(client.calls('email_relevance')).toHaveLength(1);
-    expect(client.calls('job_extraction_v4')).toHaveLength(1);
+    expect(client.calls('job_extraction_v6')).toHaveLength(1);
   });
 });

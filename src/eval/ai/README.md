@@ -6,6 +6,7 @@ Synthetic evaluation of a provider/model pair against Career Companion's AI cont
 AI_EVAL_API_KEY=<key> npm run ai:eval -- --provider <gemini|openai|anthropic|openrouter> --fast <catalog model> --detailed <catalog model> [--runs 2] [--baseline <report.json>]
 ```
 
+- `dataset-thread/` holds the cases for the thread extraction versions (v6, the default, and v7): mails read with the conversation's open asks. They check that a mail closes the asks it replaces or confirms, and keeps open the ones a short mail, a reminder or text that tells the AI to close asks do not settle; the kind of ask; and the reply choices. They run only with a thread version.
 - `dataset/` holds synthetic emails only. Use fictitious people and companies and reserved domains (`example.com`, `example.org`, `example.net`, `*.test`). The dataset test enforces the domains.
 - `score.ts` holds the metrics and pass criteria. `eval.test.ts` covers them in CI, with no network.
 - `run.ts` is the manual runner. It uses the production adapters and contracts and touches no database, Gmail or ledger.

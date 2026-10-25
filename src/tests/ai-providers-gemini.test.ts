@@ -367,7 +367,15 @@ describe('Gemini adapter', () => {
     });
     const result = await capabilities().analyzer.extractJobData('test body');
     expect(mockGenerateContent).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'gemini-2.5-flash', contents: 'test body' }),
+      expect.objectContaining({
+        model: 'gemini-2.5-flash',
+        contents: JSON.stringify({
+          receivedAt: null,
+          body: 'test body',
+          senderCanReply: true,
+          openAsks: [],
+        }),
+      }),
     );
     expect(result.data.companyName).toBe('TestCo');
     expect(result.data.jobTitle).toBeNull();
