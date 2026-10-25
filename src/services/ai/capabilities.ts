@@ -16,6 +16,7 @@ import {
 } from './contracts';
 import { ProviderFailure } from './errors';
 import { REPLY_READ_CONTRACT, type ReplyRead, type ReplyReadInput } from './replyRead';
+import { REPLY_DRAFT_CONTRACT, type ReplyDraft, type ReplyDraftInput } from './replyDraft';
 import type { ProviderClient } from './providers';
 
 export type BoundModels = Record<AIRole, CatalogModel>;
@@ -24,6 +25,8 @@ export type BoundModels = Record<AIRole, CatalogModel>;
 export interface ReplyCapabilities {
   /** Which open asks the user's reply settles. */
   read(input: ReplyReadInput): Promise<AIResult<ReplyRead>>;
+  /** A draft of the user's reply, from the whole conversation. */
+  write(input: ReplyDraftInput): Promise<AIResult<ReplyDraft>>;
 }
 
 export interface AICapabilities {
@@ -103,6 +106,8 @@ export function bindCapabilities(client: ProviderClient, models: BoundModels): A
     replies: {
       read: (input) =>
         run(client, REPLY_READ_CONTRACT, models[REPLY_READ_CONTRACT.role], JSON.stringify(input)),
+    write: (input) =>
+      run(client, REPLY_DRAFT_CONTRACT, models[REPLY_DRAFT_CONTRACT.role], JSON.stringify(input)),
     },
   };
 }
