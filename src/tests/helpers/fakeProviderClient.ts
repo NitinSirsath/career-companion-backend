@@ -19,7 +19,10 @@ export function fakeProviderClient(responses: {
     data: await answer(responseFor(contract.schemaName), input),
     usage: { inputTokens: 10, outputTokens: 5 },
   }));
-  const calls = (schemaName: 'email_relevance' | 'email_relevance_batch' | 'job_extraction_v4') =>
+  const calls = (
+    schemaName:
+      'email_relevance' | 'email_relevance_batch' | 'job_extraction_v4' | 'job_extraction_v6',
+  ) =>
     generateStructured.mock.calls.filter(([request]) => request.contract.schemaName === schemaName);
   const verifyModels = vi.fn(async (): Promise<VerifyResult> => ({ result: 'VERIFIED' }));
   return { generateStructured, verifyModels, calls };
