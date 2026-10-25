@@ -107,7 +107,7 @@ export function bindCapabilities(client: ProviderClient, models: BoundModels): A
       read: (input) =>
         run(client, REPLY_READ_CONTRACT, models[REPLY_READ_CONTRACT.role], JSON.stringify(input)),
       write: (input) =>
-      run(client, REPLY_DRAFT_CONTRACT, models[REPLY_DRAFT_CONTRACT.role], JSON.stringify(input)),
+        run(client, REPLY_DRAFT_CONTRACT, models[REPLY_DRAFT_CONTRACT.role], JSON.stringify(input)),
     },
   };
 }
