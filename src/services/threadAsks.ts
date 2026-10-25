@@ -38,8 +38,9 @@ export interface OpenAsk {
   askedAt: string | null;
 }
 
-interface ThreadMail {
-  id: string;
+/** A message of a conversation: a received mail (`id`), or a sent one, which has no email row. */
+interface ThreadMessage {
+  id?: string;
   userId: string;
   threadId: string | null;
 }
@@ -51,7 +52,7 @@ interface ThreadMail {
  */
 export async function openAsksBefore(
   db: Db,
-  mail: ThreadMail,
+  mail: ThreadMessage,
   before: Date | null,
 ): Promise<OpenAsk[]> {
   if (!mail.threadId) return [];
@@ -59,7 +60,7 @@ export async function openAsksBefore(
     where: {
       userId: mail.userId,
       threadId: mail.threadId,
-      id: { not: mail.id },
+      ...(mail.id ? { id: { not: mail.id } } : {}),
       relevanceState: 'RELEVANT',
       requestClosedReason: null,
       ...(before ? { receivedAt: { lt: before } } : {}),
@@ -139,7 +140,7 @@ export const OPEN_AGAIN = {
  */
 export async function closeNamedAsks(
   userId: string,
-  mail: ThreadMail & { before: Date | null },
+  mail: ThreadMessage & { before: Date | null },
   named: { id: string; reason: RequestClosedReason }[],
   byMessageId: string,
 ): Promise<number> {
