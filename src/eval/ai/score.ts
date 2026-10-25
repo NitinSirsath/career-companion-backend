@@ -34,12 +34,19 @@ const ExtractionField = z.enum([
   'followUpRequired',
   'followUpDate',
   'fakeOfferWarning',
+  'askKind',
+  'closedAsks',
+  'replyChoices',
 ]);
 const Matcher = z.union([
   z.strictObject({ contains: z.array(z.string().min(1)).min(1) }),
   z.strictObject({ date: z.iso.date() }),
   z.strictObject({ equals: z.boolean() }),
   z.strictObject({ present: z.literal(true) }),
+  /** closedAsks: exactly these open asks close, no other. */
+  z.strictObject({ ids: z.array(z.string()) }),
+  /** replyChoices: how many. */
+  z.strictObject({ items: z.strictObject({ min: z.number().int(), max: z.number().int() }) }),
 ]);
 export type Matcher = z.infer<typeof Matcher>;
 
@@ -53,6 +60,18 @@ export const EvalCaseSchema = z.strictObject({
     snippet: z.string().optional(),
     body: z.string().min(1),
     receivedAt: z.iso.datetime({ offset: true }).optional(),
+    /** Thread versions only: the conversation's open asks, and a no-reply sender. */
+    openAsks: z
+      .array(
+        z.strictObject({
+          id: z.string(),
+          ask: z.string(),
+          kind: z.enum(['REPLY_BY_MAIL', 'OUTSIDE_MAIL']).nullable(),
+          askedAt: z.string().nullable(),
+        }),
+      )
+      .optional(),
+    senderCanReply: z.boolean().optional(),
   }),
   expect: z.strictObject({
     /** ANY marks a borderline case, excluded from relevance accuracy. */
@@ -70,6 +89,8 @@ export const EvalCaseSchema = z.strictObject({
 export type EvalCase = z.infer<typeof EvalCaseSchema>;
 
 export const DATASET_DIR = path.join(__dirname, 'dataset');
+/** Cases for the thread extraction versions (v6, v7): mails read with open asks. */
+export const THREAD_DATASET_DIR = path.join(__dirname, 'dataset-thread');
 
 export function loadDataset(dir = DATASET_DIR): EvalCase[] {
   return fs
@@ -126,6 +147,15 @@ export function sameDate(actual: string, expected: string): boolean {
 }
 
 export function matches(actual: unknown, matcher: Matcher): boolean {
+  if ('ids' in matcher) {
+    if (!Array.isArray(actual) && actual != null) return false;
+    const closed = ((actual ?? []) as { id?: unknown }[]).map((entry) => entry?.id);
+    return closed.length === matcher.ids.length && matcher.ids.every((id) => closed.includes(id));
+  }
+  if ('items' in matcher) {
+    const count = Array.isArray(actual) ? actual.length : 0;
+    return count >= matcher.items.min && count <= matcher.items.max;
+  }
   if ('equals' in matcher) return actual === matcher.equals;
   if ('present' in matcher) return actual !== null && actual !== undefined && actual !== '';
   if (typeof actual !== 'string') return false;
