@@ -3,6 +3,7 @@ import type { EmailCategory, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { fetchMessageBody, fetchMessageMetadata } from '../gmailFetcher';
 import { matchEmailToApplication } from '../matcher';
+import { canReplyTo, closeAsksFromRead, openAsksBefore } from '../threadAsks';
 import { AIAccess, resolveAIAccess } from './access';
 import {
   AI_CONTRACT_VERSIONS,
@@ -11,12 +12,14 @@ import {
   FAKE_OFFER_EXTRACTION_VERSIONS,
   RELEVANCE_BATCH_VERSIONS,
   SCHEDULE_EXTRACTION_VERSIONS,
+  THREAD_EXTRACTION_VERSIONS,
+  ThreadReadSchema,
   classificationContractFor,
   extractionContractFor,
   usesStrictRules,
   CLASSIFICATION_INPUT_LIMITS as LIMITS,
   EXTRACTION_BODY_LIMIT,
-  EXTRACTION_V5_CONTRACT,
+  EXTRACTION_V7_CONTRACT,
   JobExtractionSchema,
   JobExtractionV3Schema,
   JobExtractionV4Schema,
@@ -215,6 +218,17 @@ async function extract(run: EmailRun) {
   const body = await fetchMessageBody(userId, email.gmailMessageId, run.options);
   const contract = await selectExtractionContract(userId, emailId);
   const schedule = SCHEDULE_EXTRACTION_VERSIONS.includes(contract.version);
+  const threaded = THREAD_EXTRACTION_VERSIONS.includes(contract.version);
+  const senderCanReply = canReplyTo(email.sender);
+  // The conversation's open asks, so the read can say which of them this mail closes.
+  const thread = threaded
+    ? {
+        senderCanReply,
+        openAsks: (await openAsksBefore(prisma, email, email.receivedAt)).map(
+          ({ id, ask, kind, askedAt }) => ({ id, ask, kind, askedAt }),
+        ),
+      }
+    : undefined;
   const extraction = await runOperation({
     userId,
     emailId,
@@ -226,6 +240,7 @@ async function extract(run: EmailRun) {
       const output = await ai.analyzer.extractJobData(bounded, {
         version: contract.version,
         receivedAt: email.receivedAt?.toISOString() ?? null,
+        thread,
       });
       if (schedule) {
         const parsed = JobExtractionV3Schema.parse(output.data);
@@ -258,6 +273,7 @@ async function extract(run: EmailRun) {
               JobExtractionV4Schema.parse(extraction.data).fakeOfferWarning?.trim() || null,
           }
         : {}),
+      ...(threaded ? threadResult(extraction.data, senderCanReply) : {}),
       ...provenance(extraction, email.aiProcessingResult),
       contractVersion: contract.version,
       processingStatus: 'COMPLETED',
@@ -265,9 +281,31 @@ async function extract(run: EmailRun) {
   });
 }
 
+/** Longest reply choice kept; the AI is asked for six words. */
+const CHOICE_LIMIT = 60;
+
+/**
+ * How the user does the request, and the replies they could send: none for a no-reply sender or
+ * a mail that asks for money, at most three, each short and once.
+ */
+function threadResult(data: unknown, senderCanReply: boolean) {
+  const read = ThreadReadSchema.parse(data);
+  const fake = !!JobExtractionV4Schema.parse(data).fakeOfferWarning?.trim();
+  const choices = (read.replyChoices ?? [])
+    .map((choice) => choice.trim().slice(0, CHOICE_LIMIT))
+    .filter((choice, index, all) => choice && all.indexOf(choice) === index)
+    .slice(0, 3);
+  return {
+    askKind: read.askKind ?? null,
+    replyChoices: senderCanReply && !fake ? choices : [],
+  };
+}
+
 async function finishEmail(userId: string, emailId: string, decision: string | null) {
   if (!decision) throw new TerminalAIError('Completed result has no relevance decision');
   if (decision !== 'IRRELEVANT') await matchEmailToApplication(emailId);
+  // Safe to repeat: an ask that is closed already keeps its own reason.
+  if (decision !== 'IRRELEVANT') await closeAsksFromRead(userId, emailId);
   await prisma.email.updateMany({
     where: { id: emailId, userId },
     data: {
@@ -297,11 +335,11 @@ export async function selectExtractionContract(
       throw new TerminalAIError(
         'The AI details of this email have conflicting versions; NorthList must check it',
       );
-    // New mails only: an email that started on an older version (v2, v3) finishes on it.
+    // New mails only: an email that started on an older version (v2 to v5) finishes on it.
     const version =
       rows[0]?.version ??
       (agendaExtractionV3Enabled()
-        ? EXTRACTION_V5_CONTRACT.version
+        ? EXTRACTION_V7_CONTRACT.version
         : AI_CONTRACT_VERSIONS.EXTRACTION);
     if (!rows.length)
       await tx.aIOperation.create({ data: { emailId, operation: 'extraction', version } });
