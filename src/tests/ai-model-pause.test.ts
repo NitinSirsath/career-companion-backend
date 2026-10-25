@@ -171,7 +171,7 @@ describe('each model pauses on its own', () => {
       await prisma.aIProcessingResult.findUniqueOrThrow({ where: { emailId: interview } }),
     ).toMatchObject({ model: FAST, companyName: 'Northwind Robotics' });
     expect(client.calls('email_relevance')).toHaveLength(2);
-    expect(client.calls('job_extraction_v4')).toHaveLength(1);
+    expect(client.calls('job_extraction_v6')).toHaveLength(1);
     // Flash-Lite's successes leave the 3.8 Flash pause and its count as they were.
     expect(await pauseOf(userId, DETAILED)).toEqual(paused);
     expect(await pauseOf(userId, FAST)).toBeNull();
@@ -188,7 +188,7 @@ describe('each model pauses on its own', () => {
     await processEmailJob(job(interview));
 
     expect(await mail(interview)).toMatchObject({ processingState: 'COMPLETED' });
-    expect(client.calls('job_extraction_v4').map(([call]) => call.model.id)).toEqual([
+    expect(client.calls('job_extraction_v6').map(([call]) => call.model.id)).toEqual([
       DETAILED,
       FAST,
     ]);
@@ -245,7 +245,7 @@ describe('"Read waiting mails now" sends one test mail first', () => {
       expect(secondsFromNow(stillBusy.resumesAt)).toBeLessThanOrEqual(120);
       await until(async () => (await mail(newest)).processingState === 'PENDING');
       // Only the test mail was sent; the others were not offered.
-      expect(client.calls('job_extraction_v4')).toHaveLength(1);
+      expect(client.calls('job_extraction_v6')).toHaveLength(1);
       expect(offered()).toEqual([newest]);
       // The settings show the pause again, with the test's result kept on it.
       const settings = await request(app).get('/api/ai/settings').set('X-Development-User', EMAIL);
@@ -269,7 +269,7 @@ describe('"Read waiting mails now" sends one test mail first', () => {
           (await mail(older)).processingState === 'COMPLETED',
       );
       expect(offered().sort()).toEqual([newest, older, oldest].sort());
-      expect(client.calls('job_extraction_v4')).toHaveLength(4);
+      expect(client.calls('job_extraction_v6')).toHaveLength(4);
     } finally {
       await boss.offWork(AI_RESUME_JOB, { wait: true });
       await boss.offWork(EMAIL_PROCESSING_JOB, { wait: true });
@@ -298,7 +298,7 @@ describe('"Read waiting mails now" sends one test mail first', () => {
       testEmailId: newest,
       testResult: 'PROVIDER_BUSY',
     });
-    expect(client.calls('job_extraction_v4')).toHaveLength(1);
+    expect(client.calls('job_extraction_v6')).toHaveLength(1);
     expect(await mail(older)).toMatchObject({ processingState: 'PENDING' });
   });
 
@@ -334,7 +334,7 @@ describe('"Read waiting mails now" sends one test mail first', () => {
       processingState: 'COMPLETED',
       relevanceState: 'IRRELEVANT',
     });
-    expect(client.calls('job_extraction_v4')).toHaveLength(0);
+    expect(client.calls('job_extraction_v6')).toHaveLength(0);
     expect(await pauseOf(userId, FAST)).toBeNull();
     await showsDetailedPause(resumesAt, 3);
   });
