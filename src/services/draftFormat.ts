@@ -59,14 +59,14 @@ function inline(text: string, marks: DraftMark[] = [], out: DraftInline[] = []):
       rest = rest.slice(bold[0].length);
       continue;
     }
-    const italic = rest.match(/^(?:_(?=\S)([\s\S]*?\S)_(?![a-z0-9])|\\\*(?=\S)([^\*]*?\S)\\\*)/i);
+    const italic = rest.match(/^(?:_(?=\S)([\s\S]*?\S)_(?![a-z0-9])|\*(?=\S)([^*]*?\S)\*)/i);
     if (italic) {
       inline(italic[1] ?? italic[2], [...marks, { type: 'italic' }], out);
       rest = rest.slice(italic[0].length);
       continue;
     }
     // Plain text up to the next possible mark; a lone mark character stays as it is.
-    const next = rest.slice(1).search(/[[\*_]/);
+    const next = rest.slice(1).search(/[[*_]/);
     const take = next === -1 ? rest.length : next + 1;
     push(out, rest.slice(0, take), marks);
     rest = rest.slice(take);
@@ -84,7 +84,7 @@ function textOf(nodes: DraftInline[]): string {
     }
     const href = node.marks?.find((mark) => mark.type === 'link')?.attrs?.href;
     text +=
-      href && href !== node.text ? ${{node.text} ({href.replace(/^mailto:/i, '')})` : node.text;
+      href && href !== node.text ? `${node.text} (${href.replace(/^mailto:/i, '')})` : node.text;
   }
   return text;
 }
@@ -139,8 +139,8 @@ function plainText(content: DraftBlock[]): string {
       return block.content
         .map((item, index) => {
           const start = block.type === 'orderedList' ? (block.attrs?.start ?? 1) : 1;
-          const marker = block.type === 'bulletList' ? '-' : ${{start + index}.`;
-          return ${{marker} ${{item.content.map((p) => textOf(p.content ?? [])).join('\n')}`;
+          const marker = block.type === 'bulletList' ? '-' : `${start + index}.`;
+          return `${marker} ${item.content.map((p) => textOf(p.content ?? [])).join('\n')}`;
         })
         .join('\n');
     })
