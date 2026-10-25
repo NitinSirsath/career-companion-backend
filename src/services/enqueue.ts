@@ -135,3 +135,33 @@ export async function enqueueGmailSync(data: GmailSyncJobData): Promise<string |
     expireInSeconds: GMAIL_SYNC_EXPIRE_SECONDS,
   });
 }
+
+export const REPLY_READING_JOB = 'reply-reading-job';
+
+export interface ReplyReadingJobData {
+  userId: string;
+  outgoingEmailId: string;
+}
+
+export const replyReadingJobOptions = (outgoingEmailId: string, startAfter?: Date) => ({
+  // One job per sent message and start time: a later try never holds back an earlier one.
+  singletonKey: `reply-read:${outgoingEmailId}${startAfter ? `:${startAfter.toISOString()}` : ''}`,
+  ...(startAfter ? { startAfter } : {}),
+  retryLimit: 3,
+  retryDelay: 60,
+  retryBackoff: true,
+  expireInSeconds: 300,
+});
+
+/** Reads the user's own reply now, or after a pause or the daily limit ends (`startAfter`). */
+export async function enqueueReplyReading(
+  userId: string,
+  outgoingEmailId: string,
+  startAfter?: Date,
+): Promise<string | null> {
+  return (await getQueue()).send(
+    REPLY_READING_JOB,
+    { userId, outgoingEmailId },
+    replyReadingJobOptions(outgoingEmailId, startAfter),
+  );
+}
