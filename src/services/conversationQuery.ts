@@ -68,14 +68,15 @@ function filterConditions(filters: ConversationFilters, pattern: string | null):
 /**
  * Job-related emails grouped into conversations. A mail with a fake offer warning always asks for
  * something: the safe next step that replaces its own request (see `requestOf`). A request is DONE when its application action
- * is finished, or, while it has no action, when the user marked it done; REPLIED when the user
- * sent a message after it, unless they reopened it later; otherwise OPEN.
+ * is finished, when something closed it (a newer mail, the user's reply, "I did this" or the
+ * application closing), or, while it has no action, when the user marked it done; REPLIED when
+ * the user sent a message after it, unless they reopened it later; otherwise OPEN.
  */
 function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql): Prisma.Sql {
   return Prisma.sql`
     WITH relevant AS (
       SELECT e.id, e."receivedAt", e."applicationId", e."matchState", e."seenAt",
-             e."requestUserState", e."requestUserStateAt",
+             e."requestUserState", e."requestUserStateAt", e."requestClosedReason",
              COALESCE(e."threadId", e.id::text) AS key,
              r.category::text AS category,
              (COALESCE(r."actionRequired", FALSE) OR COALESCE(r."followUpRequired", FALSE)
@@ -92,7 +93,7 @@ function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql):
     ),
     request AS (
       SELECT DISTINCT ON (key) key, id AS "requestEmailId", "receivedAt" AS "requestAt",
-             "requestUserState", "requestUserStateAt"
+             "requestUserState", "requestUserStateAt", "requestClosedReason"
       FROM relevant
       WHERE asks
       ORDER BY key, "receivedAt" DESC NULLS LAST, id DESC
@@ -124,6 +125,7 @@ function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql):
              CASE
                WHEN q."requestEmailId" IS NULL THEN 'NONE'
                WHEN a.status IN ('COMPLETED', 'DISMISSED') THEN 'DONE'
+               WHEN q."requestClosedReason" IS NOT NULL THEN 'DONE'
                WHEN a.status IS NULL AND q."requestUserState" = 'DONE' THEN 'DONE'
                WHEN s."lastSentAt" > q."requestAt" AND NOT COALESCE(
                  q."requestUserState" = 'OPEN' AND q."requestUserStateAt" > s."lastSentAt", FALSE
