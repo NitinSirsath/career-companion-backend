@@ -42,7 +42,6 @@ async function followRequest(tx: Prisma.TransactionClient, emailId: string, stat
     });
 }
 
-
 const context = {
   application: { select: { companyName: true, jobTitle: true } },
   email: { select: { subject: true, sender: true, threadId: true, gmailMessageId: true } },
