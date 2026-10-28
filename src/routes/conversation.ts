@@ -7,6 +7,8 @@
  *   PATCH /api/conversations/:key/request      the user's answer to the newest request
  *   POST  /api/conversations/:key/reply-draft  an AI draft of the user's reply, never stored
  *   POST  /api/conversations/:key/application  create or choose the conversation's application
+ *   DELETE /api/conversations/:key             delete it from the app; `block` blocks its company
+ *   POST  /api/conversations/:key/block        block its company's new mail; the conversation stays
  *
  * No email text is returned here, apart from the AI draft the user asked for; `routes/mailbox.ts`
  * reads the mails live from Gmail.
@@ -26,7 +28,10 @@ import {
   markConversationSeen,
   setRequestState,
 } from '../services/conversation';
+import { DeleteConversationRequestSchema } from '../contracts/blockedSender';
+import { blockConversationSender } from '../services/blockedSenders';
 import { linkConversation } from '../services/conversationApplication';
+import { deleteConversation } from '../services/removal';
 import { writeReplyDraft } from '../services/replyDraft';
 import { createPaginatedResponse, getPaginationParams } from '../utils/pagination';
 
@@ -59,6 +64,25 @@ router.get(
 router.get(
   '/:key',
   handle((req) => getConversation(req.auth!.user.id, Key.parse(req.params.key))),
+);
+
+router.delete(
+  '/:key',
+  handle((req) =>
+    deleteConversation(
+      req.auth!.user.id,
+      Key.parse(req.params.key),
+      DeleteConversationRequestSchema.parse(req.body ?? {}),
+    ),
+  ),
+);
+
+router.post(
+  '/:key/block',
+  handle((req) => {
+    EmptyBody.parse(req.body ?? {});
+    return blockConversationSender(req.auth!.user.id, Key.parse(req.params.key));
+  }),
 );
 
 router.post(
