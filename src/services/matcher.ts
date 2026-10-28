@@ -14,6 +14,7 @@ import {
   MatchConfirmationSource,
 } from '@prisma/client';
 import { enqueueNotificationJob } from './enqueue';
+import { recordStatusChange, retireStatusChangesOfEmail } from './statusLog';
 import { logEvent, logError } from '../utils/log';
 
 // Messages for a match correction that fails.
@@ -389,6 +390,7 @@ async function retireWorkFromEmail(
     where: { emailId, userId, applicationId: { in: sources }, retiredAt: null },
     data: { ...retirement, revision: { increment: 1 } },
   });
+  await retireStatusChangesOfEmail(tx, emailId, sources);
   return { retiredEvents: retiredEvents.count, retiredActions: retiredActions.count };
 }
 
@@ -404,8 +406,15 @@ async function refreshAiStatus(tx: Prisma.TransactionClient, userId: string, app
       where: { email: { userId, applicationId: app.id, matchState: 'MATCHED' } },
     });
     const aiStatus = aiStatusFromEvidence(remaining);
-    if (app.aiStatus !== aiStatus)
-      await tx.application.update({ where: { id: app.id }, data: { aiStatus } });
+    if (app.aiStatus === aiStatus) continue;
+    await tx.application.update({ where: { id: app.id }, data: { aiStatus } });
+    await recordStatusChange(tx, {
+      applicationId: app.id,
+      before: app,
+      after: { aiStatus, userStatus: app.userStatus },
+      source: 'AI',
+      changedAt: new Date(),
+    });
   }
 }
 
@@ -649,11 +658,20 @@ async function recordEmailOnTimeline(
     applicationId = app.id;
   const newState = inferState(aiResult);
   const finalState = newState && canTransition(app.aiStatus, newState) ? newState : app.aiStatus;
-  if (finalState !== app.aiStatus)
+  if (finalState !== app.aiStatus) {
     await tx.application.update({
       where: { id: applicationId },
       data: { aiStatus: finalState },
     });
+    await recordStatusChange(tx, {
+      applicationId,
+      before: app,
+      after: { aiStatus: finalState, userStatus: app.userStatus },
+      source: 'AI',
+      changedAt: email.receivedAt ?? new Date(),
+      emailId,
+    });
+  }
   const existingEvent = await tx.applicationEvent.findFirst({
     where: { applicationId, emailId, type: 'EMAIL_PROCESSED' },
   });
