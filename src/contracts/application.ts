@@ -35,15 +35,6 @@ export type ApplicationFilters = z.infer<typeof ApplicationFiltersSchema>;
 
 export type ApplicationStatus = z.infer<typeof ApplicationStatusSchema>;
 
-export const CreateApplicationRequestSchema = z.object({
-  companyName: z.string().trim().min(1, 'Company name is required').max(200),
-  jobTitle: z.string().optional(),
-  location: z.string().optional(),
-  appliedAt: z.string().datetime().optional().or(z.date().optional()),
-});
-
-export type CreateApplicationRequest = z.infer<typeof CreateApplicationRequestSchema>;
-
 // ─── Source email evidence ─────────────────────────────────────────────────
 // Owned, bounded metadata only. null means the evidence is unavailable, not an error.
 
