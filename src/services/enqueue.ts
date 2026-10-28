@@ -165,3 +165,23 @@ export async function enqueueReplyReading(
     replyReadingJobOptions(outgoingEmailId, startAfter),
   );
 }
+
+export const DASHBOARD_TIP_JOB = 'dashboard-tip-job';
+
+export interface DashboardTipJobData {
+  userId: string;
+  timeZone: string;
+}
+
+/** Makes the Dashboard's AI tip. One job per user and UTC day, so a day never gets two. */
+export async function enqueueDashboardTip(userId: string, timeZone: string, now: Date) {
+  return (await getQueue()).send(
+    DASHBOARD_TIP_JOB,
+    { userId, timeZone },
+    {
+      singletonKey: `dashboard-tip:${userId}:${now.toISOString().slice(0, 10)}`,
+      retryLimit: 0,
+      expireInSeconds: 300,
+    },
+  );
+}
