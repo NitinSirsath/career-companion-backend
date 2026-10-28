@@ -19,6 +19,7 @@ export * from './integrationToken';
 export * from './submission';
 
 export * from './workspace';
+export * from './dashboard';
 
 export * from './agenda';
 export * from './temporal';
