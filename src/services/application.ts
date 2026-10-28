@@ -1,5 +1,5 @@
 import { AppError, CHANGE_REJECTED } from '../errors';
-import { Prisma } from '@prisma/client';
+import { ApplicationStatus, Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import {
   CreateApplicationRequest,
@@ -15,6 +15,7 @@ import {
 import { logError } from '../utils/log';
 import { repliedRequests } from './conversationQuery';
 import { closeAsksOfApplication } from './threadAsks';
+import { recordStatusChange } from './statusLog';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -295,7 +296,8 @@ const CLOSING_STATUSES: readonly (string | null)[] = ['REJECTED', 'CLOSED'];
  * Owned manual status correction. One transaction locks the application row by id AND owner,
  * compares the manual revision BEFORE no-op detection, then writes only manual fields.
  * Locks no email (compatible with matcher's email → application order), makes no external call,
- * enqueues nothing and never touches aiStatus, events or AI operation/budget records.
+ * enqueues nothing and never touches aiStatus, events or AI operation/budget records. A change of
+ * the status the user sees is kept in the status-change log.
  * Setting Rejected or Closed then closes the open asks of its mails, in their own transaction
  * under the user's match lock (`closeAsksOfApplication`).
  */
@@ -317,9 +319,14 @@ async function saveUserStatus(
 ): Promise<{ application: ApplicationResponse; changed: boolean }> {
   return prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<
-      { userStatus: string | null; userStatusRevision: number; archivedAt: Date | null }[]
+      {
+        aiStatus: ApplicationStatus | null;
+        userStatus: ApplicationStatus | null;
+        userStatusRevision: number;
+        archivedAt: Date | null;
+      }[]
     >`
-      SELECT "userStatus", "userStatusRevision", "archivedAt" FROM applications
+      SELECT "aiStatus", "userStatus", "userStatusRevision", "archivedAt" FROM applications
       WHERE id = ${id}::uuid AND "userId" = ${userId}::uuid
       FOR UPDATE`;
     if (!locked.length) throw new AppError(404, 'NOT_FOUND', 'Application not found');
@@ -334,13 +341,21 @@ async function saveUserStatus(
 
     const changed = current.userStatus !== request.userStatus;
     if (changed) {
+      const now = new Date();
       await tx.application.update({
         where: { id },
         data: {
           userStatus: request.userStatus,
-          userStatusSetAt: request.userStatus === null ? null : new Date(),
+          userStatusSetAt: request.userStatus === null ? null : now,
           userStatusRevision: { increment: 1 },
         },
+      });
+      await recordStatusChange(tx, {
+        applicationId: id,
+        before: current,
+        after: { aiStatus: current.aiStatus, userStatus: request.userStatus },
+        source: 'USER',
+        changedAt: now,
       });
     }
     // Same transaction snapshot as the acknowledged write.
