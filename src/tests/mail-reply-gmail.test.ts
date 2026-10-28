@@ -306,7 +306,56 @@ describe('the mail the app builds', () => {
     expect(head.split('\r\n')).toHaveLength(7);
   });
 
-  it('sends without a quote when the answered mail has no plain text, and not at all without an address', () => {
+  it('quotes a mail that came as HTML only by its text', () => {
+    const htmlOnly = {
+      ...recruiterMail,
+      payload: {
+        ...recruiterMail.payload,
+        parts: [
+          {
+            partId: '0',
+            mimeType: 'text/html',
+            body: {
+              data: b64('<div>Hi Alex,</div><div>Please send <b>dates</b> &amp; times.</div>'),
+            },
+          },
+        ],
+      },
+    };
+    const answered = replyTarget(thread(htmlOnly), OWNER)!;
+    expect(answered.text).toBe('Hi Alex,\nPlease send dates & times.');
+    expect(fromRawMail(b64(buildReplyMail('Ok', answered)!))?.body).toBe(
+      'Ok\n\nOn Mon, 12 Oct 2026 10:02:00 GMT, Priya Raman <priya@northwind.example> wrote:\n> Hi Alex,\n> Please send dates & times.',
+    );
+  });
+
+  it('is a plain-text and an HTML part for a formatted reply, and the sandbox reads both back', () => {
+    const mail = buildReplyMail(
+      'Thursday works.',
+      target,
+      false,
+      '<p><strong>Thursday</strong> works.</p>',
+    )!;
+    const head = mail.split('\r\n\r\n')[0].split('\r\n');
+    expect(head.slice(4)).toEqual([
+      'MIME-Version: 1.0',
+      'Content-Type: multipart/alternative;',
+      expect.stringMatching(/^ boundary="northlist-[0-9a-f]{24}"$/),
+    ]);
+    expect(mail.split('\r\n').every((line) => line.length <= 76)).toBe(true);
+    const back = fromRawMail(b64(mail))!;
+    expect(back.body).toBe(
+      'Thursday works.\n\nOn Mon, 12 Oct 2026 10:02:00 GMT, Priya Raman <priya@northwind.example> wrote:\n> Please send dates.',
+    );
+    expect(back.html).toBe(
+      '<div dir="ltr"><p><strong>Thursday</strong> works.</p></div><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">' +
+        'On Mon, 12 Oct 2026 10:02:00 GMT, Priya Raman &lt;priya@northwind.example&gt; wrote:<br></div>' +
+        '<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">' +
+        'Please send dates.</blockquote></div>',
+    );
+  });
+
+  it('sends without a quote when the answered mail has no text, and not at all without an address', () => {
     const noText = replyTarget(thread(message('m1', ['INBOX'], FROM_RECRUITER, null)), OWNER)!;
     expect(fromRawMail(b64(buildReplyMail('Ok', noText)!))?.body).toBe('Ok');
     expect(recipientHeader('Søren <søren@blåbær.example>')).toBeNull();
@@ -409,6 +458,84 @@ describe('sending through Gmail', () => {
     expect(handed.mail?.body.startsWith(`${TEXT}\n\nOn `)).toBe(true);
     // No hidden retry by Google's client either.
     expect(mocks.send.mock.calls[0][1]).toMatchObject({ retryConfig: { retry: 0 } });
+  });
+
+  it('sends a formatted reply from its structure: the server writes the text and the HTML', async () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'REPLYSENTINEL <b>Free</b> times:' }],
+        },
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    { type: 'text', text: 'Tuesday', marks: [{ type: 'bold' }] },
+                    { type: 'text', text: ' after 3 pm' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              text: 'portfolio',
+              marks: [{ type: 'link', attrs: { href: 'https://alex.example', target: '_blank' } }],
+            },
+            { type: 'text', text: ' and ' },
+            {
+              type: 'text',
+              text: 'this',
+              marks: [{ type: 'link', attrs: { href: 'javascript:alert(1)' } }],
+            },
+          ],
+        },
+      ],
+    };
+    const res = await reply(randomUUID(), undefined, { doc });
+    expect(res.status).toBe(200);
+    const { mail } = handedToGmail();
+    expect(
+      mail?.body.startsWith(
+        'REPLYSENTINEL <b>Free</b> times:\n\n- Tuesday after 3 pm\n\nportfolio (https://alex.example) and this\n\nOn ',
+      ),
+    ).toBe(true);
+    expect(
+      mail?.html?.startsWith(
+        '<div dir="ltr"><p>REPLYSENTINEL &lt;b&gt;Free&lt;/b&gt; times:</p><ul><li><strong>Tuesday</strong> after 3 pm</li></ul>' +
+          '<p><a href="https://alex.example">portfolio</a> and this</p></div><br><div class="gmail_quote">',
+      ),
+    ).toBe(true);
+    expect(mail?.html).not.toContain('javascript:');
+  });
+
+  it('refuses an empty or too long reply, and a request with no reply at all, before anything is sent', async () => {
+    const empty = { type: 'doc', content: [{ type: 'paragraph' }] };
+    const long = {
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'x'.repeat(20_001) }] }],
+    };
+    for (const body of [{ doc: empty }, { doc: long }, {}]) {
+      const res = await request(app)
+        .post(`/api/mailbox/threads/${THREAD}/replies`)
+        .set(as)
+        .send({ replyId: randomUUID(), ...body });
+      expect(res.status).toBe(400);
+    }
+    expect(mocks.threadsGet).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(await claims()).toEqual([]);
   });
 
   it('notes the reply at once in a conversation the app holds, and only there', async () => {

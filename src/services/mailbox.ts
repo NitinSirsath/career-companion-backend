@@ -17,6 +17,7 @@ import {
 import { AppError } from '../errors';
 import { googleStatus, withGmail } from './gmailClient';
 import { gmailCallOptions } from './googleTransport';
+import { htmlToText } from './mailHtml';
 
 const PAGE_SIZE = 20;
 /** Far above any written email; a longer text is cut and marked as cut. */
@@ -189,7 +190,10 @@ export interface ReplyTarget {
   references: string | null;
   from: string | null;
   sentAt: Date | null;
-  /** The answered mail's plain text, quoted below the reply. */
+  /**
+   * The answered mail's text, quoted below the reply: its plain-text part, else the words of its
+   * HTML part (most company mails come as HTML only).
+   */
   text: string | null;
 }
 
@@ -238,8 +242,14 @@ export function replyTarget(
     references: header(answered, 'references'),
     from: header(answered, 'from'),
     sentAt: date && !isNaN(date.getTime()) ? date : null,
-    text: readParts(answered.payload).text,
+    text: quotableText(readParts(answered.payload)),
   };
+}
+
+/** A mail's text to quote: its plain-text part, else its HTML part's words, else nothing. */
+function quotableText({ text, html }: Parts): string | null {
+  if (text?.trim()) return text;
+  return html ? htmlToText(html) || null : null;
 }
 
 /** Label ID to the name to show: the user's own labels, and the system labels worth showing. */

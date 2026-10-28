@@ -15,7 +15,8 @@ import type {
 
 const BULLET = /^\s*[-*+]\s+(.*)$/;
 const NUMBERED = /^\s*(\d{1,3})[.)]\s+(.*)$/;
-const SAFE_LINK = /^(https?:\/\/[^\s]+|mailto:[^\s]+)$/i;
+/** A link address the app keeps: https://, http:// or mailto: only. */
+export const SAFE_LINK = /^(https?:\/\/[^\s]+|mailto:[^\s]+)$/i;
 
 /** What a line holds once Markdown that is not kept is reduced to its text. */
 function plainLine(line: string): string {
@@ -146,6 +147,9 @@ function plainText(content: DraftBlock[]): string {
     })
     .join('\n\n');
 }
+
+/** The plain text of a structure: of a draft, or of a reply written in the editor. */
+export const docText = (doc: DraftDoc): string => plainText(doc.content).trim();
 
 /** The draft as plain text and as the editor's structure. */
 export function formatDraft(draft: string): { text: string; doc: DraftDoc } {

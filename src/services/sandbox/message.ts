@@ -87,7 +87,7 @@ export function toGmailMessage(
       body: { size: 0 },
       parts: [
         textPart('0', 'text/plain', message.body),
-        textPart('1', 'text/html', htmlOf(message.body)),
+        textPart('1', 'text/html', message.html ?? htmlOf(message.body)),
       ],
     },
   };
@@ -101,6 +101,8 @@ export interface RawMail {
   inReplyTo?: string;
   references?: string;
   body: string;
+  /** The HTML part of a formatted reply; left out for a plain-text mail. */
+  html?: string;
 }
 
 /** "=?UTF-8?B?…?=" words in a header, as a mail program writes text outside ASCII. */
@@ -111,9 +113,47 @@ const decodeWords = (value: string) =>
       Buffer.from(data, 'base64').toString('utf8'),
     );
 
+/** A mail part written in base64: its headers, then a blank line, then its text. */
+function decodePart(part: string): { type: string; text: string } | null {
+  const split = part.indexOf('\r\n\r\n');
+  if (split < 0) return null;
+  const head = part.slice(0, split);
+  const type = head
+    .match(/content-type:\s*([^;\r\n]+)/i)?.[1]
+    .trim()
+    .toLowerCase();
+  if (!type || !/content-transfer-encoding:\s*base64/i.test(head)) return null;
+  return { type, text: Buffer.from(part.slice(split + 4), 'base64').toString('utf8') };
+}
+
+/** The plain text and the HTML of a two-part mail (`multipart/alternative`), as the app writes one. */
+function alternativeParts(body: string, boundary: string): { text?: string; html?: string } {
+  const found: { text?: string; html?: string } = {};
+  for (const chunk of body.split(`--${boundary}`)) {
+    const part = decodePart(chunk);
+    if (part?.type === 'text/plain') found.text ??= part.text;
+    if (part?.type === 'text/html') found.html ??= part.text;
+  }
+  return found;
+}
+
+/** The text, and the HTML when there is one, of a mail the app writes; null for any other mail. */
+function bodyParts(
+  headers: Map<string, string>,
+  body: string,
+): { text?: string; html?: string } | null {
+  const boundary = headers
+    .get('content-type')
+    ?.match(/^multipart\/alternative;\s*boundary="?([^";]+)"?/i)?.[1];
+  if (boundary) return alternativeParts(body, boundary);
+  if (headers.get('content-transfer-encoding') !== 'base64') return null;
+  return { text: Buffer.from(body, 'base64').toString('utf8') };
+}
+
 /**
- * Reads the mail the app hands to Gmail's send call (`raw`: a whole plain-text mail, base64url),
- * the way Gmail would. Null when it is not a mail the app writes: the caller refuses it.
+ * Reads the mail the app hands to Gmail's send call (`raw`: a whole mail, base64url), the way
+ * Gmail would: plain text, or plain text and HTML. Null when it is not a mail the app writes: the
+ * caller refuses it.
  */
 export function fromRawMail(raw: string): RawMail | null {
   const mail = Buffer.from(raw, 'base64url').toString('utf8');
@@ -129,7 +169,9 @@ export function fromRawMail(raw: string): RawMail | null {
     if (colon > 0) headers.set(line.slice(0, colon).toLowerCase(), line.slice(colon + 1).trim());
   }
   const to = headers.get('to');
-  if (!to || headers.get('content-transfer-encoding') !== 'base64') return null;
+  if (!to) return null;
+  const parts = bodyParts(headers, mail.slice(split + 4));
+  if (parts?.text === undefined) return null;
   const cc = headers.get('cc');
   return {
     to: decodeWords(to),
@@ -137,6 +179,7 @@ export function fromRawMail(raw: string): RawMail | null {
     subject: decodeWords(headers.get('subject') ?? ''),
     inReplyTo: headers.get('in-reply-to'),
     references: headers.get('references'),
-    body: Buffer.from(mail.slice(split + 4), 'base64').toString('utf8'),
+    body: parts.text,
+    ...(parts.html !== undefined ? { html: parts.html } : {}),
   };
 }

@@ -46,6 +46,8 @@ interface NewMessage {
   inReplyTo?: string;
   referenceIds?: string;
   body: string;
+  /** The HTML part of a formatted reply sent from the app; null for a plain-text mail. */
+  html?: string | null;
 }
 
 async function userAddress(userId: string): Promise<string> {
@@ -149,6 +151,7 @@ export async function deliverSentMail(
     inReplyTo: mail.inReplyTo,
     referenceIds: mail.references,
     body: mail.body.slice(0, BODY_LIMIT),
+    html: mail.html?.slice(0, BODY_LIMIT) ?? null,
   });
 }
 

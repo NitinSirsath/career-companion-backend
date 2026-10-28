@@ -4,6 +4,7 @@
  * of a reply the user sends from here goes to Gmail and is not kept or logged either.
  */
 import { z } from 'zod';
+import { DraftDocSchema } from './conversation';
 
 const IsoDateTime = z.iso.datetime({ offset: true });
 
@@ -102,13 +103,26 @@ export type MailThread = z.infer<typeof MailThreadSchema>;
 
 // ─── POST /api/mailbox/threads/:threadId/replies ────────────────────────────
 
-/** A reply is plain text. Far above any written reply; a longer text is refused, not cut. */
+/**
+ * The most a reply's plain text may hold. Far above any written reply; a longer reply is refused,
+ * not cut.
+ */
 export const MAIL_REPLY_TEXT_LIMIT = 20_000;
 
+/**
+ * A reply: `doc` from the rich text editor (owner, 25 Oct 2026), or `text` alone from an older
+ * page. With `doc` the server writes the mail's plain text and HTML itself, and `text` is not
+ * used. A request with neither, or with an empty reply, is refused.
+ */
 export const SendMailReplyRequestSchema = z.strictObject({
   /** Made by the page for this one reply. The same ID never sends a second mail. */
   replyId: z.uuid(),
-  text: z.string().trim().min(1).max(MAIL_REPLY_TEXT_LIMIT),
+  text: z.string().trim().min(1).max(MAIL_REPLY_TEXT_LIMIT).optional(),
+  /**
+   * The reply with its formatting: the same structure as an AI draft's `doc`. A link that is not
+   * https://, http:// or mailto: is sent as plain words.
+   */
+  doc: DraftDocSchema.optional(),
   /**
    * True: the reply also goes to the other people on the answered mail (`replyCc`). Left out or
    * false: only to the person who wrote. The request never names an address.

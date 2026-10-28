@@ -157,6 +157,33 @@ describe('replying from the mail details page in dev mode', () => {
     expect(google.built).not.toHaveBeenCalled();
   });
 
+  it('keeps the HTML of a formatted reply, so dev mode shows it as Gmail would', async () => {
+    const mail = await receive();
+    const doc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Thursday', marks: [{ type: 'bold' }] },
+            { type: 'text', text: ' works.' },
+          ],
+        },
+      ],
+    };
+    expect((await sendReply(mail.threadId, { replyId: randomUUID(), doc })).status).toBe(200);
+    const read = await mailThread(mail.threadId);
+    expect(read.messages[1].text).toMatch(/^Thursday works\.\n\nOn .+ wrote:\n> Hi Alex,/);
+    expect(read.messages[1].html).toMatch(
+      /^<div dir="ltr"><p><strong>Thursday<\/strong> works\.<\/p><\/div><br><div class="gmail_quote">.+Hi Alex,<br><br>Would you have 20 minutes this week\?<\/blockquote><\/div>$/,
+    );
+    // A mail with no HTML of its own still gets one made from its text.
+    expect(read.messages[0].html).toBe(
+      '<div dir="ltr">Hi Alex,<br><br>Would you have 20 minutes this week?</div>',
+    );
+    expect(google.built).not.toHaveBeenCalled();
+  });
+
   it('shows the conversation as Replied at once, and the next sync notes nothing twice', async () => {
     const mail = await receive();
     await syncUser(owner);

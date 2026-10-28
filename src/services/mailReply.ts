@@ -8,16 +8,25 @@
  * - A reply is sent once. Its own ID is written down before the send call; the same ID never
  *   sends a second mail, and nothing is ever sent again by the app itself.
  * - The text goes to Gmail and is not stored or logged. Only the IDs and the time are kept.
+ * - A reply written in the rich text editor arrives as its structure, never as HTML. The server
+ *   writes the mail's plain text and HTML from it (owner, 25 Oct 2026).
  */
+import { randomBytes } from 'crypto';
 import { Prisma } from '@prisma/client';
-import type { SendMailReplyRequest, SendMailReplyResponse } from '../contracts';
+import {
+  MAIL_REPLY_TEXT_LIMIT,
+  type SendMailReplyRequest,
+  type SendMailReplyResponse,
+} from '../contracts';
 import { prisma } from '../db/prisma';
 import { AppError } from '../errors';
 import { logError, logEvent, logWarn } from '../utils/log';
 import { googleStatus, withGmail } from './gmailClient';
 import { maySend } from './gmailConnection';
 import { gmailCallOptions } from './googleTransport';
+import { escapeHtml } from './mailHtml';
 import { ReplyTarget, mailboxAddress, readGmail, replyTarget } from './mailbox';
+import { replyHtml, replyText, safeDoc } from './replyFormat';
 import { usesSandbox } from './testAccounts';
 import { noteSentForReading } from './replyReading';
 
@@ -85,6 +94,10 @@ export const replySubject = (subject: string | null): string => {
   return /^re:/i.test(value) ? value : `Re: ${value}`.trim();
 };
 
+/** "On Mon, 12 Oct 2026 10:02:00 GMT, Priya <priya@x.example> wrote:" above the quote. */
+const attribution = (answered: ReplyTarget) =>
+  `${answered.sentAt ? `On ${answered.sentAt.toUTCString()}, ` : ''}${oneLine(answered.from ?? answered.to)} wrote:`;
+
 /** The typed text with the answered mail quoted below it, as a mail program writes a reply. */
 export function replyBody(text: string, answered: ReplyTarget): string {
   if (!answered.text?.trim()) return text;
@@ -93,15 +106,62 @@ export function replyBody(text: string, answered: ReplyTarget): string {
     .split(/\r?\n/)
     .map((line) => `> ${line}`)
     .join('\n');
-  const when = answered.sentAt ? `On ${answered.sentAt.toUTCString()}, ` : '';
-  return `${text}\n\n${when}${oneLine(answered.from ?? answered.to)} wrote:\n${quoted}`;
+  return `${text}\n\n${attribution(answered)}\n${quoted}`;
 }
 
 /**
- * The reply as one plain-text mail (RFC 5322), the form Gmail's send call takes. `toAll` puts the
- * other people of the answered mail in Cc.
+ * The HTML of a formatted reply with the answered mail quoted below it in Gmail's own quote
+ * block, so Gmail folds it behind "•••". The quote is the mail's text, escaped: never its HTML.
  */
-export function buildReplyMail(text: string, answered: ReplyTarget, toAll = false): string | null {
+export function replyHtmlBody(html: string, answered: ReplyTarget): string {
+  const reply = `<div dir="ltr">${html}</div>`;
+  if (!answered.text?.trim()) return reply;
+  const quoted = escapeHtml(answered.text.slice(0, QUOTE_LIMIT)).replace(/\r?\n/g, '<br>');
+  return (
+    `${reply}<br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">` +
+    `${escapeHtml(attribution(answered))}<br></div><blockquote class="gmail_quote" ` +
+    `style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">` +
+    `${quoted}</blockquote></div>`
+  );
+}
+
+/** One part of the mail: its type, then its text as base64 lines. */
+const mailPart = (type: string, text: string) => [
+  `Content-Type: ${type}; charset="UTF-8"`,
+  'Content-Transfer-Encoding: base64',
+  '',
+  ...(Buffer.from(text, 'utf8')
+    .toString('base64')
+    .match(/.{1,76}/g) ?? []),
+];
+
+/** The body: plain text alone, or plain text and HTML for a formatted reply. */
+function mailBody(text: string, answered: ReplyTarget, html: string | null): string[] {
+  const plain = mailPart('text/plain', replyBody(text, answered));
+  if (html === null) return plain;
+  const boundary = `northlist-${randomBytes(12).toString('hex')}`;
+  return [
+    'Content-Type: multipart/alternative;',
+    ` boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    ...plain,
+    `--${boundary}`,
+    ...mailPart('text/html', replyHtmlBody(html, answered)),
+    `--${boundary}--`,
+  ];
+}
+
+/**
+ * The reply as one mail (RFC 5322), the form Gmail's send call takes: plain text, and with `html`
+ * also an HTML part. `toAll` puts the other people of the answered mail in Cc.
+ */
+export function buildReplyMail(
+  text: string,
+  answered: ReplyTarget,
+  toAll = false,
+  html: string | null = null,
+): string | null {
   const to = recipientHeader(answered.to);
   if (!to) return null;
   const cc = toAll ? copyHeader(answered.cc) : null;
@@ -109,17 +169,13 @@ export function buildReplyMail(text: string, answered: ReplyTarget, toAll = fals
   const references = [answered.references && oneLine(answered.references), messageId]
     .filter(Boolean)
     .join(' ');
-  const body = Buffer.from(replyBody(text, answered), 'utf8').toString('base64');
   return [
     `To: ${to}`,
     ...(cc ? [`Cc: ${cc}`] : []),
     `Subject: ${encodeHeaderText(replySubject(answered.subject))}`,
     ...(messageId ? [`In-Reply-To: ${messageId}`, `References: ${references}`] : []),
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset="UTF-8"',
-    'Content-Transfer-Encoding: base64',
-    '',
-    ...(body.match(/.{1,76}/g) ?? []),
+    ...mailBody(text, answered, html),
   ].join(LINE);
 }
 
@@ -257,11 +313,28 @@ async function recordSent(userId: string, replyId: string, threadId: string, mes
   return sentAt;
 }
 
+/**
+ * What the reply says: a formatted reply's plain text and HTML, made here from its structure, or
+ * the plain text an older page sends. Refused when empty or too long, before anything happens.
+ */
+export function replyContent(request: SendMailReplyRequest): { text: string; html: string | null } {
+  let reply: { text: string; html: string | null } | null = null;
+  if (request.doc) {
+    const doc = safeDoc(request.doc);
+    reply = { text: replyText(doc), html: replyHtml(doc) };
+  } else if (request.text) reply = { text: request.text, html: null };
+  if (!reply?.text.trim()) throw new AppError(400, 'BAD_REQUEST', 'Write your reply.');
+  if (reply.text.length > MAIL_REPLY_TEXT_LIMIT)
+    throw new AppError(400, 'BAD_REQUEST', 'This reply is too long to send from here.');
+  return reply;
+}
+
 export async function sendMailReply(
   userId: string,
   threadId: string,
   request: SendMailReplyRequest,
 ): Promise<SendMailReplyResponse> {
+  const reply = replyContent(request);
   await assertMaySend(userId);
   const earlier = await claimReply(userId, threadId, request.replyId);
   if (earlier) return earlier;
@@ -276,7 +349,8 @@ export async function sendMailReply(
       return found.data;
     });
     const answered = replyTarget(thread, await mailboxAddress(userId));
-    const mail = answered && buildReplyMail(request.text, answered, request.toAll === true);
+    const mail =
+      answered && buildReplyMail(reply.text, answered, request.toAll === true, reply.html);
     if (!mail)
       throw new AppError(
         409,
