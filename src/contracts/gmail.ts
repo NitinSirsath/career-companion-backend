@@ -1,5 +1,6 @@
 import { createPaginatedResponseSchema } from './pagination';
 import { EmailAIStatusSchema } from './email';
+import { MailCategorySchema } from './conversation';
 /**
  * Zod contracts for Gmail OAuth routes.
  * These types are shared via the sync-contracts script with the frontend.
@@ -82,6 +83,8 @@ export const EmailMessageSchema = z.object({
   aiStatus: EmailAIStatusSchema.nullable().optional(),
   /** Provenance of the AI result: which provider and model produced it (ADR-0001). */
   aiProcessingResult: z.object({ provider: z.string(), model: z.string() }).nullable().optional(),
+  /** The kind of job mail the AI found. Null while the mail is not read yet. */
+  category: MailCategorySchema.nullable().optional(),
 });
 export type EmailMessage = z.infer<typeof EmailMessageSchema>;
 
