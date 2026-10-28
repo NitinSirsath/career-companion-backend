@@ -179,6 +179,25 @@ describe('the real sync on sandbox mail', () => {
     expect(connection.lastSyncedAt).not.toBeNull();
   });
 
+  it("a blocked company's new mail is never saved, and new mail comes in after an unblock", async () => {
+    const block = await prisma.blockedSender.create({
+      data: { userId: owner, domain: 'northwind.example', source: 'MENU' },
+    });
+    const blocked = await send({ subject: 'Private offer details' });
+    expect(await syncUser(owner)).toMatchObject({ messagesIngested: 0 });
+    expect(await prisma.email.count({ where: { userId: owner } })).toBe(0);
+    expect(queued()).toBe(0);
+
+    await request(app).delete(`/api/blocked-senders/${block.id}`).set(as).expect(200);
+    await send({ subject: 'Interview slots' });
+    expect(await syncUser(owner)).toMatchObject({ messagesIngested: 1 });
+    // Mail that came while blocked is not fetched afterwards.
+    const kept = await prisma.email.findMany({ where: { userId: owner } });
+    expect(kept.map((email) => email.subject)).toEqual(['Interview slots']);
+    expect(kept.some((email) => email.gmailMessageId === blocked.id)).toBe(false);
+    await prisma.blockedSender.deleteMany({ where: { userId: owner } });
+  });
+
   it('a second sync brings only the mails sent since the first one', async () => {
     await send({ subject: 'One' });
     await send({ subject: 'Two' });

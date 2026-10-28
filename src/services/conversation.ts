@@ -59,7 +59,7 @@ export async function listConversations(
 }
 
 /** A conversation can be opened by the ID of any of its emails, as an application timeline does. */
-async function threadKey(userId: string, key: string) {
+export async function threadKey(userId: string, key: string) {
   if (!isEmailId(key)) return key;
   const email = await prisma.email.findFirst({
     where: { id: key, userId },

@@ -16,6 +16,8 @@ import {
 import { acquireSync, withOwnedSync } from './gmailSyncOwnership';
 import { logDebug, logEvent, logError } from '../utils/log';
 import { noteSentForReading } from './replyReading';
+import { blockedDomains } from './blockedSenders';
+import { isBlockedSender } from '../contracts/blockedSender';
 export { GmailAuthError, SyncInProgressError } from './gmailSyncErrors';
 export interface SyncDelivery {
   signal?: AbortSignal;
@@ -108,6 +110,8 @@ interface SyncRun {
   signal: AbortSignal;
   window: ReturnType<typeof syncWindow>;
   counts: { ingested: number; skipped: number; sent: number };
+  /** Company domains the user blocked: their new mail is never saved. */
+  blocked: readonly string[];
 }
 
 /** null while the commit is in flight: its outcome is not known until the transaction returns. */
@@ -178,6 +182,8 @@ async function ingestMessage(
   if (!message?.labelIds?.includes('INBOX')) return 'ignored';
   const receivedAt = message.internalDate ? new Date(Number(message.internalDate)) : null;
   if (receivedAt && receivedAt < run.window.windowStart) return 'ignored';
+  const headers = extractHeaders(message.payload?.headers);
+  if (isBlockedSender(headers.sender, run.blocked)) return 'ignored';
   checkDeadline(run);
   const record = await withOwnedSync(userId, run.connectionId, run.claim, (tx) => {
     checkDeadline(run);
@@ -187,7 +193,7 @@ async function ingestMessage(
         userId,
         gmailMessageId: id,
         threadId: message.threadId,
-        ...extractHeaders(message.payload?.headers),
+        ...headers,
         ...(receivedAt && !isNaN(receivedAt.getTime()) ? { receivedAt } : {}),
       },
       update: {},
@@ -468,7 +474,8 @@ export async function syncUser(userId: string, queuedClaim?: string, delivery: S
     connectionId = connection.id;
     const lookbackDays = connection.syncLookbackDays || 1;
     const window = syncWindow({ now, lastSyncedAt: connection.lastSyncedAt, lookbackDays });
-    const run: SyncRun = { userId, connectionId, claim, signal, window, counts };
+    const blocked = await blockedDomains(userId);
+    const run: SyncRun = { userId, connectionId, claim, signal, window, counts, blocked };
     const startHistoryId = needsFullSync(connection, now, lookbackDays)
       ? null
       : connection.lastHistoryId;

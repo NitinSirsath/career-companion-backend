@@ -120,6 +120,16 @@ curl -X GET http://localhost:3000/api/applications \
 
 Applications are never added by hand: they come from mails and from the automation link (owner, 26 Oct 2026). The same goes for to-dos: a follow-up the user added before stays and can be completed, snoozed or dismissed, but none can be added or edited.
 
+### Deleting and blocking (owner, 26 Oct 2026)
+
+Gmail is never changed: the app can only read it.
+
+- `DELETE /api/conversations/:key` `{ block?: boolean }` deletes a conversation from the app: its subjects, senders, AI reading, steps, history, agenda items and reply records. Each mail keeps only its Gmail ids and date (as a mail that is not about a job), so a sync does not bring it back; the daily clean-up deletes it after 35 days. A later mail in the thread still comes in. 409 `MAIL_BEING_READ` while the AI reads one of its mails.
+- `POST /api/conversations/:key/block` blocks the company of the newest job mail; the conversation stays. `block: true` on delete does the same.
+- Only official company mail can be blocked, as a whole domain (`infosys.com`); LinkedIn and shared mail providers answer 409 `NOT_BLOCKABLE`. The rule is `contracts/blockedSender.ts`, shared with the app.
+- Sync skips a blocked company's new mail before saving anything. `GET /api/blocked-senders` lists the blocks; `DELETE /api/blocked-senders/:id` unblocks. Mail that came while blocked is not fetched afterwards.
+- `DELETE /api/applications/:id` deletes an application with its steps, history and agenda items. Its mails stay, no longer linked.
+
 ### Error Response Shape
 All API errors follow a consistent, typed shape to make it easier for clients to consume:
 ```json
