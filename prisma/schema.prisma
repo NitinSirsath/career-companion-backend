@@ -22,6 +22,7 @@ model User {
   gmailConnection     GmailConnection?
   emails              Email[]
   outgoingEmails      OutgoingEmail[]
+  blockedSenders      BlockedSender[]
   mailReplies         MailReply[]
   aiConfiguration     AIConfiguration?
   aiSavedProviders    AISavedProvider[]
@@ -279,6 +280,27 @@ enum GmailSyncStatus {
   IDLE
   SYNCING
   FAILED
+}
+
+enum BlockSource {
+  DELETE
+  MENU
+}
+
+/// A company whose new mail the app does not read (owner, 26 Oct 2026). Sync skips its mail
+/// before saving anything; mail that came while blocked is not fetched after an unblock.
+model BlockedSender {
+  id        String      @id @default(uuid()) @db.Uuid
+  userId    String      @db.Uuid
+  /// The whole company domain, such as infosys.com (`contracts/blockedSender.ts`).
+  domain    String
+  source    BlockSource
+  createdAt DateTime    @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, domain])
+  @@map("blocked_senders")
 }
 
 model GmailConnection {
