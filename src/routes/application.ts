@@ -1,15 +1,9 @@
 import { archiveApplication } from '../services/archive';
-import { createFollowUp } from '../services/action';
-import { CreateFollowUpSchema, ArchiveApplicationSchema } from '../contracts';
+import { ArchiveApplicationSchema } from '../contracts';
 import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
+import { ApplicationFiltersSchema, UpdateApplicationStatusRequestSchema } from '../contracts';
 import {
-  ApplicationFiltersSchema,
-  CreateApplicationRequestSchema,
-  UpdateApplicationStatusRequestSchema,
-} from '../contracts';
-import {
-  createApplication,
   getApplication,
   getApplicationActions,
   getApplicationEvents,
@@ -26,18 +20,6 @@ import { logEvent } from '../utils/log';
 const router = Router();
 
 router.use(requireAuth);
-
-router.post('/', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const data = CreateApplicationRequestSchema.parse(req.body);
-    const userId = req.auth!.user.id;
-
-    const application = await createApplication(userId, data);
-    res.status(201).json(application);
-  } catch (err) {
-    next(err);
-  }
-});
 
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -165,21 +147,6 @@ router.patch('/:id/status', async (req: Request, res: Response, next: NextFuncti
   }
 });
 
-router.post('/:id/actions', async (req, res, next) => {
-  try {
-    res
-      .status(201)
-      .json(
-        await createFollowUp(
-          req.auth!.user.id,
-          z.uuid().parse(req.params.id),
-          CreateFollowUpSchema.parse(req.body),
-        ),
-      );
-  } catch (error) {
-    next(error);
-  }
-});
 router.patch('/:id/archive', async (req, res, next) => {
   try {
     res.json(
