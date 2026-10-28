@@ -1,14 +1,8 @@
 import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth';
-import {
-  editFollowUp,
-  getActionByRequest,
-  getUserActions,
-  snoozeAction,
-  updateActionStatus,
-} from '../services/action';
-import { EditFollowUpSchema, SnoozeActionSchema, UpdateActionRequestSchema } from '../contracts';
+import { getUserActions, snoozeAction, updateActionStatus } from '../services/action';
+import { SnoozeActionSchema, UpdateActionRequestSchema } from '../contracts';
 
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
 
@@ -32,28 +26,6 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
-router.get('/by-request/:clientRequestId', async (req, res, next) => {
-  try {
-    res.json(
-      await getActionByRequest(req.auth!.user.id, z.uuid().parse(req.params.clientRequestId)),
-    );
-  } catch (error) {
-    next(error);
-  }
-});
-router.patch('/:id/personal', async (req, res, next) => {
-  try {
-    res.json(
-      await editFollowUp(
-        req.auth!.user.id,
-        z.uuid().parse(req.params.id),
-        EditFollowUpSchema.parse(req.body),
-      ),
-    );
-  } catch (error) {
-    next(error);
-  }
-});
 router.patch('/:id/snooze', async (req, res, next) => {
   try {
     res.json(
