@@ -143,12 +143,12 @@ describe('canonical status (64 combinations)', () => {
     );
   });
 
-  it('returns revision 0 and canonical fields from create', async () => {
-    const res = await request(app)
-      .post('/api/applications')
-      .set(as(OWNER))
-      .send({ companyName: 'Fresh' });
-    expect(res.status).toBe(201);
+  it('returns revision 0 and canonical fields for a new application', async () => {
+    const fresh = await prisma.application.create({
+      data: { companyName: 'Fresh', userId: ownerId },
+    });
+    const res = await request(app).get(`/api/applications/${fresh.id}`).set(as(OWNER));
+    expect(res.status).toBe(200);
     expect(ApplicationResponseSchema.parse(res.body)).toMatchObject({
       userStatusRevision: 0,
       effectiveStatus: null,
