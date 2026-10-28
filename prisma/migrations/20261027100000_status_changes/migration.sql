@@ -40,17 +40,17 @@ WITH step AS (
            e.id AS email_id,
            COALESCE(e."receivedAt", e."createdAt") AS at,
            CASE
-                WHEN NULLIF(r."fakeOfferWarning", '') IS NOT NULL THEN NULL
-                WHEN NULLIF(r."rejectionInfo", '') IS NOT NULL OR r.category = 'REJECTION' THEN 5
-                WHEN NULLIF(r."offerInfo", '') IS NOT NULL OR r.category = 'OFFER' THEN 4
-                WHEN NULLIF(r."interviewDate", '') IS NOT NULL OR r.category = 'INTERVIEW'
-                     OR (NULLIF(r."interviewStage", '') IS NOT NULL
-                         AND r.category IS DISTINCT FROM 'ASSESSMENT'
-                         AND r.category IS DISTINCT FROM 'RECRUITER') THEN 3
-                WHEN NULLIF(r."assessmentInfo", '') IS NOT NULL OR r.category = 'ASSESSMENT' THEN 2
-                WHEN NULLIF(r."recruiterName", '') IS NOT NULL OR r.category = 'RECRUITER' THEN 1
-                WHEN r.category = 'FOLLOW_UP' THEN 0
-            END AS rank
+               WHEN NULLIF(r."fakeOfferWarning", '') IS NOT NULL THEN NULL
+               WHEN NULLIF(r."rejectionInfo", '') IS NOT NULL OR r.category = 'REJECTION' THEN 5
+               WHEN NULLIF(r."offerInfo", '') IS NOT NULL OR r.category = 'OFFER' THEN 4
+               WHEN NULLIF(r."interviewDate", '') IS NOT NULL OR r.category = 'INTERVIEW'
+                    OR (NULLIF(r."interviewStage", '') IS NOT NULL
+                        AND r.category IS DISTINCT FROM 'ASSESSMENT'
+                        AND r.category IS DISTINCT FROM 'RECRUITER') THEN 3
+               WHEN NULLIF(r."assessmentInfo", '') IS NOT NULL OR r.category = 'ASSESSMENT' THEN 2
+               WHEN NULLIF(r."recruiterName", '') IS NOT NULL OR r.category = 'RECRUITER' THEN 1
+               WHEN r.category = 'FOLLOW_UP' THEN 0
+           END AS rank
     FROM "emails" e
     JOIN "ai_processing_results" r ON r."emailId" = e.id
     WHERE e."matchState" = 'MATCHED' AND e."applicationId" IS NOT NULL
