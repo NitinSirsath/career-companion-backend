@@ -79,6 +79,7 @@ model Application {
   agendaItems         AgendaItem[]
   emails              Email[]
   events              ApplicationEvent[]
+  statusChanges       StatusChange[]
   actions             Action[]
   externalSubmissions ExternalSubmission[]
 
@@ -168,9 +169,10 @@ model Email {
 
   user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   application Application?       @relation(fields: [applicationId], references: [id], onDelete: SetNull)
-  agendaItems AgendaItem[]
-  events      ApplicationEvent[]
-  actions     Action[]
+  agendaItems   AgendaItem[]
+  events        ApplicationEvent[]
+  statusChanges StatusChange[]
+  actions       Action[]
 
   @@unique([userId, gmailMessageId]) // idempotency constraint
   @@index([userId])
@@ -421,6 +423,37 @@ model ApplicationEvent {
   @@index([applicationId])
   @@index([emailId])
   @@map("application_events")
+}
+
+/// Who changed the status the user sees.
+enum StatusChangeSource {
+  AI
+  USER
+}
+
+/// One change of an application's status as the user sees it (`userStatus ?? aiStatus`), kept for
+/// the Dashboard (owner, 27 Oct 2026): the furthest step a job reached, even when it was rejected
+/// later. Ids, steps and times only, never mail text.
+model StatusChange {
+  id            String             @id @default(uuid()) @db.Uuid
+  applicationId String             @db.Uuid
+  /// The mail behind an AI change; null for the user's change or a recount after a mail left.
+  emailId       String?            @db.Uuid
+  source        StatusChangeSource
+  fromStatus    ApplicationStatus?
+  toStatus      ApplicationStatus?
+  /// When it happened: the mail's receivedAt for the AI, the click for the user.
+  changedAt     DateTime
+  /// Set when the mail behind it moved to another application or was unlinked.
+  retiredAt     DateTime?
+  createdAt     DateTime           @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  email       Email?      @relation(fields: [emailId], references: [id], onDelete: SetNull)
+
+  @@index([applicationId, changedAt])
+  @@index([emailId])
+  @@map("status_changes")
 }
 
 enum DeadlinePrecision {
