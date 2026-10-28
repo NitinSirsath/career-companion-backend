@@ -730,6 +730,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
         'aiStatus',
         'application',
         'applicationId',
+        'category',
         'gmailMessageId',
         'id',
         'matchConfirmedBy',
@@ -757,6 +758,41 @@ describe('Gmail OAuth Routes (COM-19)', () => {
         msg.aiProcessingResult === null ||
           Object.keys(msg.aiProcessingResult).sort().join() === 'model,provider',
       ).toBe(true);
+    });
+
+    it('lists job mails and unread mails only, with the AI type', async () => {
+      await prisma.email.create({
+        data: {
+          userId: testUser.id,
+          gmailMessageId: 'msg-job',
+          relevanceState: 'RELEVANT',
+          aiProcessingResult: {
+            create: {
+              provider: 'fixture',
+              model: 'fixture-fast',
+              contractVersion: 'fixture',
+              category: 'INTERVIEW',
+              processingStatus: 'COMPLETED',
+            },
+          },
+        },
+      });
+      await prisma.email.createMany({
+        data: [
+          { userId: testUser.id, gmailMessageId: 'msg-new', relevanceState: 'UNPROCESSED' },
+          { userId: testUser.id, gmailMessageId: 'msg-other', relevanceState: 'IRRELEVANT' },
+        ],
+      });
+      // The old tab choice is ignored: other mails are never listed.
+      const res = await request(app)
+        .get('/api/gmail/messages?relevance=irrelevant')
+        .set('X-Development-User', testUser.email);
+      expect(res.status).toBe(200);
+      const rows = res.body.items as { gmailMessageId: string; category: string | null }[];
+      expect(rows.map((row) => row.gmailMessageId).sort()).toEqual(['msg-job', 'msg-new']);
+      expect(rows.find((row) => row.gmailMessageId === 'msg-job')?.category).toBe('INTERVIEW');
+      expect(rows.find((row) => row.gmailMessageId === 'msg-new')?.category).toBeNull();
+      await prisma.email.deleteMany({ where: { userId: testUser.id } });
     });
 
     it('isolates messages between users', async () => {
