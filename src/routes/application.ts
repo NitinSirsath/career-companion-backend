@@ -1,4 +1,5 @@
 import { archiveApplication } from '../services/archive';
+import { deleteApplication } from '../services/removal';
 import { ArchiveApplicationSchema } from '../contracts';
 import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
@@ -147,6 +148,14 @@ router.patch('/:id/status', async (req: Request, res: Response, next: NextFuncti
   }
 });
 
+// Deletes the application from the app; its mails stay in Mails, no longer linked.
+router.delete('/:id', async (req, res, next) => {
+  try {
+    res.json(await deleteApplication(req.auth!.user.id, z.uuid().parse(req.params.id)));
+  } catch (error) {
+    next(error);
+  }
+});
 router.patch('/:id/archive', async (req, res, next) => {
   try {
     res.json(
