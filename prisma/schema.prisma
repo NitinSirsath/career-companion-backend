@@ -254,8 +254,10 @@ model SandboxMessage {
   messageId    String
   inReplyTo    String?
   referenceIds String?
-  /// Plain text. The HTML part is built from it when the message is read.
+  /// Plain text. Unless `html` is set, the HTML part is built from it when the message is read.
   body         String
+  /// The HTML part of a formatted reply sent from the app; null for every other mail.
+  html         String?
   internalDate DateTime
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
