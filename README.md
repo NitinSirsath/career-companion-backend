@@ -112,19 +112,13 @@ Next to Google sign-in, a user can sign in with email and password.
 ### Making Authenticated Requests
 API calls to protected routes need a logged-in session cookie. For local development, authenticate with Google first and send the resulting `cc_session` cookie with API requests.
 
-#### Example POST Request
-```bash
-curl -X POST http://localhost:3000/api/applications \
-  -H "Content-Type: application/json" \
-  -H "Cookie: cc_session=<logged-in-session-cookie>" \
-  -d '{"companyName": "Acme Corp", "jobTitle": "Software Engineer"}'
-```
-
 #### Example GET Request
 ```bash
 curl -X GET http://localhost:3000/api/applications \
   -H "Cookie: cc_session=<logged-in-session-cookie>"
 ```
+
+Applications are never added by hand: they come from mails and from the automation link (owner, 26 Oct 2026). The same goes for to-dos: a follow-up the user added before stays and can be completed, snoozed or dismissed, but none can be added or edited.
 
 ### Error Response Shape
 All API errors follow a consistent, typed shape to make it easier for clients to consume:
@@ -141,7 +135,7 @@ Standard error codes include `VALIDATION_ERROR`, `UNAUTHORIZED`, `NOT_FOUND`, `S
 
 ### Application status and evidence (Sprint 6)
 
-Every application response (create 201, list, detail, status PATCH) includes the stored `aiStatus`, `userStatus`, `userStatusSetAt`, `userStatusRevision` and derived `effectiveStatus` (`userStatus ?? aiStatus`), `statusSource` (`USER` | `AI` | `UNKNOWN`) and `hasStatusConflict`. `recentEvent` (or null) and each item of `GET /api/applications/:id/events` include `recordedAt` (ISO, same instant as `createdAt`) and `sourceEmail` (`{ id, subject, sender, receivedAt }` for an owned source email, else null). Events stay in recording order; email date is not an event occurrence time.
+Every application response (list, detail, status PATCH) includes the stored `aiStatus`, `userStatus`, `userStatusSetAt`, `userStatusRevision` and derived `effectiveStatus` (`userStatus ?? aiStatus`), `statusSource` (`USER` | `AI` | `UNKNOWN`) and `hasStatusConflict`. `recentEvent` (or null) and each item of `GET /api/applications/:id/events` include `recordedAt` (ISO, same instant as `createdAt`) and `sourceEmail` (`{ id, subject, sender, receivedAt }` for an owned source email, else null). Events stay in recording order; email date is not an event occurrence time.
 
 ```bash
 curl -X PATCH http://localhost:3000/api/applications/<id>/status \
