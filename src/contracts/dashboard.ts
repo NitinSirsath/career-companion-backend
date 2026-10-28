@@ -51,12 +51,26 @@ const WorkModeRowSchema = z.object({
   answered: count,
 });
 
-export const DashboardTipSchema = z.object({
-  kind: z.enum(['GONE_QUIET', 'SITE_ANSWERS_MORE', 'REPLY_TIME', 'EARLY_DAYS']),
-  text: z.string(),
-  /** Where the tip's link leads; null when it has none. */
-  link: z.enum(['GONE_QUIET', 'MAILS_NEEDS_ACTION']).nullable(),
-});
+/**
+ * A tip from fixed rules, at most three, only when true. The page writes the words; the backend
+ * gives the facts, so the site names and the wording have one home.
+ */
+export const DashboardTipSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('GONE_QUIET'), count }),
+  z.object({
+    kind: z.literal('REPLY_TIME'),
+    medianReplyHours: z.number().nullable(),
+    waitingOverADay: count,
+  }),
+  z.object({
+    kind: z.literal('SITE_ANSWERS_MORE'),
+    site: z.string(),
+    percent: count,
+    otherSite: z.string(),
+    otherPercent: count,
+  }),
+  z.object({ kind: z.literal('EARLY_DAYS'), medianDays: z.number().nullable() }),
+]);
 export type DashboardTip = z.infer<typeof DashboardTipSchema>;
 
 export const DashboardAITipSchema = z.object({

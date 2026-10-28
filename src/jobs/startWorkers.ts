@@ -6,6 +6,7 @@ import { startEmailProcessingWorker } from './emailProcessingJob';
 import { startNotificationWorker } from './notificationJob';
 import { startRelevanceTriageWorker } from './relevanceTriageJob';
 import { startReplyReadingWorker } from './replyReadingJob';
+import { startDashboardTipWorker } from './dashboardTipJob';
 import { stopQueue, QUEUE_NAMES } from '../services/queue';
 import { errorCategory } from '../utils/errorCategory';
 import { logEvent, logError } from '../utils/log';
@@ -51,6 +52,11 @@ export function defaultWorkers(): WorkerRegistration[] {
       queue: QUEUE_NAMES[5],
       start: startReplyReadingWorker,
       failureEvent: 'reply_reading_worker_start_failed',
+    },
+    {
+      queue: QUEUE_NAMES[6],
+      start: startDashboardTipWorker,
+      failureEvent: 'dashboard_tip_worker_start_failed',
     },
   ];
 }

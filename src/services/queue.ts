@@ -14,6 +14,7 @@ export const QUEUE_NAMES = [
   'relevance-triage-job',
   'ai-resume-job',
   'reply-reading-job',
+  'dashboard-tip-job',
 ] as const;
 
 /**

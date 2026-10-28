@@ -31,6 +31,7 @@ model User {
   externalSubmissions ExternalSubmission[]
   notSubmittedJobs    NotSubmittedJob[]
   sandboxMessages     SandboxMessage[]
+  dashboardAITip      DashboardAITip?
 
   @@map("users")
 }
@@ -167,8 +168,8 @@ model Email {
   createdAt                DateTime                 @default(now())
   updatedAt                DateTime                 @updatedAt
 
-  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  application Application?       @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application   Application?       @relation(fields: [applicationId], references: [id], onDelete: SetNull)
   agendaItems   AgendaItem[]
   events        ApplicationEvent[]
   statusChanges StatusChange[]
@@ -745,6 +746,26 @@ model AIUsageDay {
 
   @@id([userId, day])
   @@map("ai_usage_days")
+}
+
+/// The Dashboard's AI tip (owner, 27 Oct 2026): the latest one for the user, made from their
+/// numbers at most once a day and only when the numbers changed. Opening the page never calls AI.
+model DashboardAITip {
+  userId      String    @id @db.Uuid
+  /// The latest tip; null until one was made.
+  text        String?
+  /// The catalog model that wrote it.
+  model       String?
+  provider    String?
+  madeAt      DateTime?
+  /// A fingerprint of the numbers the latest tip was made from.
+  numbersHash String?
+  /// The last try, made or not: the next one waits a day.
+  triedAt     DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("dashboard_ai_tips")
 }
 
 // ─── Automation submissions through MCP (ADR-0002) ───────────────────────────

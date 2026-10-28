@@ -26,6 +26,7 @@ import {
 import { TerminalAIError } from '../services/ai/errors';
 import { REPLY_READ_CONTRACT } from '../services/ai/replyRead';
 import { REPLY_DRAFT_CONTRACT } from '../services/ai/replyDraft';
+import { DASHBOARD_TIP_CONTRACT } from '../services/ai/dashboardTip';
 import { geminiSchema } from '../services/ai/providers/gemini';
 
 // Verbatim copies of the prompts and hand-written Gemini schemas that lived in
@@ -225,6 +226,7 @@ const FINGERPRINTS: Record<string, string> = {
   'extraction/v7': '5b3e618584fa1129db01f31d155a9a6873390c8ed55edf8156141ba34f1ac6c4',
   'reply-read/v1': '05c061e1271722e8a69ad8cafb0001953798d39f876935244ab03dfd98960194',
   'reply-draft/v1': 'ee4f41efa4161099642fb9725dddbe0942ce001aac84fac7dd1e808ab608fa35',
+  'dashboard-tip/v1': '968a7a762d51ff62266fb66080b1d9a455256429e1c2616897371f334f3f2c72',
 };
 const fingerprint = (contract: AIContract<unknown>) =>
   createHash('sha256')
@@ -265,6 +267,7 @@ describe('provider-neutral AI contracts', () => {
     EXTRACTION_V7_CONTRACT,
     REPLY_READ_CONTRACT,
     REPLY_DRAFT_CONTRACT,
+    DASHBOARD_TIP_CONTRACT,
   ])('keeps $version bound to one prompt and schema', (contract) => {
     expect(fingerprint(contract as AIContract<unknown>)).toBe(FINGERPRINTS[contract.version]);
   });
