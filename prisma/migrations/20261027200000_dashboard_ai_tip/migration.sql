@@ -15,3 +15,4 @@ CREATE TABLE "dashboard_ai_tips" (
 
 -- AddForeignKey
 ALTER TABLE "dashboard_ai_tips" ADD CONSTRAINT "dashboard_ai_tips_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
