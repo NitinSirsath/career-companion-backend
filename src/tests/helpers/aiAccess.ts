@@ -37,6 +37,7 @@ export function fakeAccess(userId: string, revision = 0): AIAccess {
     classifier: { classifyRelevance: vi.fn(), classifyRelevanceBatch: vi.fn() },
     analyzer: { extractJobData: vi.fn() },
     replies: { read: vi.fn(), write: vi.fn() },
+    dashboardTip: vi.fn(),
   };
 }
 
