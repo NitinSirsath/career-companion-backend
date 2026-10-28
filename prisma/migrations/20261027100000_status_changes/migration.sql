@@ -54,7 +54,6 @@ WITH step AS (
     FROM "emails" e
     JOIN "ai_processing_results" r ON r."emailId" = e.id
     WHERE e."matchState" = 'MATCHED' AND e."applicationId" IS NOT NULL
-
 ),
 running AS (
     SELECT app_id, email_id, at, rank,
@@ -62,14 +61,12 @@ running AS (
                            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS before_rank
     FROM step
     WHERE rank IS NOT NULL
-
 ),
 names AS (
     SELECT * FROM (VALUES
         (0, 'APPLIED'), (1, 'RECRUITER_CONTACT'), (2, 'ASSESSMENT'),
         (3, 'INTERVIEW'), (4, 'OFFER'), (5, 'REJECTED')
     ) AS n(rank, status)
-
 )
 INSERT INTO "status_changes" ("id", "applicationId", "emailId", "source", "fromStatus", "toStatus", "changedAt")
 SELECT gen_random_uuid(), r.app_id, r.email_id, 'AI',
