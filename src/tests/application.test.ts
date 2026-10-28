@@ -60,59 +60,17 @@ describe('Application API (COM-13)', () => {
     });
   });
 
-  describe('Validation', () => {
-    it('missing companyName fails with 400', async () => {
-      const res = await request(app)
-        .post('/api/applications')
-        .set('X-Development-User', 'user-a@test.local')
-        .send({ jobTitle: 'Engineer' });
-
-      expect(res.status).toBe(400);
-      expect(res.body.error.code).toBe('VALIDATION_ERROR');
-      expect(res.body.error.details).toBeDefined();
-    });
-
-    it('invalid input fails with 400', async () => {
-      const res = await request(app)
-        .post('/api/applications')
-        .set('X-Development-User', 'user-a@test.local')
-        .send({ companyName: 123 }); // should be string
-
-      expect(res.status).toBe(400);
-      expect(res.body.error.code).toBe('VALIDATION_ERROR');
-    });
-  });
-
-  describe('Create & Cross-user Isolation', () => {
-    it('valid authenticated request creates an Application', async () => {
+  describe('No manual creation', () => {
+    it('has no endpoint to add an application by hand', async () => {
       const res = await request(app)
         .post('/api/applications')
         .set('X-Development-User', 'user-a@test.local')
         .send({ companyName: 'Company A' });
 
-      expect(res.status).toBe(201);
-      expect(res.body.companyName).toBe('Company A');
-      expect(res.body.id).toBeDefined();
-
-      const dbApp = await prisma.application.findUnique({
-        where: { id: res.body.id },
-      });
-      expect(dbApp?.userId).toBe(userA.id);
-    });
-
-    it('client cannot choose userId', async () => {
-      const res = await request(app)
-        .post('/api/applications')
-        .set('X-Development-User', 'user-a@test.local')
-        .send({ companyName: 'Company A2', userId: userB.id });
-
-      expect(res.status).toBe(201);
-
-      const dbApp = await prisma.application.findUnique({
-        where: { id: res.body.id },
-      });
-      expect(dbApp?.userId).toBe(userA.id); // Must remain user A
-      expect(dbApp?.userId).not.toBe(userB.id);
+      expect(res.status).toBe(404);
+      expect(await prisma.application.count({ where: { userId: userA.id } })).toBe(0);
+      // Applications come from mails and the automation; the tests below seed one directly.
+      await prisma.application.create({ data: { companyName: 'Company A', userId: userA.id } });
     });
 
     it('list response includes recentEvent and pendingActionCount fields', async () => {
