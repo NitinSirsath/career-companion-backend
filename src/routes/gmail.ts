@@ -251,9 +251,7 @@ router.get('/messages', async (req: Request, res: Response, next: NextFunction) 
   try {
     const userId = req.auth!.user.id;
     const { limit, offset } = getPaginationParams(req.query);
-    const relevance = req.query.relevance as string | undefined;
-
-    const items = await listEmails(userId, relevance, limit, offset);
+    const items = await listEmails(userId, limit, offset);
     return res.status(200).json(createPaginatedResponse(items, limit, offset));
   } catch (err) {
     next(err);

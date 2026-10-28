@@ -227,8 +227,13 @@ const isSentOnly = (m: gmail_v1.Schema$Message) =>
 async function recordSentMessages(run: SyncRun, gmail: gmail_v1.Gmail, refs: SentRef[]) {
   if (!refs.length) return;
   const { userId } = run;
+  // Only job conversations: the app keeps nothing of the user's replies elsewhere.
   const held = await prisma.email.findMany({
-    where: { userId, threadId: { in: refs.map((ref) => ref.threadId) } },
+    where: {
+      userId,
+      threadId: { in: refs.map((ref) => ref.threadId) },
+      relevanceState: { not: 'IRRELEVANT' },
+    },
     select: { threadId: true },
     distinct: ['threadId'],
   });
@@ -259,10 +264,10 @@ async function recordSentMessages(run: SyncRun, gmail: gmail_v1.Gmail, refs: Sen
   }
 }
 
-/** Reads the sent mail of the sync window. Skipped while we hold no conversation to reply to. */
+/** Reads the sent mail of the sync window. Skipped while we hold no job conversation. */
 async function scanSentMail(run: SyncRun, gmail: gmail_v1.Gmail) {
   const anyThread = await prisma.email.findFirst({
-    where: { userId: run.userId, threadId: { not: null } },
+    where: { userId: run.userId, threadId: { not: null }, relevanceState: { not: 'IRRELEVANT' } },
     select: { id: true },
   });
   if (!anyThread) return;

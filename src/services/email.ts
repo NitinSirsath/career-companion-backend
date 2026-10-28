@@ -17,21 +17,16 @@ import { enqueueEmailProcessingJob } from './enqueue';
 export const EMAIL_PROCESSING_STUCK_MS = 20 * 60_000;
 
 /**
- * One page of emails, newest first, plus one extra row so the caller can tell if more exist. A
- * waiting or stopped email says why and what happens next (`aiStatus`).
+ * One page of job mails and mails not read yet, newest first, plus one extra row so the caller
+ * can tell if more exist. Mails that are not about a job are never listed: the app keeps only
+ * their ids (`mailRetention.ts`). A waiting or stopped email says why and what happens next
+ * (`aiStatus`).
  */
-export async function listEmails(
-  userId: string,
-  relevance: string | undefined,
-  limit: number,
-  offset: number,
-) {
-  const where: Prisma.EmailWhereInput = { userId };
-  if (relevance === 'job_related') {
-    where.relevanceState = { in: ['RELEVANT', 'UNPROCESSED'] };
-  } else if (relevance === 'irrelevant') {
-    where.relevanceState = 'IRRELEVANT';
-  }
+export async function listEmails(userId: string, limit: number, offset: number) {
+  const where: Prisma.EmailWhereInput = {
+    userId,
+    relevanceState: { in: ['RELEVANT', 'UNPROCESSED'] },
+  };
 
   const [messages, access] = await Promise.all([
     prisma.email.findMany({
@@ -58,7 +53,9 @@ export async function listEmails(
         processingErrorStage: true,
         processingRetryable: true,
         processingFailedAt: true,
-        aiProcessingResult: { select: { provider: true, model: true, processingStatus: true } },
+        aiProcessingResult: {
+          select: { provider: true, model: true, processingStatus: true, category: true },
+        },
         aiOperations: { select: STATUS_STEP_SELECT },
       },
     }),
@@ -73,6 +70,7 @@ export async function listEmails(
       provider: aiProcessingResult.provider,
       model: aiProcessingResult.model,
     },
+    category: aiProcessingResult?.category ?? null,
     processingStuck: message.processingState === 'PROCESSING' && updatedAt.getTime() < cutoff,
     aiStatus: aiStatusOf({ ...message, aiProcessingResult, aiOperations }, access, now),
   }));

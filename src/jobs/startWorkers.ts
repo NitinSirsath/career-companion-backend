@@ -2,6 +2,7 @@ import { startAiResumeWorker } from './aiResumeJob';
 import { startGmailScheduledSync } from './gmailScheduledSyncJob';
 import { GMAIL_SCHEDULE_QUEUE } from '../services/gmailSchedule';
 import { startGmailSyncWorker } from './gmailSyncJob';
+import { MAIL_CLEANUP_QUEUE, startMailCleanupWorker } from './mailCleanupJob';
 import { startEmailProcessingWorker } from './emailProcessingJob';
 import { startNotificationWorker } from './notificationJob';
 import { startRelevanceTriageWorker } from './relevanceTriageJob';
@@ -57,6 +58,11 @@ export function defaultWorkers(): WorkerRegistration[] {
       queue: QUEUE_NAMES[6],
       start: startDashboardTipWorker,
       failureEvent: 'dashboard_tip_worker_start_failed',
+    },
+    {
+      queue: MAIL_CLEANUP_QUEUE,
+      start: startMailCleanupWorker,
+      failureEvent: 'mail_cleanup_worker_start_failed',
     },
   ];
 }

@@ -73,6 +73,7 @@ const providerFixture = {
 };
 const provider = providerFixture as never;
 
+const NO_DETAILS = { subject: null, sender: null };
 let userId = '';
 async function reset() {
   await prisma.email.deleteMany({ where: { userId } });
@@ -262,7 +263,14 @@ describe('COM-125 relevance batch pure behavior', () => {
   it('20 happy path uses one batch call for non-spam candidates', async () => {
     await Promise.all(
       Array.from({ length: 5 }, (_, i) =>
-        prisma.email.create({ data: { userId, gmailMessageId: `happy-${i}` } }),
+        prisma.email.create({
+          data: {
+            userId,
+            gmailMessageId: `happy-${i}`,
+            subject: `Subject ${i}`,
+            sender: 'a@b.test',
+          },
+        }),
       ),
     );
     vi.mocked(fetchMessageMetadata).mockImplementation(async (_u, id) => ({
@@ -302,6 +310,15 @@ describe('COM-125 relevance batch pure behavior', () => {
       }),
     ).toBe(3);
     expect(send).toHaveBeenCalledTimes(2);
+    // A mail that is not about a job keeps no subject or sender, from the rules or the AI.
+    const kept = await prisma.email.findMany({
+      where: { userId },
+      select: { relevanceState: true, subject: true, sender: true },
+    });
+    for (const mail of kept) {
+      if (mail.relevanceState === 'IRRELEVANT') expect(mail).toMatchObject(NO_DETAILS);
+      else expect(mail.subject).not.toBeNull();
+    }
   });
   it('21 missing batch item remains pending on first miss', async () => {
     const email = await prisma.email.create({ data: { userId, gmailMessageId: 'missing-1' } });

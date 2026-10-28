@@ -3,6 +3,7 @@ import type { AIAccess } from './access';
 import { blockingPause, getAccessState, resolveAIAccess, withPause } from './access';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
+import { NOT_JOB_MAIL_FORGETS } from '../mailRetention';
 import { fetchMessageMetadata } from '../gmailFetcher';
 import { enqueueEmailProcessingJob } from '../enqueue';
 import {
@@ -422,7 +423,12 @@ async function saveDecision(
     where: { id: emailId, userId: run.userId },
     // relevanceState of job-related email is set by the pipeline's finish(), after extraction.
     data: irrelevant
-      ? { processingState: 'COMPLETED', relevanceState: 'IRRELEVANT', ...CLEARED_FAILURE }
+      ? {
+          processingState: 'COMPLETED',
+          relevanceState: 'IRRELEVANT',
+          ...CLEARED_FAILURE,
+          ...NOT_JOB_MAIL_FORGETS,
+        }
       : { processingState: 'PENDING', ...CLEARED_FAILURE },
   });
 }
@@ -643,11 +649,8 @@ async function markDeterministicIrrelevant(userId: string, emailId: string) {
     data: {
       processingState: 'COMPLETED',
       relevanceState: 'IRRELEVANT',
-      processingErrorCategory: null,
-      processingErrorDetails: null,
-      processingErrorStage: null,
-      processingRetryable: null,
-      processingFailedAt: null,
+      ...CLEARED_FAILURE,
+      ...NOT_JOB_MAIL_FORGETS,
     },
   });
 }
