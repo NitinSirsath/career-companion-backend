@@ -1,6 +1,7 @@
 import { candidateEnvelope, verifiedCandidates } from './temporal';
 import type { EmailCategory, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
+import { NOT_JOB_MAIL_FORGETS } from '../mailRetention';
 import { fetchMessageBody, fetchMessageMetadata } from '../gmailFetcher';
 import { matchEmailToApplication } from '../matcher';
 import { canReplyTo, closeAsksFromRead, openAsksBefore } from '../threadAsks';
@@ -316,6 +317,7 @@ async function finishEmail(userId: string, emailId: string, decision: string | n
       processingErrorStage: null,
       processingRetryable: null,
       processingFailedAt: null,
+      ...(decision === 'IRRELEVANT' ? NOT_JOB_MAIL_FORGETS : {}),
     },
   });
 }
