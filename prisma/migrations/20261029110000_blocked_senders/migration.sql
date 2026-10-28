@@ -19,3 +19,4 @@ CREATE UNIQUE INDEX "blocked_senders_userId_domain_key" ON "blocked_senders"("us
 
 -- AddForeignKey
 ALTER TABLE "blocked_senders" ADD CONSTRAINT "blocked_senders_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
