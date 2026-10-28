@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { DashboardResponseSchema, type DashboardPeriod, type DashboardQuery } from '../contracts';
 import { conversationRows } from './conversationQuery';
+import { aiTipForPage, makeAITip, ruleTips } from './dashboardTips';
 import {
   answerSpeed,
   automationRows,
@@ -32,11 +33,30 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const OPEN_ASK_LIMIT = 1000;
 
 /**
- * The user's job search in numbers (owner, 27 Oct 2026). One read snapshot of the user's own
- * data; the rules are in `dashboardMetrics.ts`. Nothing is cached: one user's data is small.
+ * The user's job search in numbers (owner, 27 Oct 2026), with its tips. The AI tip is the latest
+ * one made by the queued job; reading the page never calls the AI.
  */
 export async function readDashboard(userId: string, query: DashboardQuery) {
   const now = new Date();
+  const numbers = await dashboardNumbers(userId, query, now);
+  return DashboardResponseSchema.parse({
+    ...numbers,
+    tips: ruleTips(numbers, now),
+    aiTip: await aiTipForPage(userId, query.timeZone, now),
+  });
+}
+
+/** The queued job: the AI tip is made from the numbers of the last 30 days. */
+export async function makeDashboardTip(userId: string, timeZone: string) {
+  const now = new Date();
+  await makeAITip(userId, await dashboardNumbers(userId, { period: '30d', timeZone }, now), now);
+}
+
+/**
+ * One read snapshot of the user's own data; the rules are in `dashboardMetrics.ts`. Nothing is
+ * cached: one user's data is small.
+ */
+async function dashboardNumbers(userId: string, query: DashboardQuery, now: Date) {
   return prisma.$transaction(
     async (tx) => {
       const apps = await loadApplications(tx, userId);
@@ -47,7 +67,7 @@ export async function readDashboard(userId: string, query: DashboardQuery) {
       const dataStartsAt = await firstDataDay(tx, userId, apps, submissions);
       const { current, previous } = windows(query.period, now, dataStartsAt);
       const sent = funnel(apps, current);
-      return DashboardResponseSchema.parse({
+      return {
         generatedAt: now.toISOString(),
         period: query.period,
         timeZone: query.timeZone,
@@ -74,9 +94,7 @@ export async function readDashboard(userId: string, query: DashboardQuery) {
           interview: rate(sent.interview, sent.applied),
           offer: rate(sent.offer, sent.applied),
         },
-        tips: [],
-        aiTip: null,
-      });
+      };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
