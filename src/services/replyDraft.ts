@@ -64,7 +64,8 @@ export function draftMessages(messages: MailMessage[]): DraftMessage[] {
   return out;
 }
 
-const modelName = (provider: string, model: string) =>
+/** The model's name in words, as the page shows it. */
+export const modelName = (provider: string, model: string) =>
   getCatalogProvider(provider)?.models.find((candidate) => candidate.id === model)?.displayName ??
   model;
 
