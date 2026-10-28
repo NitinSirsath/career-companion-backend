@@ -47,12 +47,10 @@ afterAll(async () => {
 });
 
 describe('submittedVia', () => {
-  it('is present and null on create, list, detail and status PATCH for manual applications', async () => {
-    const created = await request(app)
-      .post('/api/applications')
-      .set(as)
-      .send({ companyName: 'Manual' });
-    expect(ApplicationResponseSchema.parse(created.body).submittedVia).toBeNull();
+  it('is present and null on list, detail and status PATCH for applications from mail', async () => {
+    const created = {
+      body: await prisma.application.create({ data: { companyName: 'From mail', userId: owner } }),
+    };
     const list = ListApplicationsResponseSchema.parse(
       (await request(app).get('/api/applications').set(as)).body,
     );

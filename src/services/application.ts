@@ -2,7 +2,6 @@ import { AppError, CHANGE_REJECTED } from '../errors';
 import { ApplicationStatus, Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import {
-  CreateApplicationRequest,
   ApplicationFilters,
   ApplicationResponse,
   ApplicationEventResponse,
@@ -185,24 +184,6 @@ function toSourceSubmission(
     submittedAt: source.submittedAt.toISOString(),
     confirmationText: source.confirmationText,
   };
-}
-
-export async function createApplication(
-  userId: string,
-  data: CreateApplicationRequest,
-): Promise<ApplicationResponse> {
-  const application = await prisma.application.create({
-    data: {
-      userId,
-      companyName: data.companyName,
-      jobTitle: data.jobTitle,
-      location: data.location,
-      appliedAt: data.appliedAt ? new Date(data.appliedAt as string) : null,
-    },
-    include: enrichment,
-  });
-
-  return mapToResponse(userId, application, null); // a new application has no history
 }
 
 function applicationOrder(
