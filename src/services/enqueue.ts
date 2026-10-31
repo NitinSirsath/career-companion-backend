@@ -2,7 +2,7 @@
  * The one place that puts background work on the queue: each job's name, payload, options and
  * enqueue function. Services queue work through these; the files in `src/jobs/` only run it.
  */
-import { getQueue } from './queue';
+import { getQueue, type QUEUE_NAMES } from './queue';
 
 export const EMAIL_PROCESSING_JOB = 'email-processing-job';
 export const EMAIL_RETRY_LIMIT = 3;
@@ -93,25 +93,28 @@ export async function enqueueAiResume(userId: string, pauseEndsAt: Date): Promis
 }
 
 export const NOTIFICATION_JOB = 'discord-notification-job';
+/** Push alerts on the user's devices (owner, 30 Oct 2026), next to the Discord notification. */
+export const WEB_PUSH_NOTIFICATION_JOB =
+  'web-push-notification-job' satisfies (typeof QUEUE_NAMES)[number];
 
 export interface NotificationJobData {
   actionId: string;
 }
 
+/** Queues the action's notification on each channel: Discord and push alerts. */
 export async function enqueueNotificationJob(actionId: string) {
   const queue = await getQueue();
-  const jobId = `notify-discord-${actionId}`; // idempotency key
-
+  const retries = { singletonSeconds: 300, retryLimit: 3, retryDelay: 60, retryBackoff: true };
+  // The singleton keys are the idempotency keys.
   await queue.send(
     NOTIFICATION_JOB,
     { actionId },
-    {
-      singletonKey: jobId,
-      singletonSeconds: 300,
-      retryLimit: 3,
-      retryDelay: 60,
-      retryBackoff: true,
-    },
+    { singletonKey: `notify-discord-${actionId}`, ...retries },
+  );
+  await queue.send(
+    WEB_PUSH_NOTIFICATION_JOB,
+    { actionId },
+    { singletonKey: `notify-push-${actionId}`, ...retries }
   );
 }
 
