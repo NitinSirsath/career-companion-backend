@@ -114,7 +114,7 @@ export async function enqueueNotificationJob(actionId: string) {
   await queue.send(
     WEB_PUSH_NOTIFICATION_JOB,
     { actionId },
-    { singletonKey: `notify-push-${actionId}`, ...retries }
+    { singletonKey: `notify-push-${actionId}`, ...retries },
   );
 }
 
