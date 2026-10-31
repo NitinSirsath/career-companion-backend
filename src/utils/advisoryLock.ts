@@ -13,6 +13,8 @@ export const LOCK_NAMESPACE = {
   integrationTokens: 0x4d435002,
   /** Sending in a sandbox mailbox, so its history numbers have no gaps or repeats. */
   sandboxMailbox: 0x4d435004,
+  /** Creating an account, so two sign-ups at once cannot both take the beta's last place. */
+  newAccounts: 0x4d435005,
 } as const;
 
 /** Holds the lock until the surrounding transaction ends. */

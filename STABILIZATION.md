@@ -146,6 +146,7 @@ JOIN applications a ON a.id = x."applicationId" WHERE e."userId" <> a."userId";
 | `MCP_ALLOWED_HOSTS` | Required in production (ADR-0002): comma-separated hostnames, no scheme or port, that the `Host` header may name on `/mcp`. Outside production it defaults to `localhost,127.0.0.1,[::1]`. |
 | `MCP_ALLOWED_ORIGINS` | Hostnames a present `Origin` may name on `/mcp`. Default empty: requests with any `Origin` are rejected; requests without one pass. |
 | `MCP_DAILY_SUBMISSION_LIMIT` | Integer 0–5000, default 500: new automation submissions per user per UTC day. 0 stops all new submissions. Invalid values fail production startup. |
+| `BETA_USER_LIMIT` | Whole number, default 99 when unset or empty: new accounts stop at this many real users, test accounts not counted (owner, 31 Oct 2026). Google lets an unverified Gmail app have 100 users and never counts down, so keep it below Google's "User cap" on the Audience page. A refused person lands on `/login?error=beta_full`; existing users always sign in. 0: no limit. Invalid values fail startup. |
 
 Keep OAuth, database, encryption and webhook credentials server-side. No new infrastructure is required. AI provider keys belong to users and are stored only as AES-256-GCM ciphertext bound to their owner.
 

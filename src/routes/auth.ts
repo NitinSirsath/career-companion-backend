@@ -29,10 +29,10 @@ import {
 } from '../services/googleOAuth';
 import { loginWithPassword, registerUser, setPassword } from '../services/passwordLogin';
 import { isTestAccountEmail } from '../services/testAccounts';
-import { findOrCreateGoogleUser, getUserProfile } from '../services/user';
+import { BetaFullError, findOrCreateGoogleUser, getUserProfile } from '../services/user';
 import { AppError } from '../errors';
 import { frontendUrl, isProduction } from '../utils/config';
-import { logError } from '../utils/log';
+import { logError, logEvent } from '../utils/log';
 import { returnPath } from '../utils/returnPath';
 
 const router = Router();
@@ -135,6 +135,10 @@ router.get('/callback', prodModeOnly, async (req: Request, res: Response) => {
     await signIn(req, user.id);
     return res.redirect(302, `${frontendUrl()}${returnTo}`);
   } catch (err) {
+    if (err instanceof BetaFullError) {
+      logEvent('new_account_refused', { reason: 'beta_full' });
+      return res.redirect(302, loginErrorUrl('beta_full', returnTo));
+    }
     logError('google_login_failed', {}, err);
     return res.redirect(302, loginErrorUrl('server_error', returnTo));
   }

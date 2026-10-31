@@ -1,10 +1,40 @@
 import type { UserProfile } from '../contracts/auth';
 import { prisma } from '../db/prisma';
+import { LOCK_NAMESPACE, lockUser } from '../utils/advisoryLock';
+import { betaUserLimit, testAccounts } from '../utils/config';
 import { isTestAccountEmail } from './testAccounts';
+
+/** A new account was refused: the beta has all its places (`BETA_USER_LIMIT`). */
+export class BetaFullError extends Error {
+  constructor() {
+    super('The beta is full');
+    this.name = 'BetaFullError';
+  }
+}
+
+/**
+ * Creates a user unless the real accounts (test accounts left out) already reach the beta limit.
+ * The count and the create share one lock, so two sign-ups at once cannot both take the last place.
+ */
+async function createWithinBetaLimit(data: {
+  googleId: string;
+  email: string;
+  name: string | null;
+}) {
+  const limit = betaUserLimit();
+  if (limit === 0) return prisma.user.create({ data });
+  return prisma.$transaction(async (tx) => {
+    await lockUser(tx, LOCK_NAMESPACE.newAccounts, 'all');
+    const testEmails = testAccounts().map((account) => account.email);
+    const accounts = await tx.user.count({ where: { email: { notIn: testEmails } } });
+    if (accounts >= limit) throw new BetaFullError();
+    return tx.user.create({ data });
+  });
+}
 
 /**
  * The user for a verified Google identity: the one already linked to it, else the account with
- * the same email (linked now), else a new user.
+ * the same email (linked now), else a new user while the beta has places (else `BetaFullError`).
  */
 export async function findOrCreateGoogleUser(googleId: string, email: string, name: string | null) {
   const linked = await prisma.user.findUnique({ where: { googleId } });
@@ -14,7 +44,7 @@ export async function findOrCreateGoogleUser(googleId: string, email: string, na
   }
 
   const sameEmail = await prisma.user.findUnique({ where: { email } });
-  if (!sameEmail) return prisma.user.create({ data: { googleId, email, name } });
+  if (!sameEmail) return createWithinBetaLimit({ googleId, email, name });
   if (sameEmail.googleId && sameEmail.googleId !== googleId)
     throw new Error('Identity already linked');
   return prisma.user.update({
