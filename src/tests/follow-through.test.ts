@@ -105,15 +105,18 @@ it('snooze partitions full counts, retains deadline, wakes on read and suppresse
   expect(awake.counts.overdue).toBe(25);
   expect(awake.counts.snoozed).toBe(0);
   expect(awake.items[0].deadline).toBe('2026-10-02T00:00:00.000Z');
-  expect(
-    await prisma.notificationDelivery.count({
-      where: {
-        actionId: { in: rows.map((a) => a.id) },
-        status: 'FAILED_PERMANENT',
-        errorDetails: 'USER_SUPPRESSED',
-      },
-    }),
-  ).toBe(25);
+  // Suppressed on each channel: Discord and push alerts.
+  for (const provider of ['DISCORD', 'WEB_PUSH'] as const)
+    expect(
+      await prisma.notificationDelivery.count({
+        where: {
+          actionId: { in: rows.map((a) => a.id) },
+          provider,
+          status: 'FAILED_PERMANENT',
+          errorDetails: 'USER_SUPPRESSED',
+        },
+      }),
+    ).toBe(25);
   await updateActionStatus(owner, rows[0].id, 'COMPLETED', 1);
   expect(
     (await prisma.action.findUniqueOrThrow({ where: { id: rows[0].id } })).snoozedUntil,
