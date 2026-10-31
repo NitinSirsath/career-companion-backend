@@ -20,6 +20,7 @@ const DEV_VALUES: Record<string, string> = {
   LOG_LEVEL: 'debug',
   TEST_ACCOUNTS: 'dev1@test.com:a-long-dev-password-1',
   AI_SHOW_HIDDEN_PROVIDERS: 'true',
+  BETA_USER_LIMIT: '5',
   VAPID_PUBLIC_KEY: 'dev-public-key',
   VAPID_PRIVATE_KEY: 'dev-private-key',
   VAPID_SUBJECT: 'mailto:dev@example.com',
