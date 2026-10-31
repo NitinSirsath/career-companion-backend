@@ -33,6 +33,7 @@ model User {
   notSubmittedJobs    NotSubmittedJob[]
   sandboxMessages     SandboxMessage[]
   dashboardAITip      DashboardAITip?
+  pushDevices         PushDevice[]
 
   @@map("users")
 }
@@ -519,6 +520,7 @@ model Action {
 
 enum NotificationProviderType {
   DISCORD
+  WEB_PUSH
 }
 
 enum NotificationStatus {
@@ -544,6 +546,25 @@ model NotificationDelivery {
   @@unique([actionId, provider])
   @@index([status])
   @@map("notification_deliveries")
+}
+
+/// A phone or computer that turned push alerts on (owner, 30 Oct 2026). `endpoint` is the push
+/// service address its browser gave; `p256dh` and `auth` are the keys that seal each alert for it.
+/// The same endpoint again updates this row, also when another user signs in on that device.
+model PushDevice {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  endpoint   String    @unique
+  p256dh     String
+  auth       String
+  createdAt  DateTime  @default(now())
+  /// The last time the push service took an alert for this device.
+  lastUsedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_devices")
 }
 
 enum AIOperationStatus {

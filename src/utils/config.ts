@@ -200,6 +200,19 @@ export function discordUserId(): string | undefined {
   return process.env.DISCORD_USER_ID || undefined;
 }
 
+// ─── Push alerts ────────────────────────────────────────────────────────────
+
+/**
+ * The keys that sign push alerts (VAPID). All three are needed; without any of them alerts are
+ * not offered and nothing is sent.
+ */
+export function vapidKeys(): { publicKey: string; privateKey: string; subject: string } | null {
+  const publicKey = process.env.VAPID_PUBLIC_KEY;
+  const privateKey = process.env.VAPID_PRIVATE_KEY;
+  const subject = process.env.VAPID_SUBJECT;
+  return publicKey && privateKey && subject ? { publicKey, privateKey, subject } : null;
+}
+
 // ─── Automation submissions through MCP ─────────────────────────────────────
 
 const LOCALHOST = ['localhost', '127.0.0.1', '[::1]'];

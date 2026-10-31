@@ -89,6 +89,7 @@ import { integrationTokenRouter } from './routes/integrationTokens';
 import { submissionRouter } from './routes/submissions';
 import { sandboxRouter } from './routes/sandbox';
 import { appModeRouter } from './routes/appMode';
+import { alertsRouter } from './routes/alerts';
 import { errorHandler } from './middleware/error';
 
 app.use('/api/app-mode', appModeRouter);
@@ -106,6 +107,7 @@ app.use('/api/dashboard', dashboardRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/integration-tokens', integrationTokenRouter);
 app.use('/api/submissions', submissionRouter);
+app.use('/api/alerts', alertsRouter);
 // Dev mode and test accounts only: answers 404 for everyone else (middleware/appMode.ts).
 app.use('/api/sandbox', sandboxRouter);
 

@@ -20,6 +20,9 @@ const DEV_VALUES: Record<string, string> = {
   LOG_LEVEL: 'debug',
   TEST_ACCOUNTS: 'dev1@test.com:a-long-dev-password-1',
   AI_SHOW_HIDDEN_PROVIDERS: 'true',
+  VAPID_PUBLIC_KEY: 'dev-public-key',
+  VAPID_PRIVATE_KEY: 'dev-private-key',
+  VAPID_SUBJECT: 'mailto:dev@example.com',
 };
 const pinned = Object.keys(PINNED_TEST_ENV);
 let before: Record<string, string | undefined>;

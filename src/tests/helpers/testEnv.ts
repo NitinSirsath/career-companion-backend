@@ -17,6 +17,9 @@ export const PINNED_TEST_ENV: Record<string, string> = {
   LOG_LEVEL: '', // info
   TEST_ACCOUNTS: '', // none
   AI_SHOW_HIDDEN_PROVIDERS: '', // off
+  VAPID_PUBLIC_KEY: '', // no alerts
+  VAPID_PRIVATE_KEY: '',
+  VAPID_SUBJECT: '',
 };
 
 /** `fromEnvTest`: the values `.env.test` sets. The name must exist, even empty, to stay pinned. */
