@@ -247,6 +247,21 @@ export function mcpServerAddress(env: NodeJS.ProcessEnv = process.env): string |
   return host ? `https://${host}` : null;
 }
 
+/**
+ * Real accounts at most (owner, 31 Oct 2026): Google lets an unverified Gmail app have 100 users,
+ * and its count never goes down, so new accounts stop one short of it. Unset or empty: 99. 0: no
+ * limit, for after Google's Gmail verification.
+ */
+export const DEFAULT_BETA_USER_LIMIT = 99;
+
+export function parseBETA_USER_LIMIT(value: string | undefined): number {
+  if (value === undefined || value === '') return DEFAULT_BETA_USER_LIMIT;
+  if (!/^\d+$/.test(value) || Number(value) > 1_000_000)
+    throw new Error('Invalid BETA_USER_LIMIT: must be a whole number; 0 means no limit');
+  return Number(value);
+}
+export const betaUserLimit = () => parseBETA_USER_LIMIT(process.env.BETA_USER_LIMIT);
+
 export const DEFAULT_DAILY_SUBMISSION_LIMIT = 500;
 
 /** New submissions per user per UTC day, 0–5000. 0 stops all new submissions. */
@@ -386,6 +401,7 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env) {
   validateAppMode(env);
   parseTEST_ACCOUNTS(env.TEST_ACCOUNTS);
   parseAI_SHOW_HIDDEN_PROVIDERS(env.AI_SHOW_HIDDEN_PROVIDERS);
+  parseBETA_USER_LIMIT(env.BETA_USER_LIMIT);
   if (env.NODE_ENV !== 'production') return;
   if (env.ENABLE_DEV_AUTH === 'true')
     throw new Error('Development authentication is forbidden in production');
