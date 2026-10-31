@@ -4,10 +4,11 @@ import { GMAIL_SCHEDULE_QUEUE } from '../services/gmailSchedule';
 import { startGmailSyncWorker } from './gmailSyncJob';
 import { MAIL_CLEANUP_QUEUE, startMailCleanupWorker } from './mailCleanupJob';
 import { startEmailProcessingWorker } from './emailProcessingJob';
-import { startNotificationWorker } from './notificationJob';
+import { startNotificationWorker, startWebPushNotificationWorker } from './notificationJob';
 import { startRelevanceTriageWorker } from './relevanceTriageJob';
 import { startReplyReadingWorker } from './replyReadingJob';
 import { startDashboardTipWorker } from './dashboardTipJob';
+import { WEB_PUSH_NOTIFICATION_JOB } from '../services/enqueue';
 import { stopQueue, QUEUE_NAMES } from '../services/queue';
 import { errorCategory } from '../utils/errorCategory';
 import { logEvent, logError } from '../utils/log';
@@ -38,6 +39,11 @@ export function defaultWorkers(): WorkerRegistration[] {
       queue: QUEUE_NAMES[1],
       start: startNotificationWorker,
       failureEvent: 'notification_worker_start_failed',
+    },
+    {
+      queue: WEB_PUSH_NOTIFICATION_JOB,
+      start: startWebPushNotificationWorker,
+      failureEvent: 'web_push_worker_start_failed',
     },
     {
       queue: QUEUE_NAMES[3],
