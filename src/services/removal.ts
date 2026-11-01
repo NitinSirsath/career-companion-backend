@@ -80,19 +80,23 @@ export async function deleteConversation(
 }
 
 /**
- * Removes an application with its steps, history and agenda items. Its mails stay in Mails, no
- * longer linked, so the conversation offers "Create application" again; automation records keep
- * their own state and lose the link. Archive stays for jobs that are finished.
+ * Removes an application with its steps, history and agenda items, and what the user's automation
+ * reported for it (owner, 1 Nov 2026: unlinked, those records were shown nowhere). Its mails stay in
+ * Mails, no longer linked, so the conversation offers "Create application" again. Automation records
+ * waiting for review or ignored, and jobs not applied to, stay. Archive stays for finished jobs.
  */
 export async function deleteApplication(userId: string, id: string) {
   return prisma.$transaction(async (tx) => {
     await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
+    // Automation intake links records under this lock. No other path takes both locks.
+    await lockUser(tx, LOCK_NAMESPACE.externalSubmissions, userId);
     const application = await tx.application.findFirst({ where: { id, userId } });
     if (!application) throw new AppError(404, 'NOT_FOUND', 'Application not found.');
     await tx.email.updateMany({
       where: { userId, applicationId: id },
       data: { applicationId: null, matchState: 'UNMATCHED', matchConfirmedBy: null },
     });
+    await tx.externalSubmission.deleteMany({ where: { userId, applicationId: id } });
     // Steps, history and agenda items go with it (cascade).
     await tx.application.delete({ where: { id } });
     return { deleted: true as const };
