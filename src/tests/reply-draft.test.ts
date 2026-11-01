@@ -163,6 +163,13 @@ describe('reply choices and "Write with AI" (COM-197)', () => {
       hint: "I'm free Tue after 3",
       userName: 'Nitin',
     });
+    // Only what AI_DATA_SENT_SUMMARY and the privacy policy name. A new field needs both changed.
+    expect(Object.keys(JSON.parse(call.input)).sort()).toEqual([
+      'choice',
+      'hint',
+      'messages',
+      'userName',
+    ]);
     expect((await prisma.aIUsageDay.findFirstOrThrow({ where: { userId: owner } })).calls).toBe(1);
   });
 
