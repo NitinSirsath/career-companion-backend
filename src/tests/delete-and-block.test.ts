@@ -257,4 +257,75 @@ describe('deleting an application', () => {
     const detail = await request(app).get('/api/conversations/thread-app').set(as);
     expect(detail.body.conversation.application).toBeNull();
   });
+
+  it('also deletes what the automation reported for it, and nothing else of the automation', async () => {
+    const otherApp = await prisma.application.create({
+      data: { userId: owner, companyName: 'Wipro Limited' },
+    });
+    const settled = { resolvedBy: 'AUTOMATIC', resolvedAt: new Date() } as const;
+    const record = (sourceRecordRef: string, data: object) =>
+      prisma.externalSubmission.create({
+        data: {
+          userId: owner,
+          source: 'AUTOMATION',
+          sourceRecordRef,
+          platform: 'linkedin',
+          company: 'Infosys Limited',
+          jobTitle: 'Frontend Engineer',
+          submittedAt: new Date(Date.UTC(2026, 9, 30)),
+          submittedAnswers: [{ question: 'Notice period?', answer: '30 days' }],
+          matchState: 'NEEDS_REVIEW',
+          ...data,
+        },
+      });
+    const created = await record('2026-10-30/10:00:00', {
+      ...settled,
+      matchState: 'CREATED',
+      applicationId: appId,
+    });
+    await record('2026-10-30/11:00:00', { ...settled, matchState: 'LINKED', applicationId: appId });
+    await prisma.applicationEvent.create({
+      data: {
+        applicationId: appId,
+        type: 'AUTOMATION_SUBMITTED',
+        externalSubmissionId: created.id,
+      },
+    });
+    const kept = [
+      await record('2026-10-30/12:00:00', {}),
+      await record('2026-10-30/13:00:00', {
+        matchState: 'IGNORED',
+        resolvedBy: 'USER',
+        resolvedAt: new Date(),
+      }),
+      await record('2026-10-30/14:00:00', {
+        ...settled,
+        matchState: 'LINKED',
+        applicationId: otherApp.id,
+      }),
+    ];
+    const skipped = await prisma.notSubmittedJob.create({
+      data: {
+        userId: owner,
+        source: 'AUTOMATION',
+        sourceRecordRef: '2026-10-30/15:00:00',
+        outcome: 'SKIPPED',
+        platform: 'naukri',
+        company: 'Infosys Limited',
+        jobTitle: 'Backend Engineer',
+        reason: 'Asks for 8 years of experience',
+        loggedAt: new Date(),
+      },
+    });
+
+    await request(app).delete(`/api/applications/${appId}`).set(as).expect(200);
+
+    const left = await prisma.externalSubmission.findMany({
+      where: { userId: owner },
+      select: { id: true },
+    });
+    expect(left.map((row) => row.id).sort()).toEqual(kept.map((row) => row.id).sort());
+    expect(await prisma.notSubmittedJob.findUnique({ where: { id: skipped.id } })).not.toBeNull();
+    expect(await prisma.application.findUnique({ where: { id: otherApp.id } })).not.toBeNull();
+  });
 });
