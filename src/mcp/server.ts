@@ -168,7 +168,7 @@ function toolError(code: ToolErrorCode, fields?: string[]) {
 }
 
 const DESCRIPTION = [
-  "Record one job application that the user's own automation has just submitted, so it appears in Career Companion.",
+  "Record one job application that the user's own automation has just submitted, so it appears in NorthList.",
   'Call it once per submission, only after the site showed a submission confirmation and the applied entry was appended to the daily file.',
   'Send only the listed fields, copied from that entry, including the resume file name and every submitted question and answer. Never send resume content, credentials, or skipped or needs_user entries.',
   'Idempotent on sourceRecordRef: a repeat returns already_recorded and only fills fields that are still empty. On invalid_input do not retry until the entry is fixed.',
@@ -236,7 +236,7 @@ export function identityOf(authInfo: AuthInfo | undefined) {
 }
 
 export function createMcpServer(authInfo: AuthInfo | undefined) {
-  const server = new McpServer({ name: 'career-companion', version: '1.1.0' });
+  const server = new McpServer({ name: 'northlist', version: '1.1.0' });
   server.registerTool(
     TOOL_NAME,
     {
