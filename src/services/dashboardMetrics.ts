@@ -387,7 +387,7 @@ export function topReasons(reasons: string[], limit = 3) {
 
 const MONTH = '(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?';
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-const ISO_DAY = /\\b(\\d{4})-(\\d{2})-(\\d{2})\\b/g;
+const ISO_DAY = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
 const MONTH_FIRST = new RegExp(
   `\\b${MONTH}\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?:,?\\s*(\\d{4}))?`,
   'g',
@@ -397,7 +397,7 @@ const DAY_FIRST = new RegExp(
   'g',
 );
 const DAY_RANGE = new RegExp(`${MONTH}\\s+\\d{1,2}\\s*(?:-|–|to)\\s*\\d{1,2}\\b`);
-const DAY_CHOICE = /\\b\\d{1,2}(?:st|nd|rd|th)?\\s*(?:or|and|&|\\/)\\s*\\d{1,2}(?:st|nd|rd|th)?\\b/;
+const DAY_CHOICE = /\b\d{1,2}(?:st|nd|rd|th)?\s*(?:or|and|&|\/)\s*\d{1,2}(?:st|nd|rd|th)?\b/;
 
 function validDay(year: number, month: number, day: number): string | null {
   const date = new Date(Date.UTC(year, month - 1, day));
@@ -446,14 +446,14 @@ export function interviewDay(text: string | null, mailDate: Date | null): string
 /** The time of an interview as HH:mm from the AI's free text ("10:00 AM IST", "14:30"), or null. */
 export function interviewClock(text: string | null): string | null {
   if (!text) return null;
-  const twelve = /\\b(\\d{1,2})(?::([0-5]\\d))?\\s*([ap])\\.?\\s?m\\b\\.?/i.exec(text);
+  const twelve = /\b(\d{1,2})(?::([0-5]\d))?\s*([ap])\.?\s?m\b\.?/i.exec(text);
   if (twelve) {
     const hour = Number(twelve[1]);
     if (hour < 1 || hour > 12) return null;
     const pm = twelve[3].toLowerCase() === 'p';
     return `${String((hour % 12) + (pm ? 12 : 0)).padStart(2, '0')}:${twelve[2] ?? '00'}`;
   }
-  const clock = /\\b([01]?\\d|2[0-3]):([0-5]\\d)\\b/.exec(text);
+  const clock = /\b([01]?\d|2[0-3]):([0-5]\d)\b/.exec(text);
   return clock ? `${clock[1].padStart(2, '0')}:${clock[2]}` : null;
 }
 
