@@ -18,6 +18,7 @@ import { logDebug, logEvent, logError } from '../utils/log';
 import { noteSentForReading } from './replyReading';
 import { blockedDomains } from './blockedSenders';
 import { isBlockedSender } from '../contracts/blockedSender';
+import { countScannedMail } from './mailScanCount';
 export { GmailAuthError, SyncInProgressError } from './gmailSyncErrors';
 export interface SyncDelivery {
   signal?: AbortSignal;
@@ -185,18 +186,21 @@ async function ingestMessage(
   const headers = extractHeaders(message.payload?.headers);
   if (isBlockedSender(headers.sender, run.blocked)) return 'ignored';
   checkDeadline(run);
-  const record = await withOwnedSync(userId, run.connectionId, run.claim, (tx) => {
+  const record = await withOwnedSync(userId, run.connectionId, run.claim, async (tx) => {
     checkDeadline(run);
-    return tx.email.upsert({
-      where: { userId_gmailMessageId: { userId, gmailMessageId: id } },
-      create: {
+    const where = { userId_gmailMessageId: { userId, gmailMessageId: id } };
+    const saved = await tx.email.findUnique({ where });
+    if (saved) return saved;
+    // A new inbox mail: counted once, for "Mails scanned" on the Dashboard.
+    await countScannedMail(tx, userId, receivedAt);
+    return tx.email.create({
+      data: {
         userId,
         gmailMessageId: id,
         threadId: message.threadId,
         ...headers,
         ...(receivedAt && !isNaN(receivedAt.getTime()) ? { receivedAt } : {}),
       },
-      update: {},
     });
   });
   if (record.processingState === 'PENDING') {
