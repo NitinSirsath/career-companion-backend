@@ -83,7 +83,6 @@ async function dashboardNumbers(userId: string, query: DashboardQuery, now: Date
           ...automationRows(apps, submissions, current),
           ...(await automationCoverage(tx, userId, current, submissions)),
         },
-        },
       };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
