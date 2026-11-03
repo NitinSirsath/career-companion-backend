@@ -1,23 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import {
-  answerSpeed,
   appliedDate,
   automationRows,
   funnel,
   goneQuiet,
+  interviewClock,
+  interviewDay,
   localDay,
+  mailType,
   median,
   mondayOf,
-  percentile80,
   reachedAt,
   reachedRank,
-  rejectedAfter,
-  replyHours,
-  rightNow,
+  series,
   topReasons,
   totals,
-  weeks,
+  trendWeeks,
+  upcomingInterviews,
+  usualReplyDays,
   type DashApp,
+  type InterviewMail,
 } from '../services/dashboardMetrics';
 
 const NOW = new Date('2026-10-27T12:00:00Z');
@@ -141,23 +143,56 @@ describe('the numbers for a period', () => {
     });
   });
 
-  it('a job rejected straight away ended before any answer', () => {
-    expect(rejectedAfter(apps, LAST_30)).toEqual({
-      noAnswer: 1,
-      recruiterContact: 0,
-      assessment: 0,
-      interview: 0,
-    });
+  it('the series adds up to the totals, day by day in the user time zone', () => {
+    const { bucket, points } = series(apps, [], LAST_30, 'Asia/Kolkata');
+    expect(bucket).toBe('day');
+    // 30 days back from noon UTC is a part day, so the period touches 31 calendar days.
+    expect(points).toHaveLength(31);
+    expect(points[0].start).toBe(localDay(daysAgo(30), 'Asia/Kolkata'));
+    expect(points.at(-1)?.start).toBe('2026-10-27');
+    const sum = (key: 'applicationsSent' | 'replies' | 'interviews') =>
+      points.reduce((total, point) => total + point[key], 0);
+    expect(sum('applicationsSent')).toBe(3);
+    expect(sum('replies')).toBe(2);
+    expect(sum('interviews')).toBe(1);
+    // A job counts its reply once, on its first answer in the period.
+    expect(points.find((p) => p.start === localDay(daysAgo(12), 'Asia/Kolkata'))?.replies).toBe(1);
+    expect(points.find((p) => p.start === localDay(daysAgo(6), 'Asia/Kolkata'))?.replies).toBe(0);
   });
 
-  it('right now counts active jobs by step, whatever the period', () => {
-    expect(rightNow([...apps, job({ aiStatus: 'OFFER', archivedAt: daysAgo(1) })])).toEqual({
-      APPLIED: 2,
-      RECRUITER_CONTACT: 0,
-      ASSESSMENT: 0,
-      INTERVIEW: 1,
-      OFFER: 0,
+  it('a long period goes week by week', () => {
+    const year = { start: daysAgo(200), end: NOW };
+    const { bucket, points } = series([job({ appliedAt: daysAgo(150) })], [], year, 'UTC');
+    expect(bucket).toBe('week');
+    expect(points.every((p) => mondayOf(p.start) === p.start)).toBe(true);
+    expect(points.reduce((total, p) => total + p.applicationsSent, 0)).toBe(1);
+  });
+
+  it('job mails of the period by kind; a fake offer is never a reply', () => {
+    const mails = [
+      { receivedAt: daysAgo(2), category: 'RECRUITER' as const, fakeOffer: false },
+      { receivedAt: daysAgo(2), category: 'OFFER' as const, fakeOffer: true },
+      { receivedAt: daysAgo(2), category: 'ASSESSMENT' as const, fakeOffer: false },
+      { receivedAt: daysAgo(2), category: 'REJECTION' as const, fakeOffer: false },
+      { receivedAt: daysAgo(2), category: 'FOLLOW_UP' as const, fakeOffer: false },
+      { receivedAt: daysAgo(40), category: 'RECRUITER' as const, fakeOffer: false },
+    ];
+    expect(mails.map(mailType)).toEqual([
+      'replyMails',
+      'otherMails',
+      'interviewMails',
+      'rejectionMails',
+      'otherMails',
+      'replyMails',
+    ]);
+    const { points } = series([], mails, LAST_30, 'UTC');
+    expect(points.find((p) => p.start === localDay(daysAgo(2), 'UTC'))).toMatchObject({
+      replyMails: 1,
+      interviewMails: 1,
+      rejectionMails: 1,
+      otherMails: 2,
     });
+    expect(points.reduce((total, p) => total + p.replyMails, 0)).toBe(1);
   });
 });
 
@@ -202,56 +237,60 @@ describe('weeks', () => {
     expect(mondayOf(localDay(sunday, 'Asia/Kolkata'))).toBe('2026-10-26');
   });
 
-  it('are the last 12, oldest first', () => {
-    const list = weeks([job({ appliedAt: new Date('2026-10-26T03:00:00Z') })], NOW, 'Asia/Kolkata');
+  it('are the last 12, oldest first, with all five numbers', () => {
+    const list = trendWeeks(
+      [
+        job({ appliedAt: new Date('2026-10-26T03:00:00Z') }),
+        job({
+          appliedAt: daysAgo(40),
+          aiStatus: 'REJECTED',
+          changes: [
+            { toStatus: 'OFFER', changedAt: new Date('2026-10-20T10:00:00Z') },
+            { toStatus: 'REJECTED', changedAt: new Date('2026-10-27T08:00:00Z') },
+          ],
+          mails: [{ receivedAt: new Date('2026-10-20T10:00:00Z'), category: 'OFFER' }],
+        }),
+      ],
+      NOW,
+      'Asia/Kolkata',
+    );
     expect(list).toHaveLength(12);
     expect(list[0].weekStart).toBe('2026-08-10');
+    expect(list[10]).toEqual({
+      weekStart: '2026-10-19',
+      applicationsSent: 0,
+      replies: 1,
+      interviews: 1,
+      offers: 1,
+      rejections: 0,
+    });
     expect(list[11]).toEqual({
       weekStart: '2026-10-26',
       applicationsSent: 1,
-      answers: 0,
+      replies: 0,
       interviews: 0,
+      offers: 0,
+      rejections: 1,
     });
   });
 });
 
-describe('how fast companies answer', () => {
-  it('days from applied to the first answer, for first answers in the period', () => {
-    const speed = answerSpeed(
+describe('the usual reply time', () => {
+  it('is the median days from applied to the first answer, for first answers in the period', () => {
+    const days = usualReplyDays(
       [
+        job({ appliedAt: daysAgo(10), mails: [{ receivedAt: daysAgo(8), category: 'RECRUITER' }] }),
+        job({ appliedAt: daysAgo(25), mails: [{ receivedAt: daysAgo(5), category: 'REJECTION' }] }),
         job({
-          companyName: 'Fast',
-          appliedAt: daysAgo(10),
-          mails: [{ receivedAt: daysAgo(8), category: 'RECRUITER' }],
-        }),
-        job({
-          companyName: 'Slow',
-          appliedAt: daysAgo(25),
-          mails: [{ receivedAt: daysAgo(5), category: 'REJECTION' }],
-        }),
-        job({
-          companyName: 'Old',
           appliedAt: daysAgo(80),
           mails: [{ receivedAt: daysAgo(60), category: 'RECRUITER' }],
         }),
       ],
       LAST_30,
     );
-    expect(speed).toEqual({
-      answered: 2,
-      medianDays: 11,
-      p80Days: 20,
-      slowest: [
-        { companyName: 'Slow', days: 20 },
-        { companyName: 'Fast', days: 2 },
-      ],
-    });
-  });
-
-  it('median and the 8-in-10 value', () => {
-    expect(median([])).toBeNull();
+    expect(days).toBe(11);
+    expect(usualReplyDays([], LAST_30)).toBeNull();
     expect(median([5, 1, 3])).toBe(3);
-    expect(percentile80([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])).toBe(8);
   });
 });
 
@@ -295,21 +334,103 @@ describe('sites and work modes', () => {
   });
 });
 
-describe('reply time', () => {
-  it('hours from a mail to the first reply after it in the same thread', () => {
+describe('interviews coming up', () => {
+  const mailDay = new Date('2026-10-30T09:00:00Z');
+
+  it('reads a booked day off the AI date text', () => {
+    expect(interviewDay('2026-11-05', mailDay)).toBe('2026-11-05');
+    expect(interviewDay('Thursday, November 5, 2026', mailDay)).toBe('2026-11-05');
+    expect(interviewDay('Nov. 16th, 2026', mailDay)).toBe('2026-11-16');
+    expect(interviewDay('16 November 2026', mailDay)).toBe('2026-11-16');
+    // No year: the mail's year, or the next one when that would be long before the mail.
+    expect(interviewDay('Thursday, 5 November', mailDay)).toBe('2026-11-05');
+    expect(interviewDay('January 8', mailDay)).toBe('2027-01-08');
+  });
+
+  it('a range, a choice of days or no clear date is not a booked interview', () => {
+    expect(interviewDay('November 2-6, 2026 (choose a slot)', mailDay)).toBeNull();
+    expect(interviewDay('5 or 6 November', mailDay)).toBeNull();
+    expect(interviewDay('November 5 and November 9, 2026', mailDay)).toBeNull();
+    expect(interviewDay('next week', mailDay)).toBeNull();
+    expect(interviewDay('February 30, 2027', mailDay)).toBeNull();
+    expect(interviewDay(null, mailDay)).toBeNull();
+  });
+
+  it('reads the time as HH:mm', () => {
+    expect(interviewClock('10:00 AM IST')).toBe('10:00');
+    expect(interviewClock('2:30 pm')).toBe('14:30');
+    expect(interviewClock('12 PM')).toBe('12:00');
+    expect(interviewClock('12:15 a.m.')).toBe('00:15');
+    expect(interviewClock('14:00 CET')).toBe('14:00');
+    expect(interviewClock('morning')).toBeNull();
+    expect(interviewClock(null)).toBeNull();
+  });
+
+  const mail = (over: Partial<InterviewMail>): InterviewMail => ({
+    conversationKey: 'thread-1',
+    receivedAt: mailDay,
+    applicationId: 'app-1',
+    companyName: 'Harbor Analytics',
+    jobTitle: 'Designer',
+    interviewDate: 'Thursday, November 5, 2026',
+    interviewTime: '10:00 AM',
+    jobClosed: false,
+    ...over,
+  });
+  const now = new Date('2026-11-03T10:00:00Z');
+
+  it('counts from today on, each interview once, the earliest first', () => {
+    const result = upcomingInterviews(
+      [
+        mail({}),
+        // The same interview, confirmed in a second conversation.
+        mail({ conversationKey: 'thread-2' }),
+        mail({
+          conversationKey: 'thread-3',
+          applicationId: 'app-2',
+          companyName: 'Quill Health',
+          interviewDate: '2026-11-09',
+          interviewTime: null,
+        }),
+        mail({ conversationKey: 'thread-4', applicationId: 'app-3', interviewDate: '2026-11-02' }),
+        mail({ conversationKey: 'thread-5', applicationId: 'app-4', jobClosed: true }),
+        mail({ conversationKey: 'thread-6', applicationId: 'app-5', interviewDate: 'next week' }),
+      ],
+      now,
+      'Asia/Kolkata',
+    );
+    expect(result).toEqual({
+      count: 2,
+      next: {
+        applicationId: 'app-1',
+        companyName: 'Harbor Analytics',
+        jobTitle: 'Designer',
+        conversationKey: 'thread-1',
+        date: '2026-11-05',
+        time: '10:00',
+      },
+    });
+  });
+
+  it('a conversation counts its newest date: a moved interview counts once', () => {
+    const result = upcomingInterviews(
+      [
+        mail({ interviewDate: '2026-11-05' }),
+        mail({ receivedAt: new Date('2026-11-01T09:00:00Z'), interviewDate: '2026-11-12' }),
+      ],
+      now,
+      'UTC',
+    );
+    expect(result.count).toBe(1);
+    expect(result.next?.date).toBe('2026-11-12');
+  });
+
+  it("today's interview still counts, in the user time zone", () => {
+    const late = new Date('2026-11-04T20:00:00Z'); // already 5 November in India
+    const result = upcomingInterviews([mail({})], late, 'Asia/Kolkata');
+    expect(result.count).toBe(1);
     expect(
-      replyHours(
-        [
-          { threadId: 't1', receivedAt: new Date('2026-10-20T08:00:00Z') },
-          { threadId: 't2', receivedAt: new Date('2026-10-20T08:00:00Z') },
-          { threadId: null, receivedAt: new Date('2026-10-20T08:00:00Z') },
-        ],
-        [
-          { threadId: 't1', sentAt: new Date('2026-10-19T08:00:00Z') },
-          { threadId: 't1', sentAt: new Date('2026-10-20T17:00:00Z') },
-          { threadId: 't1', sentAt: new Date('2026-10-21T08:00:00Z') },
-        ],
-      ),
-    ).toEqual([9]);
+      upcomingInterviews([mail({})], new Date('2026-11-05T20:00:00Z'), 'Asia/Kolkata').count,
+    ).toBe(0);
   });
 });
