@@ -2,21 +2,23 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { DashboardResponseSchema, type DashboardPeriod, type DashboardQuery } from '../contracts';
 import { conversationRows } from './conversationQuery';
+import { utcDay } from './ai/usage';
 import {
-  answerSpeed,
   automationRows,
   funnel,
   goneQuiet,
-  median,
+  localDay,
   rate,
-  rejectedAfter,
-  replyHours,
-  rightNow,
+  series,
   topReasons,
   totals,
-  weeks,
+  trendWeeks,
+  upcomingInterviews,
+  usualReplyDays,
   appliedDate,
   type DashApp,
+  type InterviewMail,
+  type JobMail,
   type Window,
 } from './dashboardMetrics';
 
@@ -28,8 +30,8 @@ const PERIOD_DAYS: Record<Exclude<DashboardPeriod, 'all'>, number> = {
   '90d': 90,
 };
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** Open asks are counted from the conversation list; more than this is not a real inbox. */
-const OPEN_ASK_LIMIT = 1000;
+/** "Needs you now" counts from the Mails lists; more than this is not a real inbox. */
+const CONVERSATION_LIMIT = 1000;
 
 /**
  * The user's job search in numbers (owner, 27 Oct 2026). Reading the page never calls the AI; the
@@ -54,32 +56,33 @@ async function dashboardNumbers(userId: string, query: DashboardQuery, now: Date
       const dataStartsAt = await firstDataDay(tx, userId, apps, submissions);
       const { current, previous } = windows(query.period, now, dataStartsAt);
       const sent = funnel(apps, current);
+      const mails = await jobMailsIn(tx, userId, current);
       return {
         generatedAt: now.toISOString(),
         period: query.period,
         timeZone: query.timeZone,
         dataStartsAt: dataStartsAt?.toISOString() ?? null,
-        data: await dataLine(tx, userId),
+        now: await needsYouNow(tx, userId, now, query.timeZone),
         totals: {
           current: totals(apps, current),
           previous: previous ? totals(apps, previous) : null,
         },
-        rightNow: rightNow(apps),
+        trend: { weeks: trendWeeks(apps, now, query.timeZone) },
+        series: series(apps, mails, current, query.timeZone),
         funnel: sent,
-        rejectedAfter: rejectedAfter(apps, current),
-        weeks: weeks(apps, now, query.timeZone),
+        rates: {
+          response: rate(sent.answered, sent.applied),
+          interview: rate(sent.interview, sent.applied),
+          offer: rate(sent.offer, sent.applied),
+        },
+        usualReplyDays: usualReplyDays(apps, current),
         goneQuiet: goneQuiet(apps, now),
-        answerSpeed: answerSpeed(apps, current),
-        keepingUp: await keepingUp(tx, userId, current, now),
+        mailbox: await mailbox(tx, userId, current, mails.length),
         automation: {
           used: submissions.length > 0,
           ...automationRows(apps, submissions, current),
           ...(await automationCoverage(tx, userId, current, submissions)),
         },
-        rates: {
-          response: rate(sent.answered, sent.applied),
-          interview: rate(sent.interview, sent.applied),
-          offer: rate(sent.offer, sent.applied),
         },
       };
     },
@@ -152,60 +155,28 @@ function windows(period: DashboardPeriod, now: Date, dataStartsAt: Date | null) 
   };
 }
 
-async function dataLine(tx: Tx, userId: string) {
-  const [jobMailsRead, notLinked, waitingForAI, fakeOffers] = await Promise.all([
-    tx.email.count({ where: { userId, relevanceState: 'RELEVANT', processingState: 'COMPLETED' } }),
-    tx.email.count({
-      where: { userId, relevanceState: 'RELEVANT', matchState: { in: ['UNMATCHED', 'AMBIGUOUS'] } },
-    }),
-    tx.email.count({ where: { userId, processingState: { in: ['PENDING', 'PROCESSING'] } } }),
-    tx.email.count({
-      where: {
-        userId,
-        relevanceState: 'RELEVANT',
-        aiProcessingResult: { fakeOfferWarning: { not: null } },
-      },
-    }),
-  ]);
-  return { jobMailsRead, notLinked, waitingForAI, fakeOffers };
+/** The job mails received in the period, for "Job mails per day". */
+async function jobMailsIn(tx: Tx, userId: string, w: Window): Promise<JobMail[]> {
+  const rows = await tx.email.findMany({
+    where: { userId, relevanceState: 'RELEVANT', receivedAt: { gte: w.start, lt: w.end } },
+    select: {
+      receivedAt: true,
+      aiProcessingResult: { select: { category: true, fakeOfferWarning: true } },
+    },
+  });
+  return rows.map((row) => ({
+    receivedAt: row.receivedAt,
+    category: row.aiProcessingResult?.category ?? null,
+    fakeOffer: !!row.aiProcessingResult?.fakeOfferWarning,
+  }));
 }
 
-async function keepingUp(tx: Tx, userId: string, w: Window, now: Date) {
-  const asks = await tx.email.findMany({
-    where: {
-      userId,
-      relevanceState: 'RELEVANT',
-      receivedAt: { gte: w.start, lt: w.end },
-      aiProcessingResult: { askKind: 'REPLY_BY_MAIL', fakeOfferWarning: null },
-    },
-    select: { threadId: true, receivedAt: true },
-  });
-  const threads = [...new Set(asks.map((a) => a.threadId).filter((t): t is string => !!t))];
-  const sent = threads.length
-    ? await tx.outgoingEmail.findMany({
-        where: { userId, threadId: { in: threads } },
-        select: { threadId: true, sentAt: true },
-      })
-    : [];
-  const hours = replyHours(asks, sent);
-  const closed = await tx.email.groupBy({
-    by: ['requestClosedReason'],
-    where: { userId, requestClosedAt: { gte: w.start, lt: w.end } },
-    _count: { _all: true },
-  });
-  const closedBy = (...reasons: string[]) =>
-    closed
-      .filter((c) => c.requestClosedReason && reasons.includes(c.requestClosedReason))
-      .reduce((sum, c) => sum + c._count._all, 0);
-  const open = await conversationRows(
-    tx,
-    userId,
-    { request: 'open' },
-    {
-      limit: OPEN_ASK_LIMIT,
-      offset: 0,
-    },
-  );
+/** "Needs you now" (owner, 3 Nov 2026): the same lists the Mails page shows, and interviews. */
+async function needsYouNow(tx: Tx, userId: string, now: Date, timeZone: string) {
+  const all = { limit: CONVERSATION_LIMIT, offset: 0 };
+  const unseen = await conversationRows(tx, userId, { unseen: 'true' }, all);
+  const open = await conversationRows(tx, userId, { request: 'open' }, all);
+  const today = localDay(now, timeZone);
   const waitingOverADay = await tx.email.count({
     where: {
       id: { in: open.map((c) => c.requestEmailId).filter((id): id is string => !!id) },
@@ -214,16 +185,91 @@ async function keepingUp(tx: Tx, userId: string, w: Window, now: Date) {
     },
   });
   return {
-    replied: hours.length,
-    medianReplyHours: median(hours),
-    waitingOverADay,
-    closed: {
-      yourReply: closedBy('YOUR_REPLY'),
-      youSaidDone: closedBy('YOU_SAID_DONE'),
-      newerMail: closedBy('REPLACED_BY_MAIL', 'CONFIRMED_BY_MAIL'),
-      applicationClosed: closedBy('APPLICATION_CLOSED'),
+    newJobMails: {
+      count: unseen.length,
+      today: unseen.filter(
+        (c) => c.lastReceivedAt && localDay(c.lastReceivedAt, timeZone) === today,
+      ).length,
     },
-    openNow: open.length,
+    needsAction: { count: open.length, waitingOverADay },
+    interviews: upcomingInterviews(await interviewMails(tx, userId), now, timeZone),
+  };
+}
+
+/** Job mails the AI read an interview date off, with their job, for "Interviews coming up". */
+async function interviewMails(tx: Tx, userId: string): Promise<InterviewMail[]> {
+  const rows = await tx.email.findMany({
+    where: {
+      userId,
+      relevanceState: 'RELEVANT',
+      aiProcessingResult: { interviewDate: { not: null }, fakeOfferWarning: null },
+    },
+    select: {
+      id: true,
+      threadId: true,
+      receivedAt: true,
+      applicationId: true,
+      application: {
+        select: {
+          companyName: true,
+          jobTitle: true,
+          archivedAt: true,
+          userStatus: true,
+          aiStatus: true,
+        },
+      },
+      aiProcessingResult: {
+        select: { interviewDate: true, interviewTime: true, companyName: true, jobTitle: true },
+      },
+    },
+  });
+  return rows.map(({ application: app, aiProcessingResult, ...row }) => {
+    const ai = aiProcessingResult ?? NO_AI_DATES;
+    return {
+      conversationKey: row.threadId ?? row.id,
+      receivedAt: row.receivedAt,
+      applicationId: row.applicationId,
+      companyName: app?.companyName ?? ai.companyName,
+      jobTitle: app?.jobTitle ?? ai.jobTitle,
+      interviewDate: ai.interviewDate,
+      interviewTime: ai.interviewTime,
+      jobClosed: jobClosed(app),
+    };
+  });
+}
+
+const NO_AI_DATES = { interviewDate: null, interviewTime: null, companyName: null, jobTitle: null };
+
+/** An archived, rejected or closed job: its interviews do not count. */
+function jobClosed(
+  app: { archivedAt: Date | null; userStatus: string | null; aiStatus: string | null } | null,
+) {
+  if (!app) return false;
+  const status = app.userStatus ?? app.aiStatus;
+  return !!app.archivedAt || status === 'REJECTED' || status === 'CLOSED';
+}
+
+/** "Your mailbox": inbox mails scanned and job mails, all time and in the period. */
+async function mailbox(tx: Tx, userId: string, w: Window, jobMailsInPeriod: number) {
+  const job = { userId, relevanceState: 'RELEVANT' as const };
+  const [scannedAll, scannedInPeriod, jobMails, notLinked, fakeOffers] = await Promise.all([
+    tx.mailScanDay.aggregate({ where: { userId }, _sum: { count: true } }),
+    tx.mailScanDay.aggregate({
+      where: { userId, day: { gte: utcDay(w.start) } },
+      _sum: { count: true },
+    }),
+    tx.email.count({ where: job }),
+    tx.email.count({ where: { ...job, matchState: { in: ['UNMATCHED', 'AMBIGUOUS'] } } }),
+    tx.email.count({ where: { ...job, aiProcessingResult: { fakeOfferWarning: { not: null } } } }),
+  ]);
+  return {
+    scanned: {
+      total: scannedAll._sum.count ?? 0,
+      inPeriod: scannedInPeriod._sum.count ?? 0,
+    },
+    jobMails: { total: jobMails, inPeriod: jobMailsInPeriod },
+    notLinked,
+    fakeOffers,
   };
 }
 
