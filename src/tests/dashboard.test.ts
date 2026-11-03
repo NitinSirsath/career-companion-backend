@@ -72,9 +72,9 @@ it('a new user gets empty numbers, not an error', async () => {
     funnel: { applied: 0 },
     goneQuiet: { count: 0, jobs: [] },
     automation: { used: false, sites: [] },
-    tips: [],
-    aiTip: null,
   });
+  expect(res.body).not.toHaveProperty('tips');
+  expect(res.body).not.toHaveProperty('aiTip');
   expect(res.body.weeks).toHaveLength(12);
 });
 

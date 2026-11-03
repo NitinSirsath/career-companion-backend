@@ -17,7 +17,6 @@ import {
 import { ProviderFailure } from './errors';
 import { REPLY_READ_CONTRACT, type ReplyRead, type ReplyReadInput } from './replyRead';
 import { REPLY_DRAFT_CONTRACT, type ReplyDraft, type ReplyDraftInput } from './replyDraft';
-import { DASHBOARD_TIP_CONTRACT, type DashboardTipAnswer } from './dashboardTip';
 import type { ProviderClient } from './providers';
 
 export type BoundModels = Record<AIRole, CatalogModel>;
@@ -34,8 +33,6 @@ export interface AICapabilities {
   classifier: RelevanceClassifier;
   analyzer: EmailAnalyzer;
   replies: ReplyCapabilities;
-  /** One tip for the Dashboard from the user's numbers only. */
-  dashboardTip(numbers: object): Promise<AIResult<DashboardTipAnswer>>;
 }
 
 async function run<T>(
@@ -112,12 +109,5 @@ export function bindCapabilities(client: ProviderClient, models: BoundModels): A
       write: (input) =>
         run(client, REPLY_DRAFT_CONTRACT, models[REPLY_DRAFT_CONTRACT.role], JSON.stringify(input)),
     },
-    dashboardTip: (numbers) =>
-      run(
-        client,
-        DASHBOARD_TIP_CONTRACT,
-        models[DASHBOARD_TIP_CONTRACT.role],
-        JSON.stringify(numbers),
-      ),
   };
 }
