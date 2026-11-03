@@ -2,7 +2,6 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { DashboardResponseSchema, type DashboardPeriod, type DashboardQuery } from '../contracts';
 import { conversationRows } from './conversationQuery';
-import { aiTipForPage, makeAITip, ruleTips } from './dashboardTips';
 import {
   answerSpeed,
   automationRows,
@@ -33,23 +32,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const OPEN_ASK_LIMIT = 1000;
 
 /**
- * The user's job search in numbers (owner, 27 Oct 2026), with its tips. The AI tip is the latest
- * one made by the queued job; reading the page never calls the AI.
+ * The user's job search in numbers (owner, 27 Oct 2026). Reading the page never calls the AI; the
+ * tips, with the AI tip, were removed on 3 Nov 2026 (owner).
  */
 export async function readDashboard(userId: string, query: DashboardQuery) {
-  const now = new Date();
-  const numbers = await dashboardNumbers(userId, query, now);
-  return DashboardResponseSchema.parse({
-    ...numbers,
-    tips: ruleTips(numbers, now),
-    aiTip: await aiTipForPage(userId, query.timeZone, now),
-  });
-}
-
-/** The queued job: the AI tip is made from the numbers of the last 30 days. */
-export async function makeDashboardTip(userId: string, timeZone: string) {
-  const now = new Date();
-  await makeAITip(userId, await dashboardNumbers(userId, { period: '30d', timeZone }, now), now);
+  return DashboardResponseSchema.parse(await dashboardNumbers(userId, query, new Date()));
 }
 
 /**
