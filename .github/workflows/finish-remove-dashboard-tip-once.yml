@@ -1,0 +1,42 @@
+name: Finish remove-dashboard-tip once (temporary)
+# Renames and deletes files on feat/remove-dashboard-tip and commits only that.
+# Lives only on the throwaway branch tmp/remove-dashboard-tip-finish, which is deleted afterwards.
+on:
+  push:
+    branches: [tmp/remove-dashboard-tip-finish]
+permissions:
+  contents: write
+concurrency:
+  group: finish-remove-dashboard-tip-once
+  cancel-in-progress: false
+jobs:
+  finish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/remove-dashboard-tip
+      - name: Check the hand commits
+        run: |
+          if [ "$(git rev-parse 'HEAD^{tree}')" != "751fac73083313cd9b1c55706bc631466f7fe4c3" ]; then
+            echo "The hand commits do not match the reviewed files. Nothing was changed."
+            exit 1
+          fi
+      - name: Rename and delete
+        run: |
+          git rm -q src/jobs/dashboardTipJob.ts
+          git rm -q src/services/ai/dashboardTip.ts
+          git rm -q src/services/dashboardTips.ts
+          git rm -q src/tests/dashboard-tips.test.ts
+      - name: Commit only the reviewed result
+        run: |
+          if [ "$(git write-tree)" != "31bb3ce60513427a1374cdf5e714bec619f63ef1" ]; then
+            echo "The result does not match the reviewed tree. Nothing was pushed."
+            git status --short
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore(dashboard): delete the Dashboard AI tip files'
+          git push origin HEAD:feat/remove-dashboard-tip
