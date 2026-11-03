@@ -51,35 +51,6 @@ const WorkModeRowSchema = z.object({
   answered: count,
 });
 
-/**
- * A tip from fixed rules, at most three, only when true. The page writes the words; the backend
- * gives the facts, so the site names and the wording have one home.
- */
-export const DashboardTipSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('GONE_QUIET'), count }),
-  z.object({
-    kind: z.literal('REPLY_TIME'),
-    medianReplyHours: z.number().nullable(),
-    waitingOverADay: count,
-  }),
-  z.object({
-    kind: z.literal('SITE_ANSWERS_MORE'),
-    site: z.string(),
-    percent: count,
-    otherSite: z.string(),
-    otherPercent: count,
-  }),
-  z.object({ kind: z.literal('EARLY_DAYS'), medianDays: z.number().nullable() }),
-]);
-export type DashboardTip = z.infer<typeof DashboardTipSchema>;
-
-export const DashboardAITipSchema = z.object({
-  text: z.string(),
-  /** The model's name in words, for "AI tip by …". */
-  modelName: z.string(),
-  createdAt: IsoDateTime,
-});
-
 export const DashboardResponseSchema = z.object({
   generatedAt: IsoDateTime,
   period: DashboardPeriodSchema,
@@ -160,7 +131,5 @@ export const DashboardResponseSchema = z.object({
     topSkipReasons: z.array(z.object({ reason: z.string(), count })),
   }),
   rates: z.object({ response: RateSchema, interview: RateSchema, offer: RateSchema }),
-  tips: z.array(DashboardTipSchema),
-  aiTip: DashboardAITipSchema.nullable(),
 });
 export type DashboardResponse = z.infer<typeof DashboardResponseSchema>;
