@@ -34,6 +34,7 @@ model User {
   sandboxMessages     SandboxMessage[]
   dashboardAITip      DashboardAITip?
   pushDevices         PushDevice[]
+  mailScanDays        MailScanDay[]
 
   @@map("users")
 }
@@ -791,6 +792,21 @@ model AIUsageDay {
 
   @@id([userId, day])
   @@map("ai_usage_days")
+}
+
+/// How many inbox mails the sync took in on each day, for "Mails scanned" on the Dashboard (owner,
+/// 3 Nov 2026). Mail that is not about a job is deleted after 35 days, so it is counted when it
+/// arrives. Only the number is kept: no subject, sender or id.
+model MailScanDay {
+  userId String @db.Uuid
+  /// The mail's `receivedAt` date in UTC, YYYY-MM-DD (the day it was saved when Gmail gave none).
+  day    String
+  count  Int    @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, day])
+  @@map("mail_scan_days")
 }
 
 /// The Dashboard's AI tip (owner, 27 Oct 2026): the latest one for the user, made from their
