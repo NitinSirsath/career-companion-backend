@@ -150,6 +150,14 @@ export const ConversationFiltersSchema = z.object({
   sort: ConversationSortSchema.optional(),
 });
 export type ConversationFilters = z.infer<typeof ConversationFiltersSchema>;
+/** The Mails page's line "4 mails need you, 2 are past due" (owner, 3 Nov 2026). */
+export const ConversationSummarySchema = z.object({
+  /** The conversations the Needs action filter (`request=open`) lists. */
+  needsAction: z.number().int().nonnegative(),
+  /** Those whose deadline has passed: a date-only deadline from the next day in the user's time zone. */
+  pastDue: z.number().int().nonnegative(),
+});
+export type ConversationSummary = z.infer<typeof ConversationSummarySchema>;
 
 /** One job email of a conversation with what the AI read from it. */
 export const ConversationMailSchema = z.object({
