@@ -12,6 +12,7 @@ import {
   type ConversationFilters,
   type ConversationMail,
   type ConversationRequest,
+  type ConversationSummary,
   type MailCategory,
   type SetRequestState,
 } from '../contracts';
@@ -25,6 +26,7 @@ import {
   isEmailId,
   type ConversationRow,
 } from './conversationQuery';
+import { localDay } from './dashboardMetrics';
 import { canReplyTo, FAKE_OFFER_NEXT_STEP, requestOf } from './emailRequest';
 import { CLOSES_BY_ITSELF, mayCloseByHand, OPEN_AGAIN } from './threadAsks';
 
@@ -56,6 +58,37 @@ export async function listConversations(
 ): Promise<Conversation[]> {
   const rows = await conversationRows(prisma, userId, filters, { limit: limit + 1, offset });
   return describe(prisma, userId, rows);
+}
+
+/** More open requests than anyone has; the count stays exact up to here. */
+const SUMMARY_LIMIT = 1000;
+
+/**
+ * "4 mails need you, 2 are past due" on the Mails page: the same conversations as its Needs action
+ * filter. A deadline with a time is past once that time is; a date-only deadline from the next day
+ * in the user's time zone, as the app shows "Past due". A fake offer's step is the app's own advice,
+ * so it is never past due.
+ */
+export async function conversationSummary(
+  userId: string,
+  timeZone: string,
+  now = new Date(),
+): Promise<ConversationSummary> {
+  const rows = await conversationRows(
+    prisma,
+    userId,
+    { request: 'open' },
+    { limit: SUMMARY_LIMIT, offset: 0 },
+  );
+  const open = await describe(prisma, userId, rows);
+  const today = localDay(now, timeZone);
+  const pastDue = open.filter((c) => {
+    const deadline = c.request?.deadline;
+    if (!deadline || c.fakeOfferWarning) return false;
+    if (c.request?.deadlinePrecision !== 'DATE') return new Date(deadline) < now;
+    return deadline.slice(0, 10) < today;
+  }).length;
+  return { needsAction: open.length, pastDue };
 }
 
 /** A conversation can be opened by the ID of any of its emails, as an application timeline does. */
