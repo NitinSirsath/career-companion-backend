@@ -150,6 +150,7 @@ export const ConversationFiltersSchema = z.object({
   sort: ConversationSortSchema.optional(),
 });
 export type ConversationFilters = z.infer<typeof ConversationFiltersSchema>;
+
 /** The Mails page's line "4 mails need you, 2 are past due" (owner, 3 Nov 2026). */
 export const ConversationSummarySchema = z.object({
   /** The conversations the Needs action filter (`request=open`) lists. */
