@@ -9,10 +9,12 @@ vi.mock('../services/enqueue', async (importOriginal) => ({
 import { app } from '../index';
 import { prisma } from '../db/prisma';
 import { enqueueNotificationJob } from '../services/enqueue';
+import { conversationSummary } from '../services/conversation';
 import { FAKE_OFFER_NEXT_STEP } from '../services/emailRequest';
 import type { Conversation } from '../contracts';
 import {
   ConversationDetailSchema,
+  ConversationSummarySchema,
   LinkConversationResponseSchema,
   ListConversationsResponseSchema,
 } from '../contracts';
@@ -253,6 +255,54 @@ describe('conversation list', () => {
       400,
     );
     expect((await request(app).get('/api/conversations')).status).toBe(401);
+  });
+});
+
+describe('conversation summary', () => {
+  const ask = (action: string, deadline?: string) => ({
+    actionRequired: true,
+    requestedAction: action,
+    ...(deadline ? { actionDeadline: deadline } : {}),
+  });
+
+  it('counts the Needs action list, and the past-due deadlines in the user time zone', async () => {
+    await jobMail('late', at(1), ask('Send dates', '2026-10-09'));
+    await jobMail('today', at(2), ask('Send your CV', '2026-10-10'));
+    await jobMail('timed', at(3), ask('Call back', '2026-10-10T08:00Z'));
+    await jobMail('no-date', at(4), ask('Reply'));
+    await jobMail('replied', at(4), ask('Send references', '2026-10-01'));
+    await sent('replied', at(6));
+    await jobMail('fake', at(5), {
+      category: 'OFFER',
+      ...ask('Pay the training fee', '2026-10-03'),
+      fakeOfferWarning: 'Asks for money before the job starts.',
+    });
+    await jobMail('theirs', at(1), ask('Send dates', '2026-10-01'), { userId: other });
+
+    const open = await list('?request=open');
+    // 10 Oct 2026 at 20:00 UTC: still 10 Oct in New York, already 11 Oct in Tokyo.
+    const now = new Date(Date.UTC(2026, 9, 10, 20));
+    expect(await conversationSummary(owner, 'America/New_York', now)).toEqual({
+      needsAction: open.length,
+      pastDue: 2,
+    });
+    expect(await conversationSummary(owner, 'Asia/Tokyo', now)).toEqual({
+      needsAction: open.length,
+      pastDue: 3,
+    });
+    expect(keys(open)).not.toContain('replied');
+  });
+
+  it('answers over HTTP with UTC for a missing or wrong time zone, and needs a session', async () => {
+    await jobMail('late', at(1), ask('Send dates', '2026-10-09'));
+    for (const query of ['', '?timeZone=Asia/Kolkata', '?timeZone=Not/AZone']) {
+      const res = await request(app).get(`/api/conversations/summary${query}`).set(as(OWNER));
+      expect(res.status).toBe(200);
+      expect(ConversationSummarySchema.parse(res.body)).toEqual({ needsAction: 1, pastDue: 1 });
+    }
+    const theirs = await request(app).get('/api/conversations/summary').set(as(OTHER));
+    expect(theirs.body).toEqual({ needsAction: 0, pastDue: 0 });
+    expect((await request(app).get('/api/conversations/summary')).status).toBe(401);
   });
 });
 
