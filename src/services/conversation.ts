@@ -89,6 +89,7 @@ export async function conversationSummary(
     return deadline.slice(0, 10) < today;
   }).length;
   return { needsAction: open.length, pastDue };
+}
 
 /** A conversation can be opened by the ID of any of its emails, as an application timeline does. */
 export async function threadKey(userId: string, key: string) {
