@@ -2,6 +2,7 @@
  * Job-mail conversations for the session user (the Mails page).
  *
  *   GET   /api/conversations                   one page, filtered and sorted
+ *   GET   /api/conversations/summary           how many need the user, and how many are past due
  *   GET   /api/conversations/:key              one conversation with what the AI read per email
  *   POST  /api/conversations/:key/seen         ends the "new" mark
  *   PATCH /api/conversations/:key/request      the user's answer to the newest request
@@ -23,12 +24,14 @@ import {
 } from '../contracts/conversation';
 import { requireAuth } from '../middleware/auth';
 import {
+  conversationSummary,
   getConversation,
   listConversations,
   markConversationSeen,
   setRequestState,
 } from '../services/conversation';
 import { DeleteConversationRequestSchema } from '../contracts/blockedSender';
+import { WorkspaceQuerySchema } from '../contracts/workspace';
 import { blockConversationSender } from '../services/blockedSenders';
 import { linkConversation } from '../services/conversationApplication';
 import { deleteConversation } from '../services/removal';
@@ -58,6 +61,15 @@ router.get(
     const filters = ConversationFiltersSchema.parse(req.query);
     const items = await listConversations(req.auth!.user.id, filters, limit, offset);
     return createPaginatedResponse(items, limit, offset);
+  }),
+);
+
+// Before `/:key`, so "summary" is never read as a conversation key. A missing or wrong time zone is UTC.
+router.get(
+  '/summary',
+  handle((req) => {
+    const zone = WorkspaceQuerySchema.shape.timeZone.safeParse(req.query.timeZone ?? 'UTC');
+    return conversationSummary(req.auth!.user.id, zone.success ? zone.data : 'UTC');
   }),
 );
 
