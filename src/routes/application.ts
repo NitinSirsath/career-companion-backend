@@ -3,7 +3,11 @@ import { deleteApplication } from '../services/removal';
 import { ArchiveApplicationSchema } from '../contracts';
 import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
-import { ApplicationFiltersSchema, UpdateApplicationStatusRequestSchema } from '../contracts';
+import {
+  ApplicationFiltersSchema,
+  ApplicationGroupsQuerySchema,
+  UpdateApplicationStatusRequestSchema,
+} from '../contracts';
 import {
   getApplication,
   getApplicationActions,
@@ -11,6 +15,7 @@ import {
   listApplications,
   updateUserStatus,
 } from '../services/application';
+import { countApplicationGroups } from '../services/applicationGroups';
 import { requireAuth } from '../middleware/auth';
 import { ApplicationSubmission, SubmittedAnswerSchema } from '../contracts/submission';
 import { listApplicationSubmissions } from '../services/externalSubmission';
@@ -34,6 +39,19 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       ApplicationFiltersSchema.parse(req.query),
     );
     res.status(200).json(createPaginatedResponse(applications, limit, offset));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/applications/groups
+ * Counts for the In progress / NorthList Apply switch and the reply bar, for one archive view.
+ */
+router.get('/groups', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { archive } = ApplicationGroupsQuerySchema.parse(req.query);
+    res.status(200).json(await countApplicationGroups(req.auth!.user.id, archive));
   } catch (err) {
     next(err);
   }
