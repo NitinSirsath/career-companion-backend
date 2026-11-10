@@ -15,6 +15,7 @@ import { logError } from '../utils/log';
 import { repliedRequests } from './conversationQuery';
 import { closeAsksOfApplication } from './threadAsks';
 import { recordStatusChange } from './statusLog';
+import { SETTLED, archiveFilter, groupFilters } from './applicationGroups';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -35,10 +36,6 @@ const sourceSubmissionSelect = {
   },
 } as const;
 const AUTOMATION_SUBMITTED = 'AUTOMATION_SUBMITTED';
-
-const SETTLED = {
-  matchState: { in: ['LINKED', 'CREATED'] },
-} satisfies Prisma.ExternalSubmissionWhereInput;
 
 const enrichment = {
   _count: {
@@ -224,15 +221,9 @@ export async function listApplications(
   const applications = await prisma.application.findMany({
     where: {
       userId,
-      ...(filters.archive === 'all'
-        ? {}
-        : { archivedAt: filters.archive === 'archived' ? { not: null } : null }),
-      ...(filters.submittedVia
-        ? {
-            externalSubmissions: { some: { userId, matchState: { in: ['LINKED', 'CREATED'] } } },
-          }
-        : {}),
+      ...archiveFilter(filters.archive),
       AND: [
+        ...groupFilters(userId, filters),
         ...(search
           ? [
               {
