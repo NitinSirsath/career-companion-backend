@@ -118,7 +118,9 @@ curl -X GET http://localhost:3000/api/applications \
   -H "Cookie: cc_session=<logged-in-session-cookie>"
 ```
 
-Applications are never added by hand: they come from mails and from the automation link (owner, 26 Oct 2026). The same goes for to-dos: a follow-up the user added before stays and can be completed, snoozed or dismissed, but none can be added or edited.
+Applications are never added by hand: they come from mails and from the automation link (owner, 26 Oct 2026).
+
+Two lists (owner, 10 Nov 2026): `GET /api/applications?group=progress` leaves out NorthList Apply applications (a linked or created automation submission) that are still waiting; `group=apply` lists only NorthList Apply applications, and `reply=replied|waiting` narrows them. Replied means the effective status is set and is not `APPLIED` (a "we got your application" mail is not a reply). `GET /api/applications/groups?archive=active|archived|all` returns `{ inProgress, apply: { total, replied, waiting } }`. The same goes for to-dos: a follow-up the user added before stays and can be completed, snoozed or dismissed, but none can be added or edited.
 
 ### Deleting and blocking (owner, 26 Oct 2026)
 

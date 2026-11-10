@@ -23,15 +23,43 @@ export const ApplicationSortSchema = z.enum([
   'company_asc',
 ]);
 
+/**
+ * The two Applications lists (owner, 2026-11-10). A NorthList Apply application has a linked or
+ * created automation submission. It has replied when its status is set and is not APPLIED (a
+ * "we got your application" mail is not a reply); otherwise it is waiting.
+ * progress: every application except NorthList Apply ones that are waiting.
+ * apply: NorthList Apply applications only.
+ */
+export const ApplicationGroupSchema = z.enum(['progress', 'apply']);
+/** Only NorthList Apply applications that replied, or that are waiting. */
+export const ApplyReplySchema = z.enum(['replied', 'waiting']);
+
+const ArchiveFilterSchema = z.enum(['active', 'archived', 'all']);
+
 export const ApplicationFiltersSchema = z.object({
-  archive: z.enum(['active', 'archived', 'all']).optional(),
+  archive: ArchiveFilterSchema.optional(),
   q: z.string().trim().max(100).optional(),
   // Query sentinel only: UNKNOWN is never an application status.
   effectiveStatus: z.union([ApplicationStatusSchema, z.literal('UNKNOWN')]).optional(),
   submittedVia: SubmittedViaSchema.optional(),
+  group: ApplicationGroupSchema.optional(),
+  reply: ApplyReplySchema.optional(),
   sort: ApplicationSortSchema.optional(),
 });
 export type ApplicationFilters = z.infer<typeof ApplicationFiltersSchema>;
+
+export const ApplicationGroupsQuerySchema = z.object({ archive: ArchiveFilterSchema.optional() });
+
+/** Counts for the Applications switch and the NorthList Apply reply bar. */
+export const ApplicationGroupsResponseSchema = z.object({
+  inProgress: z.number().int().nonnegative(),
+  apply: z.object({
+    total: z.number().int().nonnegative(),
+    replied: z.number().int().nonnegative(),
+    waiting: z.number().int().nonnegative(),
+  }),
+});
+export type ApplicationGroupsResponse = z.infer<typeof ApplicationGroupsResponseSchema>;
 
 export type ApplicationStatus = z.infer<typeof ApplicationStatusSchema>;
 

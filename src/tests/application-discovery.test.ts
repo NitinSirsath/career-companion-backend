@@ -3,7 +3,11 @@ import { Prisma } from '@prisma/client';
 import request from 'supertest';
 import { app } from '../index';
 import { prisma } from '../db/prisma';
-import { ApplicationFilters, ListApplicationsResponseSchema } from '../contracts';
+import {
+  ApplicationFilters,
+  ApplicationGroupsResponseSchema,
+  ListApplicationsResponseSchema,
+} from '../contracts';
 import { recordSubmission, resolveSubmission } from '../services/externalSubmission';
 
 const address = 'owner@app-discovery.test';
@@ -131,6 +135,76 @@ describe('normal API application discovery', () => {
     expect(ids(await list({ ...filters, archive: 'all' }))).toEqual([target.id]);
   });
 
+  it('splits In progress from NorthList Apply by reply, with matching counts', async () => {
+    let n = 0;
+    // An application created by a NorthList Apply submission, then given statuses.
+    const sent = async (data: Prisma.ApplicationUncheckedUpdateInput = {}, userId = owner) => {
+      n += 1;
+      await recordSubmission(userId, null, {
+        sourceRecordRef: `2026-11-0${n}/09:00:00`,
+        platform: 'linkedin',
+        company: `Sent ${n}`,
+        jobTitle: 'Engineer',
+        submittedAt: `2026-11-0${n}T09:00:00+05:30`,
+      });
+      const row = await prisma.application.findFirstOrThrow({
+        where: { userId, companyName: `Sent ${n}` },
+      });
+      return (await prisma.application.update({ where: { id: row.id }, data })).id;
+    };
+    const mailNoStatus = (await application({ companyName: 'Mail' })).id;
+    const mailApplied = (await application({ companyName: 'Mail', aiStatus: 'APPLIED' })).id;
+    const silent = await sent();
+    const confirmed = await sent({ aiStatus: 'APPLIED' });
+    const interview = await sent({ aiStatus: 'INTERVIEW' });
+    const userApplied = await sent({ aiStatus: 'INTERVIEW', userStatus: 'APPLIED' });
+    const userRejected = await sent({ aiStatus: 'APPLIED', userStatus: 'REJECTED' });
+    const archived = await sent({ aiStatus: 'OFFER', archivedAt: new Date() });
+    await sent({ aiStatus: 'INTERVIEW' }, foreign);
+    const sorted = (rows: string[]) => [...rows].sort();
+    const listed = async (filters: ApplicationFilters) =>
+      sorted(ids(await list({ ...filters, limit: 50 })));
+
+    const progress = [mailNoStatus, mailApplied, interview, userRejected];
+    const replied = [interview, userRejected];
+    const waiting = [silent, confirmed, userApplied];
+    expect(await listed({ group: 'progress' })).toEqual(sorted(progress));
+    expect(await listed({ group: 'apply' })).toEqual(sorted([...replied, ...waiting]));
+    expect(await listed({ group: 'apply', reply: 'replied' })).toEqual(sorted(replied));
+    expect(await listed({ group: 'apply', reply: 'waiting' })).toEqual(sorted(waiting));
+    expect(await listed({ reply: 'waiting' })).toEqual(sorted(waiting));
+    expect(await listed({ group: 'progress', effectiveStatus: 'APPLIED' })).toEqual([mailApplied]);
+    expect(await listed({ group: 'progress', archive: 'archived' })).toEqual([archived]);
+    expect(await listed({ group: 'apply', reply: 'replied', archive: 'all' })).toEqual(
+      sorted([...replied, archived]),
+    );
+
+    const groups = async (query = '') => {
+      const result = await request(app)
+        .get('/api/applications/groups' + query)
+        .set('X-Development-User', address);
+      expect(result.status).toBe(200);
+      return ApplicationGroupsResponseSchema.parse(result.body);
+    };
+    expect(await groups()).toEqual({ inProgress: 4, apply: { total: 5, replied: 2, waiting: 3 } });
+    expect(await groups('?archive=archived')).toEqual({
+      inProgress: 1,
+      apply: { total: 1, replied: 1, waiting: 0 },
+    });
+    expect(await groups('?archive=all')).toEqual({
+      inProgress: 5,
+      apply: { total: 6, replied: 3, waiting: 3 },
+    });
+    expect((await request(app).get('/api/applications/groups')).status).toBe(401);
+    expect(
+      (
+        await request(app)
+          .get('/api/applications/groups?archive=old')
+          .set('X-Development-User', address)
+      ).status,
+    ).toBe(400);
+  });
+
   it('does not turn review or ignored receipts into applications/source membership', async () => {
     await application({ companyName: 'Review Company', jobTitle: null });
     const receipt = {
@@ -190,6 +264,8 @@ describe('normal API application discovery', () => {
       'submittedVia=EMAIL',
       'submittedVia=AUTOMATION&submittedVia=AUTOMATION',
       'effectiveStatus=unknown',
+      'group=all',
+      'reply=replied&reply=waiting',
     ]) {
       expect(
         (
