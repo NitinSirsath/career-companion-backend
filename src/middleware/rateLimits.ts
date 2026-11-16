@@ -37,7 +37,7 @@ const SIGN_IN_ROUTES = new Set([
   'GET /callback',
 ]);
 
-export const addressKey = (req: Request) => `address:\${ipKeyGenerator(req.ip ?? '')}`;
+export const addressKey = (req: Request) => `address:${ipKeyGenerator(req.ip ?? '')}`;
 
 function retryAfterSeconds(info: RateLimitInfo | undefined): number {
   const resetAt = info?.resetTime?.getTime() ?? Date.now() + MINUTE_MS;
@@ -97,12 +97,12 @@ export function limiter(
 export const signInLimit = limiter('sign_in', {
   limit: SIGN_IN_PER_MINUTE,
   keyGenerator: addressKey,
-  applies: (req) => SIGN_IN_ROUTES.has(`\${req.method} \${req.path}`),
+  applies: (req) => SIGN_IN_ROUTES.has(`${req.method} ${req.path}`),
 });
 
 /** Mounted on `/api`, after the session: per user when signed in, else per network address. */
 export const apiLimit = limiter('api', {
   limit: (req) => (req.session?.userId ? SIGNED_IN_PER_MINUTE : SIGNED_OUT_PER_MINUTE),
   keyGenerator: (req) =>
-    req.session?.userId ? `user:\${req.session.userId}` : addressKey(req as Request),
+    req.session?.userId ? `user:${req.session.userId}` : addressKey(req as Request),
 });
