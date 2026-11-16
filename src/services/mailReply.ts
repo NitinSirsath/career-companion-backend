@@ -20,6 +20,7 @@ import {
 } from '../contracts';
 import { prisma } from '../db/prisma';
 import { AppError } from '../errors';
+import { mailDailyReplyLimit } from '../utils/config';
 import { logError, logEvent, logWarn } from '../utils/log';
 import { googleStatus, withGmail } from './gmailClient';
 import { maySend } from './gmailConnection';
@@ -31,6 +32,7 @@ import { usesSandbox } from './testAccounts';
 import { noteSentForReading } from './replyReading';
 
 const READ_BUDGET_MS = 20_000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const SEND_BUDGET_MS = 30_000;
 /** The answered mail is quoted below the reply; a very long one is cut. */
 const QUOTE_LIMIT = 20_000;
@@ -252,6 +254,28 @@ async function assertMaySend(userId: string): Promise<void> {
   if (!maySend(connection, await usesSandbox(userId))) throw sendNotAllowed();
 }
 
+/**
+ * At most `MAIL_DAILY_REPLY_LIMIT` replies per user in 24 hours: NorthList is not a way to send
+ * mail in bulk through its Google app. A repeat of the same reply (`replyId`) is never refused,
+ * so it can still return the answer of its earlier send.
+ */
+async function assertUnderReplyLimit(userId: string, replyId: string): Promise<void> {
+  const limit = mailDailyReplyLimit();
+  const sent = await prisma.mailReply.count({
+    where: { userId, id: { not: replyId }, createdAt: { gt: new Date(Date.now() - DAY_MS) } },
+  });
+  if (sent < limit) return;
+  logWarn('mail_reply_limit_reached', { userId, limit });
+  throw new AppError(
+    429,
+    'MAIL_DAILY_LIMIT',
+    limit === 0
+      ? 'Sending from NorthList is turned off. Send your reply from Gmail.'
+      : `You sent ${limit} mails from NorthList in the last 24 hours. Send more from Gmail, or try again later.`,
+    { limit },
+  );
+}
+
 /** Sends the mail. Any failure without a clear "no" from Gmail may still have sent it. */
 async function sendThroughGmail(userId: string, threadId: string, raw: string): Promise<string> {
   const signal = AbortSignal.timeout(SEND_BUDGET_MS);
@@ -336,6 +360,7 @@ export async function sendMailReply(
 ): Promise<SendMailReplyResponse> {
   const reply = replyContent(request);
   await assertMaySend(userId);
+  await assertUnderReplyLimit(userId, request.replyId);
   const earlier = await claimReply(userId, threadId, request.replyId);
   if (earlier) return earlier;
 
