@@ -278,7 +278,13 @@ describe('capped and failed scan persistence', () => {
     const unscannedUntil = new Date('2026-01-15');
     await prisma.gmailConnection.update({
       where: { userId },
-      data: { lastSyncedAt, lastHistoryId: 'old', unscannedFrom, unscannedUntil },
+      data: {
+        lastSyncedAt,
+        lastHistoryId: 'old',
+        unscannedFrom,
+        unscannedUntil,
+        syncLookbackDays: 1,
+      },
     });
     mocks.list.mockRejectedValueOnce({ status: 503 });
     await expect(syncUser(userId)).rejects.toThrow();
