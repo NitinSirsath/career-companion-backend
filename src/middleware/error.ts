@@ -3,6 +3,25 @@ import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
 import { logError, logWarn } from '../utils/log';
 
+/** The body parser's own refusals: the request's fault, not the server's. */
+const BODY_ERRORS: Record<string, { status: number; code: string; message: string }> = {
+  'entity.too.large': {
+    status: 413,
+    code: 'PAYLOAD_TOO_LARGE',
+    message: 'This request is too large.',
+  },
+  'entity.parse.failed': {
+    status: 400,
+    code: 'INVALID_JSON',
+    message: 'This request is not valid JSON.',
+  },
+};
+
+function bodyError(err: unknown) {
+  const type = (err as { type?: unknown } | null)?.type;
+  return typeof type === 'string' && Object.hasOwn(BODY_ERRORS, type) ? BODY_ERRORS[type] : null;
+}
+
 export function errorHandler(
   err: unknown,
   req: Request,
@@ -27,6 +46,12 @@ export function errorHandler(
         ...(err.details ? { details: err.details } : {}),
       },
     });
+  }
+
+  const body = bodyError(err);
+  if (body) {
+    logWarn('request_failed', { ...fields, code: body.code });
+    return res.status(body.status).json({ error: { code: body.code, message: body.message } });
   }
 
   logError('request_failed', fields, err);
@@ -63,6 +88,8 @@ export function errorHandler(
 /** The status the handler above sends for this error. */
 function statusFor(err: unknown): number {
   if (err instanceof AppError) return err.status;
+  const body = bodyError(err);
+  if (body) return body.status;
   if (err instanceof ZodError) return 400;
   if (err instanceof Error && err.name === 'UnauthorizedError') return 401;
   return 500;

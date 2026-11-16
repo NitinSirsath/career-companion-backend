@@ -2,7 +2,9 @@
  * Sign-in with email and password, next to Google sign-in (services/googleOAuth.ts).
  *
  * Guessing is slowed down by counting failed tries per email and per network address over a
- * short window. A wrong email and a wrong password get the same answer and take the same time.
+ * short window. A try is counted before its password is checked, so tries sent at the same moment
+ * count against each other. A wrong email and a wrong password get the same answer and take the
+ * same time.
  * Passwords and hashes are never logged.
  */
 import { randomBytes } from 'crypto';
@@ -24,26 +26,37 @@ const findByEmail = (email: string) =>
 const blockedUntil = (tries: { createdAt: Date }[], limit: number): number =>
   tries.length >= limit ? tries[limit - 1].createdAt.getTime() + WINDOW_MS : 0;
 
-const recentTries = (where: { email: string } | { ip: string }, limit: number) =>
+/** The newest tries in the window, other than `except` (the try being checked). */
+const recentTries = (where: { email: string } | { ip: string }, limit: number, except: string) =>
   prisma.loginAttempt.findMany({
-    where: { ...where, createdAt: { gt: new Date(Date.now() - WINDOW_MS) } },
+    where: { ...where, id: { not: except }, createdAt: { gt: new Date(Date.now() - WINDOW_MS) } },
     orderBy: { createdAt: 'desc' },
     take: limit,
     select: { createdAt: true },
   });
 
-/** Refuses with 429 while this email or network address has used up its tries. */
-async function assertNotBlocked(email: string, ip: string) {
+/**
+ * Writes this try down before the slow password check, then refuses with 429 (and forgets this
+ * try) while this email or network address has used up its tries. A wrong try stays counted;
+ * a right one is forgotten by the caller. Returns the try's ID.
+ */
+async function claimTry(email: string, ip: string): Promise<string> {
+  // The app's clock, not the database's: the window is measured with the same one.
+  const { id } = await prisma.loginAttempt.create({
+    data: { email, ip, createdAt: new Date() },
+    select: { id: true },
+  });
   const [byEmail, byAddress] = await Promise.all([
-    recentTries({ email }, MAX_TRIES_PER_EMAIL),
-    recentTries({ ip }, MAX_TRIES_PER_ADDRESS),
+    recentTries({ email }, MAX_TRIES_PER_EMAIL, id),
+    recentTries({ ip }, MAX_TRIES_PER_ADDRESS, id),
   ]);
   const until = Math.max(
     blockedUntil(byEmail, MAX_TRIES_PER_EMAIL),
     blockedUntil(byAddress, MAX_TRIES_PER_ADDRESS),
   );
   const retryAfterSeconds = Math.ceil((until - Date.now()) / 1000);
-  if (retryAfterSeconds <= 0) return;
+  if (retryAfterSeconds <= 0) return id;
+  await prisma.loginAttempt.deleteMany({ where: { id } });
   const minutes = Math.ceil(retryAfterSeconds / 60);
   throw new AppError(
     429,
@@ -53,10 +66,8 @@ async function assertNotBlocked(email: string, ip: string) {
   );
 }
 
-async function recordFailedTry(email: string, ip: string) {
-  // The app's clock, not the database's: the window above is measured with the same one.
-  await prisma.loginAttempt.create({ data: { email, ip, createdAt: new Date() } });
-  // Tries older than the window count for nothing: dropping them here keeps the table small.
+/** Tries older than the window count for nothing: dropping them keeps the table small. */
+async function dropOldTries() {
   await prisma.loginAttempt.deleteMany({
     where: { createdAt: { lt: new Date(Date.now() - WINDOW_MS) } },
   });
@@ -68,13 +79,14 @@ const decoyHash = () => (decoy ??= hashPassword(randomBytes(32).toString('hex'))
 
 /** The user's ID for a correct email and password; the same 401 for every other case. */
 export async function loginWithPassword(input: PasswordLoginRequest, ip: string): Promise<string> {
-  await assertNotBlocked(input.email, ip);
+  await claimTry(input.email, ip);
   const user = await findByEmail(input.email);
   const correct = await verifyPassword(input.password, user?.passwordHash ?? (await decoyHash()));
   if (!user?.passwordHash || !correct) {
-    await recordFailedTry(input.email, ip);
+    await dropOldTries();
     throw new AppError(401, 'INVALID_CREDENTIALS', 'Email or password is wrong.');
   }
+  // This try and the email's earlier wrong ones.
   await prisma.loginAttempt.deleteMany({ where: { email: input.email } });
   return user.id;
 }
@@ -93,14 +105,15 @@ export async function setPassword(
     throw new AppError(403, 'TEST_ACCOUNT', "A test account's password is set on the server.");
   if (user.passwordHash) {
     const email = user.email.toLowerCase();
-    await assertNotBlocked(email, request.ip);
+    const attempt = await claimTry(email, request.ip);
     const correct =
       input.currentPassword !== undefined &&
       (await verifyPassword(input.currentPassword, user.passwordHash));
     if (!correct) {
-      await recordFailedTry(email, request.ip);
+      await dropOldTries();
       throw new AppError(403, 'WRONG_PASSWORD', 'Current password is wrong.');
     }
+    await prisma.loginAttempt.deleteMany({ where: { id: attempt } });
   }
   await prisma.user.update({
     where: { id: userId },

@@ -19,7 +19,8 @@ export function requestContext(req: Request, res: Response, next: NextFunction):
     };
     runWithRequestId(requestId, () => {
       if (status < 400 || status === 401) logDebug('request_completed', fields);
-      else if (status < 500) logWarn('request_completed', fields);
+      // A 429 has its own line, once per limit and minute (middleware/rateLimits.ts).
+      else if (status < 500 && status !== 429) logWarn('request_completed', fields);
     });
   });
 

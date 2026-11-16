@@ -10,12 +10,35 @@ const COST = { N: 2 ** 15, r: 8, p: 3 };
 const KEY_BYTES = 32;
 const MAX_MEMORY = 64 * 1024 * 1024;
 
+/**
+ * At most two hashes at a time; the others wait their turn. Each takes about 32 MB and one thread
+ * of Node's small pool, which the rest of the app needs too (DNS, files), so a burst of sign-ins
+ * cannot take it all.
+ */
+const AT_ONCE = 2;
+let running = 0;
+const waiting: (() => void)[] = [];
+
+async function inTurn<T>(work: () => Promise<T>): Promise<T> {
+  while (running >= AT_ONCE) await new Promise<void>((wake) => waiting.push(wake));
+  running += 1;
+  try {
+    return await work();
+  } finally {
+    running -= 1;
+    waiting.shift()?.();
+  }
+}
+
 function derive(password: string, salt: Buffer, cost: typeof COST, bytes: number): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    scrypt(password, salt, bytes, { ...cost, maxmem: MAX_MEMORY }, (err, key) =>
-      err ? reject(err) : resolve(key),
-    );
-  });
+  return inTurn(
+    () =>
+      new Promise((resolve, reject) => {
+        scrypt(password, salt, bytes, { ...cost, maxmem: MAX_MEMORY }, (err, key) =>
+          err ? reject(err) : resolve(key),
+        );
+      }),
+  );
 }
 
 export async function hashPassword(password: string): Promise<string> {

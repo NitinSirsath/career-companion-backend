@@ -22,6 +22,9 @@ import { logError, logEvent, logWarn } from './utils/log';
 import { createMcpRouter } from './mcp/router';
 import { healthRouter } from './routes/health';
 import { requestContext } from './middleware/requestContext';
+import { securityHeaders } from './middleware/securityHeaders';
+import { clientAddressCheck } from './middleware/clientAddressCheck';
+import { apiLimit, signInLimit } from './middleware/rateLimits';
 
 dotenv.config();
 validateProductionConfig();
@@ -36,6 +39,8 @@ if (proxyHops) app.set('trust proxy', proxyHops);
 
 // Request ID and one line per request, before everything else so every route is covered.
 app.use(requestContext);
+app.use(securityHeaders);
+app.use(clientAddressCheck);
 
 // MCP endpoint (ADR-0002). Mounted right after the request ID, before CORS, the global JSON
 // parser, cookies and session: its own 128 KB body limit must apply, and it accepts only Bearer
@@ -72,6 +77,10 @@ app.use(
     },
   }),
 );
+
+// Request limits (middleware/rateLimits.ts): sign-in per network address, the rest per user.
+app.use('/api/auth', signInLimit);
+app.use('/api', apiLimit);
 
 import { authRouter } from './routes/auth';
 import { applicationRouter } from './routes/application';
