@@ -47,6 +47,17 @@ const PRIYA = 'Priya Raman <priya.raman@northwind.example>';
 let owner: string;
 
 const as = { 'X-Development-User': OWNER };
+
+/**
+ * Runs a sync as the worker would: first the one that connecting Gmail queued (owner, 15 Nov
+ * 2026), then a new one each time.
+ */
+async function sync() {
+  const { syncClaim } = await prisma.gmailConnection.findUniqueOrThrow({
+    where: { userId: owner },
+  });
+  return syncUser(owner, syncClaim?.startsWith('queued:') ? syncClaim : undefined);
+}
 const connect = () => request(app).get('/api/gmail/connect').set(as);
 const send = async (overrides: object = {}) =>
   (
@@ -159,7 +170,7 @@ describe('the real sync on sandbox mail', () => {
     expect(queued()).toBe(0);
     expect(await states(mail.threadId)).toEqual(['NOT_SYNCED']);
 
-    const result = await syncUser(owner);
+    const result = await sync();
     expect(result).toMatchObject({ synced: true, messagesIngested: 1, messagesSkipped: 0 });
     const stored = await prisma.sandboxMessage.findUniqueOrThrow({ where: { id: mail.id } });
     const email = await prisma.email.findUniqueOrThrow({
@@ -184,13 +195,13 @@ describe('the real sync on sandbox mail', () => {
       data: { userId: owner, domain: 'northwind.example', source: 'MENU' },
     });
     const blocked = await send({ subject: 'Private offer details' });
-    expect(await syncUser(owner)).toMatchObject({ messagesIngested: 0 });
+    expect(await sync()).toMatchObject({ messagesIngested: 0 });
     expect(await prisma.email.count({ where: { userId: owner } })).toBe(0);
     expect(queued()).toBe(0);
 
     await request(app).delete(`/api/blocked-senders/${block.id}`).set(as).expect(200);
     await send({ subject: 'Interview slots' });
-    expect(await syncUser(owner)).toMatchObject({ messagesIngested: 1 });
+    expect(await sync()).toMatchObject({ messagesIngested: 1 });
     // Mail that came while blocked is not fetched afterwards.
     const kept = await prisma.email.findMany({ where: { userId: owner } });
     expect(kept.map((email) => email.subject)).toEqual(['Interview slots']);
@@ -201,10 +212,10 @@ describe('the real sync on sandbox mail', () => {
   it('a second sync brings only the mails sent since the first one', async () => {
     await send({ subject: 'One' });
     await send({ subject: 'Two' });
-    expect(await syncUser(owner)).toMatchObject({ messagesIngested: 2 });
+    expect(await sync()).toMatchObject({ messagesIngested: 2 });
 
     await send({ subject: 'Three' });
-    const second = await syncUser(owner);
+    const second = await sync();
     // A full scan would count the two older mails as skipped: only the new one was looked at.
     expect(second).toMatchObject({
       messagesIngested: 1,
@@ -213,7 +224,7 @@ describe('the real sync on sandbox mail', () => {
     });
     expect(await prisma.email.count({ where: { userId: owner } })).toBe(3);
 
-    const third = await syncUser(owner);
+    const third = await sync();
     expect(third).toMatchObject({
       messagesIngested: 0,
       messagesSkipped: 0,
@@ -226,12 +237,12 @@ describe('the real sync on sandbox mail', () => {
 
   it("notes the user's reply as a reply and never reads it as mail", async () => {
     const mail = await send();
-    await syncUser(owner);
+    await sync();
     await readAsJobMail(mail.id);
 
     const mine = await reply(mail.threadId, 'me', 'Thursday at 3 pm works for me.');
     expect(await states(mail.threadId)).toEqual(['JOB_MAIL', 'NOT_SYNCED']);
-    await syncUser(owner);
+    await sync();
 
     expect(await prisma.email.count({ where: { userId: owner } })).toBe(1);
     const noted = await prisma.outgoingEmail.findMany({ where: { userId: owner } });
@@ -255,7 +266,7 @@ describe('the real sync on sandbox mail', () => {
     const mail = await send();
     const mine = await reply(mail.threadId, 'me', 'Thursday works.');
     const theirs = await reply(mail.threadId, 'them', 'Great, see you on Thursday.');
-    expect(await syncUser(owner)).toMatchObject({ messagesIngested: 2 });
+    expect(await sync()).toMatchObject({ messagesIngested: 2 });
     const emails = await prisma.email.findMany({ where: { userId: owner } });
     expect(emails.map((email) => email.gmailMessageId).sort()).toEqual([mail.id, theirs.id].sort());
     expect(new Set(emails.map((email) => email.threadId))).toEqual(new Set([mail.threadId]));
@@ -273,14 +284,14 @@ describe('the real sync on sandbox mail', () => {
         labelIds: ['INBOX', 'CATEGORY_PERSONAL'],
         sender: PRIYA,
         recipient: OWNER,
-        subject: 'Three days old',
+        subject: 'Eight days old',
         messageId: '<old@sandbox.mail>',
         body: 'Old mail.',
-        internalDate: new Date(Date.now() - 3 * 86_400_000),
+        internalDate: new Date(Date.now() - 8 * 86_400_000),
       },
     });
     const fresh = await send({ subject: 'Fresh' });
-    expect(await syncUser(owner)).toMatchObject({ messagesIngested: 1 });
+    expect(await sync()).toMatchObject({ messagesIngested: 1 });
     const emails = await prisma.email.findMany({ where: { userId: owner } });
     expect(emails.map((email) => email.gmailMessageId)).toEqual([fresh.id]);
   });
@@ -289,7 +300,7 @@ describe('the real sync on sandbox mail', () => {
     const job = await send();
     const other = await send({ from: 'Weekly Digest <news@digest.example>', subject: 'Digest' });
     const broken = await send({ subject: 'Broken' });
-    await syncUser(owner);
+    await sync();
     expect(await states(job.threadId)).toEqual(['AI_KEY_MISSING']);
 
     await configureAI(owner);
@@ -363,7 +374,7 @@ describe('the real sync on sandbox mail', () => {
       subject: 'Congratulations! Offer of employment - Google India',
       body: 'You are selected. Pay a refundable laptop security fee of Rs 8,500 within 24 hours.',
     });
-    await syncUser(owner);
+    await sync();
     await configureAI(owner);
     await readAsJobMail(mail.id);
     const warning = 'It asks for a fee of Rs 8,500 within 24 hours from a free-mail address.';

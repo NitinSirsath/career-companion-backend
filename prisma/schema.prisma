@@ -322,7 +322,8 @@ model GmailConnection {
   syncClaim              String?
   syncLeaseUntil         DateTime?
   syncError              String?
-  syncLookbackDays       Int                   @default(1)
+  /// How far the first sync reads, in days: 7 for new connections (owner, 15 Nov 2026).
+  syncLookbackDays       Int                   @default(7)
   unscannedFrom          DateTime?
   unscannedUntil         DateTime?
   lastSyncedLookbackDays Int?

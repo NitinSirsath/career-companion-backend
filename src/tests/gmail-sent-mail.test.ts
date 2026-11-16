@@ -121,7 +121,7 @@ describe('the user’s own replies', () => {
     ]);
     // The sent scan asks Gmail for sent mail of the same window as the inbox scan.
     expect(mocks.list).toHaveBeenLastCalledWith(
-      expect.objectContaining({ labelIds: ['SENT'], q: 'newer_than:1d' }),
+      expect.objectContaining({ labelIds: ['SENT'], q: 'newer_than:7d' }),
       expect.anything(),
     );
   });

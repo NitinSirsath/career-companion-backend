@@ -262,7 +262,7 @@ it.each(['deadline', 'cancel', 'timeout', 'quota', 'forbidden', 'network'] as co
     const previous = new Date(Date.now() - 2 * 86400_000);
     await prisma.gmailConnection.update({
       where: { userId },
-      data: { lastHistoryId: 'old', lastSyncedAt: previous },
+      data: { lastHistoryId: 'old', lastSyncedAt: previous, syncLookbackDays: 1 },
     });
     const controller = new AbortController();
     if (mode === 'deadline') transport.dataBound = 2000;

@@ -52,6 +52,17 @@ let owner: string;
 let other: string;
 
 const as = (user = OWNER) => ({ 'X-Development-User': user });
+
+/**
+ * Runs a sync as the worker would: first the one that connecting Gmail queued (owner, 15 Nov
+ * 2026), then a new one each time.
+ */
+async function sync() {
+  const { syncClaim } = await prisma.gmailConnection.findUniqueOrThrow({
+    where: { userId: owner },
+  });
+  return syncUser(owner, syncClaim?.startsWith('queued:') ? syncClaim : undefined);
+}
 const connect = (user = OWNER) => request(app).get('/api/gmail/connect').set(as(user));
 const compose = (more: object = {}, user = OWNER) =>
   request(app)
@@ -186,7 +197,7 @@ describe('replying from the mail details page in dev mode', () => {
 
   it('shows the conversation as Replied at once, and the next sync notes nothing twice', async () => {
     const mail = await receive();
-    await syncUser(owner);
+    await sync();
     await readAsJobMail(mail.id);
 
     const sent = SendMailReplyResponseSchema.parse((await reply(mail.threadId)).body);
@@ -200,7 +211,7 @@ describe('replying from the mail details page in dev mode', () => {
     expect(noted).toHaveLength(1);
     expect(noted[0]).toMatchObject({ gmailMessageId: sent.id, threadId: mail.threadId });
 
-    await syncUser(owner);
+    await sync();
     expect(await prisma.outgoingEmail.count({ where: { userId: owner } })).toBe(1);
     // The reply is never read as mail of its own.
     expect(await prisma.email.count({ where: { userId: owner } })).toBe(1);
@@ -275,7 +286,7 @@ describe('replying from the mail details page in dev mode', () => {
         logs.push(args.map(String).join(' '));
       });
     const mail = await receive();
-    await syncUser(owner);
+    await sync();
     const res = await reply(mail.threadId);
     vi.restoreAllMocks();
 

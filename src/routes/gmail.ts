@@ -6,7 +6,9 @@ import { SyncQueueError } from '../services/gmailSyncErrors';
  *   GET  /api/gmail/status       — connection status for authenticated user
  *   GET  /api/gmail/connect      — initiate OAuth flow (redirect to Google); in dev mode,
  *                                  connect the sandbox mailbox at once. `?returnTo=` names
- *                                  the mail page to come back to instead of the Gmail page
+ *                                  the mail page or the Dashboard to come back to instead of
+ *                                  the Gmail page; `?freeAI=` is the free AI data-use version
+ *                                  the user agreed to on the Connect Gmail button
  *   GET  /api/gmail/callback     — Google OAuth callback handler
  *   POST /api/gmail/disconnect   — revoke and clear GmailConnection
  *
@@ -37,6 +39,7 @@ import {
   saveGmailGrant,
   setSyncLookbackDays,
 } from '../services/gmailConnection';
+import { afterGmailConnected } from '../services/gmailFirstRun';
 import { startManualSync } from '../services/gmailSyncRequests';
 import { exchangeGmailCode, gmailConsentUrl, revokeGmailAccess } from '../services/googleOAuth';
 import { GmailAuthError, SyncInProgressError } from '../services/gmailSync';
@@ -48,15 +51,21 @@ const router = Router();
 
 const STATE_COOKIE_NAME = 'gmail_oauth_state';
 const RETURN_COOKIE_NAME = 'gmail_oauth_return';
+const FREE_AI_COOKIE_NAME = 'gmail_oauth_free_ai';
 const FRONTEND_GMAIL_PATH = '/gmail';
 const OAUTH_COOKIE_MAX_AGE_MS = 5 * 60 * 1000; // enough time to complete the OAuth flow
 
 /**
- * Where to send the user after connecting: the mail they came from, or the Gmail page. Only a
- * mail details path is accepted here, a narrower rule than the shared in-app path check.
+ * Where to send the user after connecting: the mail they came from, the Dashboard (a new user,
+ * owner 15 Nov 2026), or the Gmail page. Only those paths are accepted here, a narrower rule than
+ * the shared in-app path check.
  */
-const MAIL_PAGE = /^\/mails\/(gmail\/)?[A-Za-z0-9_-]{1,128}$/;
-const mailReturnPath = (value: unknown) => returnPath(value, FRONTEND_GMAIL_PATH, MAIL_PAGE);
+const RETURN_PAGE = /^\/(dashboard|mails\/(gmail\/)?[A-Za-z0-9_-]{1,128})$/;
+const connectReturnPath = (value: unknown) => returnPath(value, FRONTEND_GMAIL_PATH, RETURN_PAGE);
+
+/** The free AI data-use version the user agreed to on the Connect Gmail button, or null. */
+const freeAIConsent = (value: unknown) =>
+  typeof value === 'string' && value.length > 0 && value.length <= 128 ? value : null;
 
 // ─── Protect all routes with dev auth ───────────────────────────────────────
 
@@ -76,10 +85,12 @@ router.get('/status', async (req: Request, res: Response, next: NextFunction) =>
 
 router.get('/connect', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const returnTo = mailReturnPath(req.query.returnTo);
+    const returnTo = connectReturnPath(req.query.returnTo);
+    const consent = freeAIConsent(req.query.freeAI);
     // Dev mode and test accounts have no Google account: the sandbox mailbox is connected at once.
     if (await usesSandbox(req.auth!.user.id)) {
       await connectSandboxMailbox(req.auth!.user.id);
+      await afterGmailConnected(req.auth!.user.id, consent);
       return res.redirect(302, `${frontendUrl()}${returnTo}`);
     }
 
@@ -101,6 +112,8 @@ router.get('/connect', async (req: Request, res: Response, next: NextFunction) =
     // Kept for the same few minutes; an earlier try's page must not outlive it.
     if (returnTo === FRONTEND_GMAIL_PATH) res.clearCookie(RETURN_COOKIE_NAME);
     else res.cookie(RETURN_COOKIE_NAME, returnTo, cookie);
+    if (consent) res.cookie(FREE_AI_COOKIE_NAME, consent, cookie);
+    else res.clearCookie(FREE_AI_COOKIE_NAME);
 
     return res.redirect(302, authUrl);
   } catch (err) {
@@ -126,6 +139,7 @@ router.get('/callback', prodModeOnly, async (req: Request, res: Response) => {
       // Clear state cookie regardless.
       res.clearCookie(STATE_COOKIE_NAME);
       res.clearCookie(RETURN_COOKIE_NAME);
+      res.clearCookie(FREE_AI_COOKIE_NAME);
       return res.redirect(302, `${frontendGmailUrl}?gmailError=denied`);
     }
 
@@ -134,8 +148,10 @@ router.get('/callback', prodModeOnly, async (req: Request, res: Response) => {
 
     // Clear the state cookie immediately — it is single-use.
     res.clearCookie(STATE_COOKIE_NAME);
-    const returnTo = mailReturnPath(req.signedCookies?.[RETURN_COOKIE_NAME]);
+    const returnTo = connectReturnPath(req.signedCookies?.[RETURN_COOKIE_NAME]);
     res.clearCookie(RETURN_COOKIE_NAME);
+    const consent = freeAIConsent(req.signedCookies?.[FREE_AI_COOKIE_NAME]);
+    res.clearCookie(FREE_AI_COOKIE_NAME);
 
     if (!storedState || !state || storedState !== state || !state.startsWith(`${userId}.`)) {
       // Do NOT log `state` param — it could reveal correlation data.
@@ -164,6 +180,7 @@ router.get('/callback', prodModeOnly, async (req: Request, res: Response) => {
     // SECURITY: the service encrypts the tokens before it stores them.
     const saved = await saveGmailGrant(userId, gmailEmail, grant);
     if (!saved) return res.redirect(302, `${frontendGmailUrl}?gmailError=account_change`);
+    await afterGmailConnected(userId, consent);
 
     return res.redirect(302, `${frontendUrl()}${returnTo}`);
   } catch (err) {

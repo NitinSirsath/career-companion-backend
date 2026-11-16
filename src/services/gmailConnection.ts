@@ -17,6 +17,9 @@ export const maySend = (
   sandbox: boolean,
 ): boolean => connection.status === 'CONNECTED' && (sandbox || connection.canSend);
 
+/** How far a new connection's first sync reads, in days (owner, 15 Nov 2026; was 1). */
+export const DEFAULT_SYNC_LOOKBACK_DAYS = 7;
+
 /** Connection and sync state for the Gmail page. */
 export async function readGmailStatus(userId: string) {
   const connection = await prisma.gmailConnection.findUnique({
@@ -45,7 +48,7 @@ export async function readGmailStatus(userId: string) {
       lastSyncedAt: null,
       unscannedGap: null,
       nextScheduledSyncAt: null,
-      syncLookbackDays: 1,
+      syncLookbackDays: DEFAULT_SYNC_LOOKBACK_DAYS,
       canSend: false,
     };
   }
