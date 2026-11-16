@@ -277,7 +277,7 @@ export const submissionDailyLimit = () =>
 // ─── Request limits ─────────────────────────────────────────────────────────
 
 /**
- * \`off\` turns every request limit off: an emergency switch if a limit ever blocks real users.
+ * `off` turns every request limit off: an emergency switch if a limit ever blocks real users.
  * Empty: on, except in tests, which turn them on where they test them.
  */
 export function parseRATE_LIMITS(value: string | undefined): boolean {
