@@ -1,0 +1,40 @@
+name: Security
+# Known holes in the packages the live app uses, and keys or passwords committed by mistake.
+# Runs on pull requests and main, and once a week so a hole found later still shows up.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: security-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: node scripts/check-package-holes.cjs
+  keys:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install Gitleaks 8.30.1 (checksum checked)
+        run: |
+          curl -sSfL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          rm gitleaks.tar.gz
+      # Whole history; known false alarms (made-up test keys) are listed in .gitleaksignore.
+      - run: ./gitleaks git --redact --no-banner --exit-code 1 .
