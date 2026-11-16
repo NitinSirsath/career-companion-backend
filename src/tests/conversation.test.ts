@@ -1,3 +1,4 @@
+import type { Server } from 'node:http';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 
@@ -24,6 +25,12 @@ const OTHER = 'other@conversation.test';
 let owner: string;
 let other: string;
 let counter = 0;
+/**
+ * One server for the whole file, on 127.0.0.1 only. `request(app)` starts a new server per request
+ * on every address but sends to 127.0.0.1, so on a Mac another program that already listens on
+ * 127.0.0.1 with the same port answered instead now and then: a random 404 or 401.
+ */
+let server: Server;
 
 const as = (user: string) => ({ 'X-Development-User': user });
 const at = (day: number, hour = 9) => new Date(Date.UTC(2026, 9, day, hour));
@@ -81,22 +88,24 @@ const sent = (threadId: string, sentAt: Date, userId = owner) =>
   });
 
 async function list(query = '', user = OWNER): Promise<Conversation[]> {
-  const res = await request(app).get(`/api/conversations${query}`).set(as(user));
+  const res = await request(server).get(`/api/conversations${query}`).set(as(user));
   expect(res.status).toBe(200);
   return ListConversationsResponseSchema.parse(res.body).items;
 }
 const detail = (key: string, user = OWNER) =>
-  request(app).get(`/api/conversations/${key}`).set(as(user));
+  request(server).get(`/api/conversations/${key}`).set(as(user));
 const answer = (key: string, body: object) =>
-  request(app).patch(`/api/conversations/${key}/request`).set(as(OWNER)).send(body);
+  request(server).patch(`/api/conversations/${key}/request`).set(as(OWNER)).send(body);
 const link = (key: string, body: object = {}, user = OWNER) =>
-  request(app).post(`/api/conversations/${key}/application`).set(as(user)).send(body);
+  request(server).post(`/api/conversations/${key}/application`).set(as(user)).send(body);
 const keys = (items: Conversation[]) => items.map((item) => item.key);
 
 beforeAll(async () => {
   await prisma.user.deleteMany({ where: { email: { in: [OWNER, OTHER] } } });
   owner = (await prisma.user.create({ data: { email: OWNER } })).id;
   other = (await prisma.user.create({ data: { email: OTHER } })).id;
+  server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
 });
 beforeEach(async () => {
   vi.mocked(enqueueNotificationJob).mockClear();
@@ -105,6 +114,7 @@ beforeEach(async () => {
   await prisma.application.deleteMany({ where: { userId: { in: [owner, other] } } });
 });
 afterAll(async () => {
+  await new Promise((resolve) => server.close(resolve));
   await prisma.user.deleteMany({ where: { id: { in: [owner, other] } } });
 });
 
@@ -218,10 +228,10 @@ describe('conversation list', () => {
 
   it('pages with the shared envelope', async () => {
     for (let day = 1; day <= 22; day++) await jobMail(`page-${day}`, at(day));
-    const first = await request(app).get('/api/conversations').set(as(OWNER));
+    const first = await request(server).get('/api/conversations').set(as(OWNER));
     expect(first.body.items).toHaveLength(20);
     expect(first.body.metadata).toEqual({ nextOffset: 20, limit: 20, offset: 0 });
-    const second = await request(app).get('/api/conversations?offset=20').set(as(OWNER));
+    const second = await request(server).get('/api/conversations?offset=20').set(as(OWNER));
     expect(second.body.items).toHaveLength(2);
     expect(second.body.metadata.nextOffset).toBeNull();
   });
@@ -251,10 +261,10 @@ describe('conversation list', () => {
   });
 
   it('rejects an unknown filter value and requires a session', async () => {
-    expect((await request(app).get('/api/conversations?request=later').set(as(OWNER))).status).toBe(
-      400,
-    );
-    expect((await request(app).get('/api/conversations')).status).toBe(401);
+    expect(
+      (await request(server).get('/api/conversations?request=later').set(as(OWNER))).status,
+    ).toBe(400);
+    expect((await request(server).get('/api/conversations')).status).toBe(401);
   });
 });
 
@@ -296,13 +306,13 @@ describe('conversation summary', () => {
   it('answers over HTTP with UTC for a missing or wrong time zone, and needs a session', async () => {
     await jobMail('late', at(1), ask('Send dates', '2026-10-09'));
     for (const query of ['', '?timeZone=Asia/Kolkata', '?timeZone=Not/AZone']) {
-      const res = await request(app).get(`/api/conversations/summary${query}`).set(as(OWNER));
+      const res = await request(server).get(`/api/conversations/summary${query}`).set(as(OWNER));
       expect(res.status).toBe(200);
       expect(ConversationSummarySchema.parse(res.body)).toEqual({ needsAction: 1, pastDue: 1 });
     }
-    const theirs = await request(app).get('/api/conversations/summary').set(as(OTHER));
+    const theirs = await request(server).get('/api/conversations/summary').set(as(OTHER));
     expect(theirs.body).toEqual({ needsAction: 0, pastDue: 0 });
-    expect((await request(app).get('/api/conversations/summary')).status).toBe(401);
+    expect((await request(server).get('/api/conversations/summary')).status).toBe(401);
   });
 });
 
@@ -346,13 +356,16 @@ describe('conversation detail', () => {
     await jobMail('opened', at(1));
     await jobMail('opened', at(2));
     await jobMail('untouched', at(3));
-    const res = await request(app).post('/api/conversations/opened/seen').set(as(OWNER)).send({});
+    const res = await request(server)
+      .post('/api/conversations/opened/seen')
+      .set(as(OWNER))
+      .send({});
     expect(res.body).toEqual({ seen: true });
     const rows = await list();
     expect(rows.find((row) => row.key === 'opened')?.isNew).toBe(false);
     expect(rows.find((row) => row.key === 'untouched')?.isNew).toBe(true);
     // Another user cannot clear it.
-    await request(app).post('/api/conversations/untouched/seen').set(as(OTHER)).send({});
+    await request(server).post('/api/conversations/untouched/seen').set(as(OTHER)).send({});
     expect((await list()).find((row) => row.key === 'untouched')?.isNew).toBe(true);
   });
 });
@@ -427,7 +440,7 @@ describe('answering a request', () => {
       .application.id;
     // Linking brings the company's other conversation, the offer, into the application too.
     const actions = async () => {
-      const res = await request(app)
+      const res = await request(server)
         .get(`/api/applications/${applicationId}/actions`)
         .set(as(OWNER));
       expect(res.status).toBe(200);
@@ -468,7 +481,7 @@ describe('answering a request', () => {
     await sent('thread-b', at(2));
     await sent('thread-b', at(5));
     const actions = async () => {
-      const res = await request(app)
+      const res = await request(server)
         .get(`/api/applications/${applicationId}/actions`)
         .set(as(OWNER));
       expect(res.status).toBe(200);
