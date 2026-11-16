@@ -21,6 +21,17 @@ const SENDER = 'Priya Raman <priya.raman@northwind.example>';
 let owner: string;
 
 const as = { 'X-Development-User': OWNER };
+
+/**
+ * Runs a sync as the worker would: first the one that connecting Gmail queued (owner, 15 Nov
+ * 2026), then a new one each time.
+ */
+async function sync() {
+  const { syncClaim } = await prisma.gmailConnection.findUniqueOrThrow({
+    where: { userId: owner },
+  });
+  return syncUser(owner, syncClaim?.startsWith('queued:') ? syncClaim : undefined);
+}
 const send = async (subject: string) =>
   (
     await request(app)
@@ -70,23 +81,23 @@ describe('counting the mails scanned', () => {
   it('counts each new inbox mail once, on its day', async () => {
     await send('One');
     await send('Two');
-    expect(await syncUser(owner)).toMatchObject({ messagesIngested: 2 });
+    expect(await sync()).toMatchObject({ messagesIngested: 2 });
     expect(await counts()).toEqual([{ day: today(), count: 2 }]);
 
     await send('Three');
-    expect(await syncUser(owner)).toMatchObject({ messagesIngested: 1 });
+    expect(await sync()).toMatchObject({ messagesIngested: 1 });
     expect(await counts()).toEqual([{ day: today(), count: 3 }]);
   });
 
   it('never counts a mail it already has, also when a full scan sees it again', async () => {
     await send('One');
-    await syncUser(owner);
+    await sync();
     // Forget the checkpoint: the next sync looks at every mail in the window again.
     await prisma.gmailConnection.update({
       where: { userId: owner },
       data: { lastHistoryId: null },
     });
-    expect(await syncUser(owner)).toMatchObject({ messagesIngested: 0, messagesSkipped: 1 });
+    expect(await sync()).toMatchObject({ messagesIngested: 0, messagesSkipped: 1 });
     expect(await counts()).toEqual([{ day: today(), count: 1 }]);
   });
 
@@ -103,20 +114,20 @@ describe('counting the mails scanned', () => {
         labelIds: ['INBOX', 'CATEGORY_PERSONAL'],
         sender: 'Old Sender <old@elsewhere.example>',
         recipient: OWNER,
-        subject: 'Three days old',
+        subject: 'Eight days old',
         messageId: '<old@scan-days.mail>',
         body: 'Old mail.',
-        internalDate: new Date(Date.now() - 3 * 86_400_000),
+        internalDate: new Date(Date.now() - 8 * 86_400_000),
       },
     });
     await send('Blocked');
-    expect(await syncUser(owner)).toMatchObject({ messagesIngested: 0 });
+    expect(await sync()).toMatchObject({ messagesIngested: 0 });
     expect(await counts()).toEqual([]);
   });
 
   it('goes with a sandbox reset, and with the user', async () => {
     await send('One');
-    await syncUser(owner);
+    await sync();
     expect(await counts()).toHaveLength(1);
     await resetSandbox(owner);
     expect(await counts()).toEqual([]);
