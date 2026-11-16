@@ -274,6 +274,31 @@ export function parseMCP_DAILY_SUBMISSION_LIMIT(value: string | undefined): numb
 export const submissionDailyLimit = () =>
   parseMCP_DAILY_SUBMISSION_LIMIT(process.env.MCP_DAILY_SUBMISSION_LIMIT);
 
+// ─── Request limits ─────────────────────────────────────────────────────────
+
+/**
+ * \`off\` turns every request limit off: an emergency switch if a limit ever blocks real users.
+ * Empty: on, except in tests, which turn them on where they test them.
+ */
+export function parseRATE_LIMITS(value: string | undefined): boolean {
+  if (value === undefined || value === '') return !isTest();
+  if (value === 'on' || value === 'off') return value === 'on';
+  throw new Error('RATE_LIMITS must be on or off');
+}
+export const rateLimitsOn = () => parseRATE_LIMITS(process.env.RATE_LIMITS);
+
+export const DEFAULT_MAIL_DAILY_REPLY_LIMIT = 50;
+
+/** Replies a user may send from NorthList in 24 hours, 0–1000. 0 stops sending from the app. */
+export function parseMAIL_DAILY_REPLY_LIMIT(value: string | undefined): number {
+  if (value === undefined || value === '') return DEFAULT_MAIL_DAILY_REPLY_LIMIT;
+  if (!/^\d+$/.test(value) || Number(value) > 1000)
+    throw new Error('Invalid MAIL_DAILY_REPLY_LIMIT: must be an integer from 0 to 1000');
+  return Number(value);
+}
+export const mailDailyReplyLimit = () =>
+  parseMAIL_DAILY_REPLY_LIMIT(process.env.MAIL_DAILY_REPLY_LIMIT);
+
 // ─── App mode ───────────────────────────────────────────────────────────────
 // One setting switches the app: prod (the default) or dev. Dev mode is for manual testing with
 // made-up mail. It runs only on its own database, so it can never touch live data, and prod
@@ -402,6 +427,8 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env) {
   parseTEST_ACCOUNTS(env.TEST_ACCOUNTS);
   parseAI_SHOW_HIDDEN_PROVIDERS(env.AI_SHOW_HIDDEN_PROVIDERS);
   parseBETA_USER_LIMIT(env.BETA_USER_LIMIT);
+  parseRATE_LIMITS(env.RATE_LIMITS);
+  parseMAIL_DAILY_REPLY_LIMIT(env.MAIL_DAILY_REPLY_LIMIT);
   if (env.NODE_ENV !== 'production') return;
   if (env.ENABLE_DEV_AUTH === 'true')
     throw new Error('Development authentication is forbidden in production');
