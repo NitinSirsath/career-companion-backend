@@ -6,8 +6,9 @@
  *   - no session is ever read here: only a Bearer integration token authenticates;
  *   - no CORS headers are added, so a web page cannot read responses.
  *
- * Order: one log line per request → POST only (405) → Host allowlist (403) → Origin allowlist
- * (403; requests without Origin pass) → Bearer token (401) → 128 KB JSON → MCP handler.
+ * Order: one log line per request → 120 per minute per network address (429) → POST only (405) →
+ * Host allowlist (403) → Origin allowlist (403; requests without Origin pass) → Bearer token (401)
+ * → 60 per minute per token (429) → 128 KB JSON → MCP handler.
  *
  * Built on the SDK's runtime-neutral core (`@modelcontextprotocol/server` + `/node`), not the
  * Express add-on, which re-types `req.auth` for the whole app. The verified AuthInfo is handed to
@@ -28,6 +29,12 @@ import { toNodeHandler } from '@modelcontextprotocol/node';
 import { TOKEN_SCOPE, verifyIntegrationToken } from '../services/integrationTokens';
 import { McpCallRecord, currentCall, rpcMethodOf, runWithCall, writeCallLog } from './callLog';
 import { mcpConfig } from '../utils/config';
+import {
+  MCP_ADDRESS_PER_MINUTE,
+  MCP_TOKEN_PER_MINUTE,
+  addressKey,
+  limiter,
+} from '../middleware/rateLimits';
 import { createMcpServer } from './server';
 
 // Room for up to 50 submitted answers (ADR-0002 amendment, 21 Oct 2026).
@@ -73,8 +80,22 @@ async function sendWebResponse(res: Response, response: globalThis.Response) {
   res.send(Buffer.from(await response.arrayBuffer()));
 }
 
+/** Over a request limit: the JSON-RPC answer of every other refusal here, with status 429. */
+const refuseMcp = (_req: Request, res: Response) =>
+  reject(res, 429, 'rate_limited', 'Too many requests. Wait a minute and try again.');
+
 export function createMcpRouter(config = mcpConfig()) {
   const router = Router();
+  const addressLimit = limiter('mcp_address', {
+    limit: MCP_ADDRESS_PER_MINUTE,
+    keyGenerator: addressKey,
+    refuse: refuseMcp,
+  });
+  const tokenLimit = limiter('mcp_token', {
+    limit: MCP_TOKEN_PER_MINUTE,
+    keyGenerator: (_req, res) => `token:${callOf(res).tokenId}`,
+    refuse: refuseMcp,
+  });
   const mcpHandler = createMcpHandler((ctx) => createMcpServer(ctx.authInfo), {
     onerror: (err) => {
       const call = currentCall();
@@ -95,6 +116,8 @@ export function createMcpRouter(config = mcpConfig()) {
     res.on('finish', () => writeCallLog(record, res.statusCode));
     next();
   });
+
+  router.use(addressLimit);
 
   router.use((req: Request, res: Response, next: NextFunction) => {
     if (req.method === 'POST') return next();
@@ -138,6 +161,8 @@ export function createMcpRouter(config = mcpConfig()) {
       );
     }
   });
+
+  router.use(tokenLimit);
 
   router.use(express.json({ limit: MCP_BODY_LIMIT }));
 
