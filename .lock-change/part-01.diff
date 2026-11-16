@@ -42,7 +42,7 @@ index 0c593da..12d6f46 100644
 +      }
 +    },
 +    "node_modules/@emnapi/wasi-threads": {
-+      "version": "2.0.0-beta.2",
++      "version": "2.2.0",
 +      "resolved": "https://registry.npmjs.org/@emnapi/wasi-threads/-/wasi-threads-2.2.0.tgz",
 +      "integrity": "sha512-JP7OYH38Q7+pyTAe14raZHLQIK7BDKbdwji+Xi3pcd/6QkJYQH3SX4wu6EplGrGJWRepoNzedfm0G3B9Z4e9Rw==",
 +      "dev": true,
