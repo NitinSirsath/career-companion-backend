@@ -119,6 +119,15 @@ export function deriveStatus(
 
 // ─── ApplicationResponse (create + list + detail + status PATCH) ───────────
 
+/** The question shown after the user declined by mail. */
+export const DeclineQuestionSchema = z.object({
+  /** When the user sent the reply that declined. */
+  repliedAt: z.iso.datetime(),
+  /** When it closes by itself; null once the company wrote again after the reply. */
+  closesAt: z.iso.datetime().nullable(),
+});
+export type DeclineQuestion = z.infer<typeof DeclineQuestionSchema>;
+
 const ApplicationResponseObjectSchema = z.object({
   archivedAt: z.iso.datetime().nullable(),
   archiveRevision: z.number().int().nonnegative(),
@@ -143,6 +152,13 @@ const ApplicationResponseObjectSchema = z.object({
   submittedVia: SubmittedViaSchema.nullable(),
   /** Platform, job link and time of the newest automation submission; null for other applications. */
   automation: ApplicationAutomationSchema.nullable(),
+  /**
+   * "Close the application?" (owner, 17 Nov 2026): the user's reply said they no longer want this
+   * job. Null when nothing asks: no such reply, answered, Rejected, Closed or archived.
+   */
+  decline: DeclineQuestionSchema.nullable(),
+  /** When it closed after the user declined by mail, while that Closed still stands. */
+  closedAfterDeclineAt: z.iso.datetime().nullable(),
 });
 
 export const ApplicationResponseSchema = ApplicationResponseObjectSchema.superRefine((app, ctx) => {
@@ -170,6 +186,12 @@ export const UpdateApplicationStatusRequestSchema = z.strictObject({
   expectedUserStatusRevision: z.number().int().nonnegative(),
 });
 export type UpdateApplicationStatusRequest = z.infer<typeof UpdateApplicationStatusRequestSchema>;
+
+/** The answer to "Close the application?": Close it, or Keep open. */
+export const DeclineAnswerRequestSchema = z.strictObject({
+  answer: z.enum(['CLOSE', 'KEEP_OPEN']),
+});
+export type DeclineAnswerRequest = z.infer<typeof DeclineAnswerRequestSchema>;
 
 // ─── ApplicationEvent ────────────────────────────────────────────────────────
 // Ordered by recording time (createdAt/recordedAt, then id); not a recruitment chronology.
@@ -241,6 +263,7 @@ export const ApplicationActionListItemSchema = ApplicationActionResponseSchema.e
       'YOUR_REPLY',
       'YOU_SAID_DONE',
       'APPLICATION_CLOSED',
+      'YOU_DECLINED',
     ])
     .nullable(),
 });
