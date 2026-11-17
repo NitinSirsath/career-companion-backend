@@ -23,8 +23,10 @@ import {
   THREAD_EXTRACTION_VERSIONS,
 } from '../../services/ai/contracts';
 import { canReplyTo } from '../../services/emailRequest';
-import { REPLY_READ_CONTRACT } from '../../services/ai/replyRead';
+import { REPLY_READ_V2_CONTRACT, replyOutcomes } from '../../services/ai/replyRead';
 import { evaluateCall } from './call';
+import { longMailCases } from './longMails';
+import { boundedBody } from '../../services/mailText';
 import { createProviderClient } from '../../services/ai/providers';
 import {
   CaseRun,
@@ -96,6 +98,7 @@ async function main() {
   const cases = [
     ...loadDataset(),
     ...(withThread ? loadDataset(THREAD_DATASET_DIR) : []),
+    ...(withThread ? longMailCases : []),
     ...(withTimes ? temporalCases : []),
   ];
   const models = { fast: catalogModel('fast', fast), detailed: catalogModel('detailed', detailed) };
@@ -186,9 +189,11 @@ async function main() {
           break evaluation;
         }
         if (c.expect.relevance !== 'IRRELEVANT') {
+          const bounded = boundedBody(c.input.body, EXTRACTION_BODY_LIMIT);
           const extracted = await timed(() =>
-            ai.analyzer.extractJobData(c.input.body.slice(0, EXTRACTION_BODY_LIMIT), {
+            ai.analyzer.extractJobData(bounded.body, {
               version: extractionVersion,
+              bodyCut: bounded.cut,
               receivedAt: c.input.receivedAt ?? null,
               thread: withThread
                 ? {
@@ -228,7 +233,7 @@ async function main() {
           valid: !!read.value,
           error: read.error,
           latencyMs: read.latencyMs,
-          answered: read.value?.data.answeredAsks,
+          read: read.value && replyOutcomes(read.value.version, read.value.data),
         });
         process.stdout.write('.');
       }
@@ -250,7 +255,7 @@ async function main() {
     contractVersions: {
       ...AI_CONTRACT_VERSIONS,
       EXTRACTION: extractionVersion,
-      ...(withThread ? { REPLY_READ: REPLY_READ_CONTRACT.version } : {}),
+      ...(withThread ? { REPLY_READ: REPLY_READ_V2_CONTRACT.version } : {}),
     },
     temporal,
     replyRead: replyRead && { ...replyRead, results: replyReads },
