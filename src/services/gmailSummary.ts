@@ -55,7 +55,6 @@ export async function readGmailSummary(
       },
     }),
   ]);
-
   return {
     days: SUMMARY_DAYS,
     since: start.toISOString(),
