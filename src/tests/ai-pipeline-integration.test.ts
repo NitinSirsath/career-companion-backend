@@ -278,10 +278,10 @@ describe('the warning for a job offer that asks for money', () => {
     return { emailId, provider };
   };
 
-  it('a new mail is read with classification/v4 and extraction/v8, and the warning is stored trimmed', async () => {
+  it('a new mail is read with classification/v5 and extraction/v8, and the warning is stored trimmed', async () => {
     const { emailId, provider } = await run('  It asks for a fee of Rs 8,500.  ');
     expect(provider.generateStructured.mock.calls.map(([sent]) => sent.contract.version)).toEqual([
-      'classification/v4',
+      'classification/v5',
       'extraction/v8',
     ]);
     expect(await prisma.aIProcessingResult.findUniqueOrThrow({ where: { emailId } })).toMatchObject(
