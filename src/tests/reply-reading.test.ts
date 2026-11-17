@@ -58,9 +58,16 @@ const sentReply = (threadId: string, sentAt = at(2)) =>
   prisma.outgoingEmail.create({
     data: { userId: owner, gmailMessageId: `sent-${++counter}`, threadId, sentAt },
   });
-const reads = (answeredAsks: string[] | ((input: string) => unknown)) => {
+/** The AI's answer (reply-read/v2): these asks answered, the others not. */
+const reads = (answered: string[] | ((input: string) => unknown)) => {
   const provider = fakeProviderClient({
-    extraction: typeof answeredAsks === 'function' ? answeredAsks : () => ({ answeredAsks }),
+    extraction:
+      typeof answered === 'function'
+        ? answered
+        : () => ({
+            asks: answered.map((id) => ({ id, outcome: 'ANSWERED' })),
+            leavesJob: false,
+          }),
   });
   vi.mocked(createProviderClient).mockReturnValue(provider);
   return provider;
@@ -130,7 +137,7 @@ describe('a sent reply is read only when something is open (COM-180)', () => {
     const logs = vi.spyOn(console, 'log');
     expect(await readSentReply(owner, sent.id)).toBeNull();
     const [[call]] = provider.generateStructured.mock.calls;
-    expect(call.contract.version).toBe('reply-read/v1');
+    expect(call.contract.version).toBe('reply-read/v2');
     expect(JSON.parse(call.input)).toEqual({
       openAsks: [
         {
@@ -210,6 +217,22 @@ describe('a sent reply is read only when something is open (COM-180)', () => {
     expect(await prisma.outgoingEmail.findUniqueOrThrow({ where: { id: sent.id } })).toMatchObject({
       replyReadState: 'NOT_READ',
       replyReadTries: 3,
+    });
+  });
+
+  it('finishes a reply queued before v2 on reply-read/v1', async () => {
+    const ask = await askingMail('t-v1');
+    const sent = await sentReply('t-v1');
+    await prisma.outgoingEmail.update({
+      where: { id: sent.id },
+      data: { replyReadState: 'WAITING' },
+    });
+    const provider = reads(() => ({ answeredAsks: [askId(ask.id)] }));
+    await readSentReply(owner, sent.id);
+    expect(provider.generateStructured.mock.calls[0][0].contract.version).toBe('reply-read/v1');
+    expect((await conversation('t-v1')).request).toMatchObject({
+      state: 'DONE',
+      closedReason: 'YOUR_REPLY',
     });
   });
 

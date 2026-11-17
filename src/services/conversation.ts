@@ -29,6 +29,7 @@ import {
 import { localDay } from './dashboardMetrics';
 import { canReplyTo, FAKE_OFFER_NEXT_STEP, requestOf } from './emailRequest';
 import { CLOSES_BY_ITSELF, mayCloseByHand, OPEN_AGAIN } from './threadAsks';
+import { declineView, newestMail } from './declineQuestion';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 type Mail = Prisma.EmailGetPayload<{ include: { aiProcessingResult: true } }>;
@@ -39,7 +40,12 @@ const applicationSummary = {
   jobTitle: true,
   aiStatus: true,
   userStatus: true,
+  userStatusSetAt: true,
   archivedAt: true,
+  declinedAt: true,
+  declineAnswer: true,
+  declineAnsweredAt: true,
+  emails: newestMail,
 } satisfies Prisma.ApplicationSelect;
 type ApplicationSummary = Prisma.ApplicationGetPayload<{ select: typeof applicationSummary }>;
 
@@ -259,6 +265,7 @@ function toConversation(
         application.userStatus as ApplicationStatus | null,
       ).effectiveStatus,
       archived: application.archivedAt !== null,
+      ...declineView(application, application.emails[0]?.receivedAt ?? null),
     },
     analyzedBy: provenance ? { provider: provenance.provider, model: provenance.model } : null,
   };
@@ -289,18 +296,30 @@ function toRequest(row: ConversationRow, thread: Mail[]): ConversationRequest | 
     canReply: canReplyTo(mail.sender),
     ...closureOf(row, mail),
     replyRead: replyReadOf(row, repliedAfter(row, mail) !== null),
+    theyAnsweredAt:
+      row.requestState === 'OPEN' ? (theyAnsweredAt(row)?.toISOString() ?? null) : null,
   };
 }
 
 /** What the AI made of the user's reply after the request, as the screens show it. */
 function replyReadOf(row: ConversationRow, replied: boolean): ConversationRequest['replyRead'] {
   if (!replied) return null;
+  const read = row.lastReadState;
   if (row.requestState === 'REPLIED')
-    return row.lastReadState === 'WAITING' || row.lastReadState === 'NOT_READ'
-      ? row.lastReadState
-      : null;
-  return row.requestState === 'OPEN' && row.lastReadState === 'READ' ? 'NOT_ANSWERED' : null;
+    return read === 'WAITING' || read === 'NOT_READ' || read === 'ASKED_BACK' ? read : null;
+  if (row.requestState !== 'OPEN') return null;
+  if (read === 'READ') return 'NOT_ANSWERED';
+  return read === 'ASKED_BACK' && theyAnsweredAt(row) ? 'THEY_ANSWERED' : null;
 }
+
+/** The user asked them a question and a mail came after it: when their answer arrived. */
+const theyAnsweredAt = (row: ConversationRow) =>
+  row.lastReadState === 'ASKED_BACK' &&
+  row.lastMailAt &&
+  row.lastSentAt &&
+  row.lastMailAt > row.lastSentAt
+    ? row.lastMailAt
+    : null;
 
 /** The user's newest message after the request arrived, if any. */
 const repliedAfter = (row: ConversationRow, mail: Mail) =>

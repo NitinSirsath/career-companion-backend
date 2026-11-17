@@ -3,6 +3,7 @@ import { startGmailScheduledSync } from './gmailScheduledSyncJob';
 import { GMAIL_SCHEDULE_QUEUE } from '../services/gmailSchedule';
 import { startGmailSyncWorker } from './gmailSyncJob';
 import { MAIL_CLEANUP_QUEUE, startMailCleanupWorker } from './mailCleanupJob';
+import { DECLINE_CLOSE_QUEUE, startDeclineCloseWorker } from './declineCloseJob';
 import { startEmailProcessingWorker } from './emailProcessingJob';
 import { startNotificationWorker, startWebPushNotificationWorker } from './notificationJob';
 import { startRelevanceTriageWorker } from './relevanceTriageJob';
@@ -63,6 +64,11 @@ export function defaultWorkers(): WorkerRegistration[] {
       queue: MAIL_CLEANUP_QUEUE,
       start: startMailCleanupWorker,
       failureEvent: 'mail_cleanup_worker_start_failed',
+    },
+    {
+      queue: DECLINE_CLOSE_QUEUE,
+      start: startDeclineCloseWorker,
+      failureEvent: 'decline_close_worker_start_failed',
     },
   ];
 }

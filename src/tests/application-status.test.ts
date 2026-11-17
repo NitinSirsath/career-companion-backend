@@ -127,6 +127,8 @@ describe('canonical status (64 combinations)', () => {
       pendingActionCount: 0,
       submittedVia: null,
       automation: null,
+      decline: null,
+      closedAfterDeclineAt: null,
     };
     expect(ApplicationResponseSchema.safeParse(valid).success).toBe(true);
     const missing: Partial<typeof valid> = { ...valid };

@@ -372,6 +372,7 @@ describe('Gemini adapter', () => {
         contents: JSON.stringify({
           receivedAt: null,
           body: 'test body',
+          bodyCut: false,
           senderCanReply: true,
           openAsks: [],
         }),

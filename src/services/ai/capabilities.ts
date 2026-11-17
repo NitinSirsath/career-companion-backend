@@ -7,15 +7,22 @@ import {
   RelevanceBatchEnvelopeSchema,
   classificationContractFor,
   relevanceBatchContractFor,
-  extractionContractFor,
   SCHEDULE_EXTRACTION_VERSIONS,
   THREAD_EXTRACTION_VERSIONS,
+  CUT_FLAG_EXTRACTION_VERSIONS,
   NO_THREAD,
   EmailAnalyzer,
   RelevanceClassifier,
 } from './contracts';
+import { extractionContractFor } from './extractionVersions';
 import { ProviderFailure } from './errors';
-import { REPLY_READ_CONTRACT, type ReplyRead, type ReplyReadInput } from './replyRead';
+import {
+  REPLY_READ_V2_CONTRACT,
+  replyReadContractFor,
+  type ReplyRead,
+  type ReplyReadInput,
+  type ReplyReadV2,
+} from './replyRead';
 import { REPLY_DRAFT_CONTRACT, type ReplyDraft, type ReplyDraftInput } from './replyDraft';
 import type { ProviderClient } from './providers';
 
@@ -23,8 +30,8 @@ export type BoundModels = Record<AIRole, CatalogModel>;
 
 /** What the AI does with the user's own side of a conversation. */
 export interface ReplyCapabilities {
-  /** Which open asks the user's reply settles. */
-  read(input: ReplyReadInput): Promise<AIResult<ReplyRead>>;
+  /** What the user's reply does with each open ask; the newest version unless one is named. */
+  read(input: ReplyReadInput, version?: string): Promise<AIResult<ReplyRead | ReplyReadV2>>;
   /** A draft of the user's reply, from the whole conversation. */
   write(input: ReplyDraftInput): Promise<AIResult<ReplyDraft>>;
 }
@@ -53,8 +60,9 @@ async function run<T>(
 }
 
 /**
- * The versions that read times also get the received time, and the thread versions also the
- * conversation's open asks; the others get the body only.
+ * The versions that read times also get the received time, the thread versions also the
+ * conversation's open asks, and the newest ones also whether the body was cut; the others get the
+ * body only.
  */
 function extractionInput(
   body: string,
@@ -62,6 +70,9 @@ function extractionInput(
   options: Parameters<EmailAnalyzer['extractJobData']>[1],
 ): string {
   const receivedAt = options?.receivedAt ?? null;
+  const thread = options?.thread ?? NO_THREAD;
+  if (CUT_FLAG_EXTRACTION_VERSIONS.includes(contract.version))
+    return JSON.stringify({ receivedAt, body, bodyCut: options?.bodyCut ?? false, ...thread });
   if (THREAD_EXTRACTION_VERSIONS.includes(contract.version))
     return JSON.stringify({ receivedAt, body, ...(options?.thread ?? NO_THREAD) });
   if (SCHEDULE_EXTRACTION_VERSIONS.includes(contract.version))
@@ -104,8 +115,10 @@ export function bindCapabilities(client: ProviderClient, models: BoundModels): A
       },
     },
     replies: {
-      read: (input) =>
-        run(client, REPLY_READ_CONTRACT, models[REPLY_READ_CONTRACT.role], JSON.stringify(input)),
+      read: (input, version = REPLY_READ_V2_CONTRACT.version) => {
+        const contract = replyReadContractFor(version);
+        return run(client, contract, models[contract.role], JSON.stringify(input));
+      },
       write: (input) =>
         run(client, REPLY_DRAFT_CONTRACT, models[REPLY_DRAFT_CONTRACT.role], JSON.stringify(input)),
     },

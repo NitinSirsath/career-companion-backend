@@ -143,6 +143,7 @@ describe('the user’s own replies', () => {
         'replyReadAt',
         'replyReadState',
         'replyReadTries',
+        'replyReadVersion',
         'sentAt',
         'threadId',
         'userId',

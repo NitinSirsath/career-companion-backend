@@ -67,6 +67,12 @@ export async function fetchMessageMetadata(
     options,
   );
 }
+/**
+ * The most of a body kept in memory for one read. The AI reads far less (`EXTRACTION_BODY_LIMIT`);
+ * the rest only tells whether the mail was cut and lets quoted mail go last (owner, 17 Nov 2026).
+ */
+export const BODY_READ_LIMIT = 200_000;
+
 export async function fetchMessageBody(
   userId: string,
   gmailMessageId: string,
@@ -79,7 +85,7 @@ export async function fetchMessageBody(
         { userId: 'me', id: gmailMessageId, format: 'full' },
         gmailCallOptions(options.signal),
       );
-      return extractBody(data).slice(0, 8000);
+      return extractBody(data).slice(0, BODY_READ_LIMIT);
     },
     options,
   );

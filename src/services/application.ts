@@ -16,6 +16,7 @@ import { repliedRequests } from './conversationQuery';
 import { closeAsksOfApplication } from './threadAsks';
 import { recordStatusChange } from './statusLog';
 import { SETTLED, archiveFilter, groupFilters } from './applicationGroups';
+import { declineView, newestMail } from './declineQuestion';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -52,6 +53,8 @@ const enrichment = {
     take: 1,
     select: { userId: true, platform: true, jobUrl: true, submittedAt: true },
   },
+  // decline: whether the company wrote again after the user declined by mail.
+  emails: newestMail,
 } satisfies Prisma.ApplicationInclude;
 
 type EnrichedApplication = Prisma.ApplicationGetPayload<{ include: typeof enrichment }>;
@@ -540,6 +543,7 @@ function mapToResponse(
     pendingActionCount: app._count.actions,
     submittedVia: app._count.externalSubmissions > 0 ? 'AUTOMATION' : null,
     automation: toAutomation(userId, app.externalSubmissions[0]),
+    ...declineView(app, app.emails[0]?.receivedAt ?? null),
   };
 }
 
