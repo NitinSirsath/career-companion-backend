@@ -7,6 +7,7 @@ import {
   AnalyzedBySchema,
   ApplicationResponseSchema,
   ApplicationStatusSchema,
+  DeclineQuestionSchema,
 } from './application';
 import { createPaginatedResponseSchema } from './pagination';
 
@@ -50,6 +51,8 @@ export const RequestClosedReasonSchema = z.enum([
   'YOU_SAID_DONE',
   /** The user set the application to Rejected or Closed. */
   'APPLICATION_CLOSED',
+  /** The user's own reply said no to it. */
+  'YOU_DECLINED',
 ]);
 export type RequestClosedReason = z.infer<typeof RequestClosedReasonSchema>;
 
@@ -80,10 +83,17 @@ export const ConversationRequestSchema = z.object({
   closedByMessageId: z.string().nullable(),
   /**
    * What the AI made of the user's reply after the request (owner, 24 Oct 2026). REPLIED:
-   * WAITING (it reads it now) or NOT_READ (it could not; "Replied" from the send time). OPEN:
-   * NOT_ANSWERED (it read it, and the reply does not settle the request yet). Null otherwise.
+   * WAITING (it reads it now), NOT_READ (it could not; "Replied" from the send time) or
+   * ASKED_BACK (the reply asked them a question: it waits for their answer; owner, 17 Nov 2026).
+   * OPEN: NOT_ANSWERED (it read it, and the reply does not settle the request yet) or
+   * THEY_ANSWERED (they wrote back after the user's question; the request stands again). Null
+   * otherwise.
    */
-  replyRead: z.enum(['WAITING', 'NOT_READ', 'NOT_ANSWERED']).nullable(),
+  replyRead: z
+    .enum(['WAITING', 'NOT_READ', 'NOT_ANSWERED', 'ASKED_BACK', 'THEY_ANSWERED'])
+    .nullable(),
+  /** THEY_ANSWERED only: when their mail after the user's question arrived. */
+  theyAnsweredAt: IsoDateTime.nullable(),
 });
 export type ConversationRequest = z.infer<typeof ConversationRequestSchema>;
 
@@ -126,6 +136,9 @@ export const ConversationSchema = z.object({
       jobTitle: z.string().nullable(),
       effectiveStatus: ApplicationStatusSchema.nullable(),
       archived: z.boolean(),
+      /** "Close the application?" after the user declined by mail; as on the application. */
+      decline: DeclineQuestionSchema.nullable(),
+      closedAfterDeclineAt: IsoDateTime.nullable(),
     })
     .nullable(),
   analyzedBy: AnalyzedBySchema.nullable(),
