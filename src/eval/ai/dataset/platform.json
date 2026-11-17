@@ -1,0 +1,225 @@
+[
+  {
+    "id": "platform-wellfound-submitted",
+    "input": {
+      "sender": "Wellfound <no-reply@wellfound.example.com>",
+      "subject": "Application to Lumen Labs successfully submitted",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Hi Alex,\n\nYour application to Lumen Labs for the role Front-end Developer (only for folks graduated in 2026 or earlier) was successfully submitted.\nThe team will review your profile and reach out here if there is a fit.\n\nGood luck!\nThe Wellfound team"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": ["FOLLOW_UP"],
+      "fields": {
+        "companyName": {
+          "contains": ["lumen labs"]
+        },
+        "jobTitle": {
+          "contains": ["front-end developer", "frontend developer"]
+        }
+      },
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "platform"
+  },
+  {
+    "id": "platform-wellfound-pro-invite",
+    "input": {
+      "sender": "Wellfound <no-reply@wellfound.example.com>",
+      "subject": "You're invited: try Wellfound Pro free for 14 days",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Hi Alex,\n\nStand out to startups: Pro members appear first in recruiter searches and see who viewed their profile.\nStart your free 14-day trial today.\n\nUnsubscribe from marketing mail"
+    },
+    "expect": {
+      "relevance": "IRRELEVANT",
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "platform"
+  },
+  {
+    "id": "platform-naukri-exclusive-invite",
+    "input": {
+      "sender": "Naukri <info@naukri.example.com>",
+      "subject": "You're invited to apply to this exclusive job",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Dear Jobseeker,\n\nYou are invited to apply to an exclusive job: Senior React Developer at Coho Winery, Pune, 6-9 years.\nThis invite is sent to a few select profiles like yours. Apply before the invite expires.\n\nApply now\n\nYou are receiving this mail as a registered Naukri user."
+    },
+    "expect": {
+      "relevance": "IRRELEVANT",
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "platform"
+  },
+  {
+    "id": "platform-naukri-pro-member",
+    "input": {
+      "sender": "Naukri Pro <pro@naukri.example.com>",
+      "subject": "Become a Pro member and get 3x more recruiter views",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Hi Alex,\n\nPro members get priority in recruiter searches, a highlighted profile and exclusive job invites.\nUpgrade today at 40% off.\n\nNaukri Pro"
+    },
+    "expect": {
+      "relevance": "IRRELEVANT",
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "platform"
+  },
+  {
+    "id": "platform-naukri-recruiter-personal",
+    "input": {
+      "sender": "Priya Shah via Naukri <recruiter-message@naukri.example.com>",
+      "subject": "Frontend Engineer role at Lumen Apps: your profile",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Hi Alex,\n\nI am Priya Shah, talent partner at Lumen Apps. I read your profile and think you would fit our Frontend Engineer opening in Bengaluru.\nCould you share your notice period and current CTC by Friday?\n\nRegards,\nPriya Shah\nLumen Apps"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": ["RECRUITER"],
+      "fields": {
+        "companyName": {
+          "contains": ["lumen apps"]
+        },
+        "recruiterName": {
+          "contains": ["priya shah"]
+        },
+        "actionRequired": {
+          "equals": true
+        }
+      },
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "platform"
+  },
+  {
+    "id": "platform-indeed-application-received",
+    "input": {
+      "sender": "Indeed Apply <indeedapply@indeed.example.com>",
+      "subject": "Application submitted: Data Analyst at Coho Winery",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Your application has been submitted.\n\nData Analyst\nCoho Winery - Remote\n\nThe employer will contact you directly if they would like to move forward. You can track this application in My jobs."
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": ["FOLLOW_UP"],
+      "fields": {
+        "companyName": {
+          "contains": ["coho winery"]
+        },
+        "jobTitle": {
+          "contains": ["data analyst"]
+        }
+      },
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "platform"
+  },
+  {
+    "id": "platform-indeed-employers-looking",
+    "input": {
+      "sender": "Indeed <no-reply@indeed.example.com>",
+      "subject": "Employers are looking for candidates like you",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Alex, 14 employers are hiring for roles that match your resume.\nYou have been selected to apply early to these jobs. Update your resume to get noticed.\n\nSee jobs"
+    },
+    "expect": {
+      "relevance": "IRRELEVANT",
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "platform"
+  },
+  {
+    "id": "platform-instahyre-premium-shortlist",
+    "input": {
+      "sender": "Instahyre <noreply@instahyre.example.com>",
+      "subject": "You have been shortlisted for 5 premium jobs",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Hi Alex,\n\nGreat news! Our algorithm shortlisted you for 5 premium jobs this week. Log in and click Interested to be seen by the companies.\n\nTeam Instahyre"
+    },
+    "expect": {
+      "relevance": "IRRELEVANT",
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "platform"
+  },
+  {
+    "id": "platform-instahyre-recruiter-personal",
+    "input": {
+      "sender": "Rohan Mehta via Instahyre <messages@instahyre.example.com>",
+      "subject": "Rohan from Fabrikam sent you a message",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Rohan Mehta (Engineering Manager, Fabrikam) wrote:\n\"Hi Alex, I liked your work on design systems. We have a Senior UI Engineer opening on my team. Are you open to a 30-minute call this week?\"\n\nReply on Instahyre"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": ["RECRUITER"],
+      "fields": {
+        "companyName": {
+          "contains": ["fabrikam"]
+        }
+      },
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "platform"
+  },
+  {
+    "id": "platform-workday-received",
+    "input": {
+      "sender": "Contoso Careers <contoso@myworkday.example.com>",
+      "subject": "Thank you for applying - Software Engineer II",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Dear Alex,\n\nThank you for applying for the Software Engineer II position (Req ID R-10442) at Contoso.\nWe have received your application and our recruiting team will review it.\n\nContoso Talent Acquisition\nThis is an automated message. Please do not reply."
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": ["FOLLOW_UP"],
+      "fields": {
+        "companyName": {
+          "contains": ["contoso"]
+        },
+        "jobTitle": {
+          "contains": ["software engineer"]
+        }
+      },
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "platform"
+  },
+  {
+    "id": "platform-workday-rejection",
+    "input": {
+      "sender": "Contoso Careers <contoso@myworkday.example.com>",
+      "subject": "Update on your application - Software Engineer II",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Dear Alex,\n\nThank you for your interest in the Software Engineer II position at Contoso. After careful review, we have decided to move forward with other candidates.\nWe wish you success in your search.\n\nContoso Talent Acquisition\nThis is an automated message. Please do not reply."
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "critical": true,
+      "category": ["REJECTION"],
+      "fields": {
+        "companyName": {
+          "contains": ["contoso"]
+        },
+        "rejectionInfo": {
+          "present": true
+        }
+      },
+      "mustBeNull": ["offerInfo"]
+    },
+    "group": "platform"
+  },
+  {
+    "id": "platform-linkedin-premium",
+    "input": {
+      "sender": "LinkedIn <messages-noreply@linkedin.example.com>",
+      "subject": "Alex, recruiters are viewing profiles like yours",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "See who viewed your profile and get InMail credits with Premium Career.\nYour free month is waiting.\n\nTry Premium for free"
+    },
+    "expect": {
+      "relevance": "IRRELEVANT",
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "platform"
+  }
+]
