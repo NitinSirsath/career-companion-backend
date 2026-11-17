@@ -372,19 +372,44 @@ describe('refusal accounting and safe evaluation retries', () => {
 
 describe("reading the user's own reply", () => {
   const right = (run = 1) =>
-    replyReadCases.map((c) => ({ id: c.id, run, valid: true, latencyMs: 10, answered: c.answers }));
+    replyReadCases.map((c) => ({
+      id: c.id,
+      run,
+      valid: true,
+      latencyMs: 10,
+      read: {
+        asks: Object.entries(c.outcomes).map(([id, outcome]) => ({ id, outcome })),
+        leavesJob: c.leavesJob,
+      },
+    }));
+  const outcomes = replyReadCases.flatMap((c) => Object.values(c.outcomes));
 
-  it('has cases that close and cases that keep the ask open', () => {
-    expect(replyReadCases.filter((c) => c.answers.length).length).toBeGreaterThanOrEqual(3);
-    expect(replyReadCases.filter((c) => !c.answers.length).length).toBeGreaterThanOrEqual(3);
+  it('has cases for every outcome, and replies that leave the job and that do not', () => {
+    for (const outcome of ['ANSWERED', 'DECLINED', 'ASKED_BACK', 'NOT_ANSWERED'] as const)
+      expect(outcomes.filter((o) => o === outcome).length).toBeGreaterThanOrEqual(2);
+    expect(replyReadCases.filter((c) => c.leavesJob).length).toBeGreaterThanOrEqual(2);
+    // A small "no" is not leaving the job.
+    expect(replyReadCases.find((c) => c.id === 'decline-small-ask')?.leavesJob).toBe(false);
   });
 
-  it('passes only every case checked with no wrong close', () => {
+  it('passes only every case checked with no wrong close and no wrong leave', () => {
     expect(scoreReplyRead([...right(1), ...right(2)], 2).outcome).toBe('PASS');
     expect(scoreReplyRead(right(1), 2).outcome).toBe('INCONCLUSIVE');
-    const wrong = right().map((r) =>
-      r.id === 'promise-later' ? { ...r, answered: ['ask-0a1b2c3d'] } : r,
+    const closed = right().map((r) =>
+      r.id === 'promise-later'
+        ? {
+            ...r,
+            read: {
+              asks: [{ id: 'ask-0a1b2c3d', outcome: 'ANSWERED' as const }],
+              leavesJob: false,
+            },
+          }
+        : r,
     );
-    expect(scoreReplyRead(wrong, 1)).toMatchObject({ outcome: 'FAIL', wrongCloses: 1 });
+    expect(scoreReplyRead(closed, 1)).toMatchObject({ outcome: 'FAIL', wrongCloses: 1 });
+    const left = right().map((r) =>
+      r.id === 'decline-small-ask' ? { ...r, read: { ...r.read, leavesJob: true } } : r,
+    );
+    expect(scoreReplyRead(left, 1)).toMatchObject({ outcome: 'FAIL', wrongLeaves: 1 });
   });
 });
