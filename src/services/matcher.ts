@@ -16,6 +16,7 @@ import {
 import { enqueueNotificationJob } from './enqueue';
 import { recordStatusChange, retireStatusChangesOfEmail } from './statusLog';
 import { logEvent, logError } from '../utils/log';
+import { sameJobTitle } from './jobTitle';
 
 // Messages for a match correction that fails.
 const MATCH_GONE = 'Email or application no longer available';
@@ -59,6 +60,8 @@ export async function matchEmailToApplication(emailId: string): Promise<void> {
   if (email.matchState === 'IGNORED') return;
   // A mail that asks for money is never linked automatically; the user can still link it.
   if (aiProcessingResult.fakeOfferWarning) return;
+  // A career contact is about the user's work, not a job: it never gets an application.
+  if (aiProcessingResult.category === 'CAREER_CONTACT') return;
 
   // 1. Thread Match
   const decision = await threadDecision(prisma, email);
@@ -124,7 +127,7 @@ export const sameCompany = (a: string, b: string) => normalize(a) === normalize(
 
 /**
  * The user's active applications an email about this company and role may belong to: the same
- * company, and the same role where both name one.
+ * company, and the same job (`sameJobTitle`) where both name one.
  */
 export async function candidateApplications(
   db: Prisma.TransactionClient,
@@ -132,11 +135,11 @@ export async function candidateApplications(
   companyName: string,
   role: string | null,
 ) {
-  const normalizedRole = role ? normalize(role) : null;
+  const named = role && normalize(role) ? role : null;
   const applications = await db.application.findMany({ where: { userId, archivedAt: null } });
   return applications.filter((app) => {
     if (!sameCompany(app.companyName, companyName)) return false;
-    return !(normalizedRole && app.jobTitle) || normalize(app.jobTitle) === normalizedRole;
+    return !(named && app.jobTitle) || sameJobTitle(app.jobTitle, named);
   });
 }
 
@@ -537,6 +540,8 @@ function isInterview(aiResult: AIProcessingResult): boolean {
 /** The status an email suggests. A mail that asks for money suggests none: it is not evidence. */
 export function inferState(aiResult: AIProcessingResult): ApplicationStatus | null {
   if (aiResult.fakeOfferWarning) return null;
+  // A career contact says nothing about a job's progress, even when the user links it by hand.
+  if (aiResult.category === 'CAREER_CONTACT') return null;
   if (aiResult.rejectionInfo || aiResult.category === 'REJECTION')
     return ApplicationStatus.REJECTED;
   if (aiResult.offerInfo || aiResult.category === 'OFFER') return ApplicationStatus.OFFER;
