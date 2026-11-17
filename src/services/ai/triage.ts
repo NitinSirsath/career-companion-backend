@@ -206,7 +206,7 @@ export async function classifyBatch(
   // answered, the rows stay PROCESSING, later become held for approval, and are never resent.
   await recordTokens(userId, run.now, result.usage);
   const keys = sent.items.map((item) => item.key!);
-  const mapped = mapBatchResults(keys, result.data.results);
+  const mapped = mapBatchResults(keys, result.data.results, version);
   const byEmail = new Map<string, BatchOutcome>();
   await prisma.$transaction(async (tx) => {
     const batch = await tx.aIBatch.update({
