@@ -1,0 +1,115 @@
+[
+  {
+    "id": "career-listing-invite",
+    "input": {
+      "sender": "Joris Bakker <joris@listly.example.com>",
+      "subject": "Listing your tool on Listly",
+      "labels": ["INBOX", "CATEGORY_PERSONAL"],
+      "body": "Hi Alex,\n\nI'm Joris, I run partnerships at Listly, a marketplace for AI agent skills. I came across your open-source job automation and would love to list it.\nCould you sign up and add it this week? Happy to answer questions.\n\nBest,\nJoris Bakker\nListly"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": ["CAREER_CONTACT"],
+      "fields": {
+        "actionRequired": {
+          "equals": true
+        }
+      },
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "career-contact"
+  },
+  {
+    "id": "career-investor-intro",
+    "input": {
+      "sender": "Maya Chen <maya@northstar-ventures.example.com>",
+      "subject": "Interested in what you're building",
+      "labels": ["INBOX", "CATEGORY_PERSONAL"],
+      "body": "Hi Alex,\n\nI'm a partner at Northstar Ventures. A friend shared your job-search app and I'd love to hear more about it.\nWould you have 20 minutes next week for a call?\n\nMaya"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": ["CAREER_CONTACT"],
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "career-contact"
+  },
+  {
+    "id": "career-talk-invite",
+    "input": {
+      "sender": "Sam Ortiz <sam@frontendconf.example.org>",
+      "subject": "Speaking at FrontendConf 2027?",
+      "labels": ["INBOX", "CATEGORY_PERSONAL"],
+      "body": "Hi Alex,\n\nI organise FrontendConf. We enjoyed your blog post on mail parsing and would like to invite you to give a 25-minute talk in March.\nLet me know if you're interested and I'll send details.\n\nThanks,\nSam Ortiz"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": ["CAREER_CONTACT"],
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "career-contact"
+  },
+  {
+    "id": "career-freelance-client",
+    "input": {
+      "sender": "Lena Park <lena@tailspin-toys.example.com>",
+      "subject": "Paid project: React dashboard",
+      "labels": ["INBOX", "CATEGORY_PERSONAL"],
+      "body": "Hi Alex,\n\nI saw your portfolio. We need help building a React dashboard for our sales team, about four weeks of work, paid.\nAre you taking freelance projects right now?\n\nLena Park\nTailspin Toys"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": ["CAREER_CONTACT"],
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "career-contact"
+  },
+  {
+    "id": "career-recruiter-stays-recruiter",
+    "input": {
+      "sender": "Daniel Okafor <daniel@adatum.example.com>",
+      "subject": "Senior Frontend Engineer at Adatum",
+      "labels": ["INBOX", "CATEGORY_PERSONAL"],
+      "body": "Hi Alex,\n\nI'm a recruiter at Adatum. We are hiring a Senior Frontend Engineer and your background looks like a strong fit.\nWould you be open to a quick call on Thursday?\n\nDaniel Okafor\nTalent Acquisition, Adatum"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": ["RECRUITER"],
+      "fields": {
+        "companyName": {
+          "contains": ["adatum"]
+        }
+      },
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "career-contact"
+  },
+  {
+    "id": "career-sales-newsletter",
+    "input": {
+      "sender": "GrowthHub <hello@growthhub.example.net>",
+      "subject": "10x your startup's leads this quarter",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Hi there,\n\nGrowthHub helps founders get more leads with done-for-you outreach. Book a demo this week and get 30% off your first month.\n\nUnsubscribe"
+    },
+    "expect": {
+      "relevance": "IRRELEVANT",
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "career-contact"
+  },
+  {
+    "id": "career-cold-sales-personal",
+    "input": {
+      "sender": "Tom Reyes <tom@brightseo.example.net>",
+      "subject": "Quick question about your website",
+      "labels": ["INBOX", "CATEGORY_PERSONAL"],
+      "body": "Hi Alex,\n\nI looked at your product site and found a few SEO issues. My agency can fix them for a monthly fee. Want me to send a short audit?\n\nTom"
+    },
+    "expect": {
+      "relevance": "ANY",
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "career-contact"
+  }
+]
