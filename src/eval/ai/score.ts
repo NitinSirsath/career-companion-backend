@@ -14,6 +14,7 @@ const Category = z.enum([
   'FOLLOW_UP',
   'NEWSLETTER',
   'SPAM',
+  'CAREER_CONTACT',
 ]);
 const ExtractionField = z.enum([
   'companyName',
