@@ -258,7 +258,14 @@ async function mailbox(tx: Tx, userId: string, w: Window, jobMailsInPeriod: numb
       _sum: { count: true },
     }),
     tx.email.count({ where: job }),
-    tx.email.count({ where: { ...job, matchState: { in: ['UNMATCHED', 'AMBIGUOUS'] } } }),
+    // A career contact never gets an application, so it is not waiting for one.
+    tx.email.count({
+      where: {
+        ...job,
+        matchState: { in: ['UNMATCHED', 'AMBIGUOUS'] },
+        NOT: { aiProcessingResult: { category: 'CAREER_CONTACT' } },
+      },
+    }),
     tx.email.count({ where: { ...job, aiProcessingResult: { fakeOfferWarning: { not: null } } } }),
   ]);
   return {
