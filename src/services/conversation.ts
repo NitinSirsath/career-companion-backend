@@ -27,6 +27,7 @@ import {
   type ConversationRow,
 } from './conversationQuery';
 import { localDay } from './dashboardMetrics';
+import { sameCompany } from './matcher';
 import { canReplyTo, FAKE_OFFER_NEXT_STEP, requestOf } from './emailRequest';
 import { CLOSES_BY_ITSELF, mayCloseByHand, OPEN_AGAIN } from './threadAsks';
 import { declineView, newestMail } from './declineQuestion';
@@ -219,12 +220,34 @@ async function describe(db: Db, userId: string, rows: ConversationRow[]): Promis
       })
     : [];
   const applicationById = new Map(applications.map((app) => [app.id, app]));
+  const offers = await linkOffers(db, userId, rows);
   return rows.flatMap((row) => {
     const thread = byKey.get(row.key);
     if (!thread) return []; // deleted between the two reads
     const application = row.applicationId ? applicationById.get(row.applicationId) : undefined;
-    return [toConversation(row, thread, application ?? null)];
+    const conversation = toConversation(row, thread, application ?? null);
+    return [{ ...conversation, sameCompanyApplications: offers(conversation) }];
   });
+}
+
+/**
+ * The user's active applications at an unlinked conversation's company: the matcher found none
+ * with the same job title, so the Mails page offers them before "Create application". Loaded only
+ * when a row has no application.
+ */
+async function linkOffers(db: Db, userId: string, rows: ConversationRow[]) {
+  const active = rows.some((row) => !row.applicationId)
+    ? await db.application.findMany({
+        where: { userId, archivedAt: null },
+        select: { id: true, companyName: true, jobTitle: true },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      })
+    : [];
+  return (conversation: Omit<Conversation, 'sameCompanyApplications'>) => {
+    const { company, category, link } = conversation;
+    if (link !== 'UNLINKED' || !company || category === 'CAREER_CONTACT') return [];
+    return active.filter((app) => sameCompany(app.companyName, company));
+  };
 }
 
 /** `thread` holds the conversation's job emails, newest first. */
@@ -232,7 +255,7 @@ function toConversation(
   row: ConversationRow,
   thread: Mail[],
   application: ApplicationSummary | null,
-): Conversation {
+): Omit<Conversation, 'sameCompanyApplications'> {
   const latest = thread.find((mail) => mail.id === row.latestEmailId) ?? thread[0];
   const results = thread.flatMap((mail) =>
     mail.aiProcessingResult ? [mail.aiProcessingResult] : [],

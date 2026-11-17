@@ -30,6 +30,9 @@ export async function linkConversation(
       orderBy: [{ receivedAt: 'asc' }, { id: 'asc' }],
     });
     if (!thread.length) throw new AppError(404, 'NOT_FOUND', 'Conversation not found.');
+    // A career contact is about the user's work, not a job (owner, 17 Nov 2026).
+    if (isCareerContact(thread))
+      throw new AppError(409, 'CAREER_CONTACT', 'A career contact has no application.');
     if (thread.some((mail) => mail.matchState === 'MATCHED' && mail.applicationId))
       throw new AppError(409, 'CONVERSATION_LINKED', CHANGE_REJECTED);
     const waiting = thread.flatMap((mail) =>
@@ -65,6 +68,11 @@ export async function linkConversation(
 }
 
 type ThreadMail = Prisma.EmailGetPayload<{ include: { aiProcessingResult: true } }>;
+
+/** The conversation's type is its newest typed mail's, as the Mails page shows it. */
+const isCareerContact = (thread: ThreadMail[]) =>
+  [...thread].reverse().find((mail) => mail.aiProcessingResult?.category)?.aiProcessingResult
+    ?.category === 'CAREER_CONTACT';
 
 /** The application the user picked: theirs, and still active. */
 async function chosenApplication(tx: Prisma.TransactionClient, userId: string, id: string) {
