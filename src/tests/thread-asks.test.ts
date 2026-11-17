@@ -61,7 +61,7 @@ async function readMail(emailId: string, answer: Read) {
   const provider = fakeProviderClient({ classification: relevant, extraction: read(answer) });
   vi.mocked(createProviderClient).mockReturnValue(provider);
   await processEmail(owner, emailId);
-  const [call] = provider.calls('job_extraction_v6');
+  const [call] = provider.calls('job_extraction_v8');
   return call ? JSON.parse(call[0].input) : null;
 }
 
