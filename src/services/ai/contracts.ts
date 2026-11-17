@@ -10,7 +10,7 @@ export { NO_THREAD, ThreadReadSchema, type ThreadInput, type ThreadRead } from '
 export const AI_CONTRACT_VERSIONS = {
   CLASSIFICATION: 'classification/v4',
   RELEVANCE_BATCH: 'relevance-batch/v3',
-  EXTRACTION: 'extraction/v6',
+  EXTRACTION: 'extraction/v8',
 } as const;
 
 /**
@@ -52,29 +52,44 @@ export const EXTRACTION_VERSIONS: readonly string[] = [
   'extraction/v3',
   'extraction/v4',
   'extraction/v5',
-  AI_CONTRACT_VERSIONS.EXTRACTION,
+  'extraction/v6',
   'extraction/v7',
+  AI_CONTRACT_VERSIONS.EXTRACTION,
+  'extraction/v9',
 ];
 /** Extraction versions that also read interview and assessment times. */
 export const SCHEDULE_EXTRACTION_VERSIONS: readonly string[] = [
   'extraction/v3',
   'extraction/v5',
   'extraction/v7',
+  'extraction/v9',
 ];
 /** Extraction versions that warn about a job offer asking for money. */
 export const FAKE_OFFER_EXTRACTION_VERSIONS: readonly string[] = [
   'extraction/v4',
   'extraction/v5',
-  AI_CONTRACT_VERSIONS.EXTRACTION,
+  'extraction/v6',
   'extraction/v7',
+  AI_CONTRACT_VERSIONS.EXTRACTION,
+  'extraction/v9',
 ];
 /**
  * Extraction versions that read the mail with the conversation's open asks: they say how the user
  * does the request, which older asks the mail closes, and short replies the user could send.
  */
 export const THREAD_EXTRACTION_VERSIONS: readonly string[] = [
-  AI_CONTRACT_VERSIONS.EXTRACTION,
+  'extraction/v6',
   'extraction/v7',
+  AI_CONTRACT_VERSIONS.EXTRACTION,
+  'extraction/v9',
+];
+/**
+ * Extraction versions told when the mail was too long and only its beginning is read (owner,
+ * 17 Nov 2026): v6 and v7 with `bodyCut`. The newest two, used for new mail.
+ */
+export const CUT_FLAG_EXTRACTION_VERSIONS: readonly string[] = [
+  AI_CONTRACT_VERSIONS.EXTRACTION,
+  'extraction/v9',
 ];
 
 export const EmailRelevanceSchema = z.object({
@@ -243,7 +258,13 @@ export interface RelevanceClassifier {
 export interface EmailAnalyzer {
   extractJobData(
     emailBody: string,
-    options?: { version: string; receivedAt: string | null; thread?: ThreadInput },
+    options?: {
+      version: string;
+      receivedAt: string | null;
+      thread?: ThreadInput;
+      /** The cut-flag versions: true when the body holds only the mail's beginning. */
+      bodyCut?: boolean;
+    },
   ): Promise<
     AIResult<
       JobExtractionResult & {
@@ -530,11 +551,11 @@ export const EXTRACTION_V5_CONTRACT: AIContract<z.infer<typeof JobExtractionV5Sc
   instructions: `${EXTRACTION_V3_CONTRACT.instructions}\n${FAKE_OFFER_EXTRACTION_RULES}`,
 };
 
-/** extraction/v4 read with the conversation's open asks. The default for new mail. */
+/** extraction/v4 read with the conversation's open asks. Frozen since extraction/v8. */
 export const JobExtractionV6Schema = JobExtractionV4Schema.extend(threadFields);
 export const EXTRACTION_V6_CONTRACT: AIContract<z.infer<typeof JobExtractionV6Schema>> = {
   ...EXTRACTION_V4_CONTRACT,
-  version: AI_CONTRACT_VERSIONS.EXTRACTION,
+  version: 'extraction/v6',
   schemaName: 'job_extraction_v6',
   schema: JobExtractionV6Schema,
   maxOutputTokens: 4096,
@@ -554,17 +575,3 @@ export const EXTRACTION_V7_CONTRACT: AIContract<z.infer<typeof JobExtractionV7Sc
 The input JSON also contains senderCanReply and openAsks.
 ${THREAD_RULES}`,
 };
-
-/** The extraction contract for a stored version. Unknown versions are never guessed. */
-export function extractionContractFor(version: string): AIContract<JobExtractionResult> {
-  const contract = [
-    EXTRACTION_CONTRACT,
-    EXTRACTION_V3_CONTRACT,
-    EXTRACTION_V4_CONTRACT,
-    EXTRACTION_V5_CONTRACT,
-    EXTRACTION_V6_CONTRACT,
-    EXTRACTION_V7_CONTRACT,
-  ].find((candidate) => candidate.version === version);
-  if (!contract) throw new TerminalAIError('Unknown extraction version');
-  return contract;
-}
