@@ -34,7 +34,7 @@ async function jobMail(
   return prisma.email.create({
     data: {
       userId: owner,
-      gmailMessageId: \`mail-sorting-\${++counter}\`,
+      gmailMessageId: `mail-sorting-${++counter}`,
       threadId,
       subject: 'A job mail',
       sender: 'Someone <someone@example.com>',
@@ -61,12 +61,12 @@ const application = (companyName: string, jobTitle: string | null) =>
   prisma.application.create({ data: { userId: owner, companyName, jobTitle } });
 const emailRow = (id: string) => prisma.email.findUniqueOrThrow({ where: { id } });
 const detail = async (key: string) => {
-  const res = await request(server).get(\`/api/conversations/\${key}\`).set(as);
+  const res = await request(server).get(`/api/conversations/${key}`).set(as);
   expect(res.status).toBe(200);
   return ConversationDetailSchema.parse(res.body).conversation;
 };
 const link = (key: string, body: object = {}) =>
-  request(server).post(\`/api/conversations/\${key}/application\`).set(as).send(body);
+  request(server).post(`/api/conversations/${key}/application`).set(as).send(body);
 
 beforeAll(async () => {
   await prisma.user.deleteMany({ where: { email: OWNER } });
@@ -206,7 +206,7 @@ describe('career contact (owner, 17 Nov 2026)', () => {
     await prisma.email.create({
       data: {
         userId: owner,
-        gmailMessageId: \`mail-sorting-\${++counter}\`,
+        gmailMessageId: `mail-sorting-${++counter}`,
         threadId: 'joeri',
         matchState: 'MATCHED',
         applicationId: agensi.id,
