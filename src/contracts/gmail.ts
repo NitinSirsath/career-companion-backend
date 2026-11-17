@@ -38,6 +38,28 @@ export const GmailStatusResponseSchema = z.object({
 });
 export type GmailStatusResponse = z.infer<typeof GmailStatusResponseSchema>;
 
+// ─── GET /api/gmail/summary ─────────────────────────────────────────────────
+
+/**
+ * What the app has read in the last `days` days, today included, by the day each mail arrived
+ * (owner, 17 Nov 2026). `failed` counts mails of any date that the AI could not read.
+ */
+export const GmailSummaryResponseSchema = z.object({
+  days: z.number().int().positive(),
+  /** Midnight UTC of the first day counted. */
+  since: IsoDateTime,
+  /** New inbox mails the sync took in. */
+  checked: z.number().int().nonnegative(),
+  jobMails: z.number().int().nonnegative(),
+  notJobMails: z.number().int().nonnegative(),
+  /** Not read by the AI yet, and not stopped. */
+  waiting: z.number().int().nonnegative(),
+  /** Job mails kept with a fake-offer warning. */
+  fakeOffers: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+});
+export type GmailSummaryResponse = z.infer<typeof GmailSummaryResponseSchema>;
+
 // ─── POST /api/gmail/disconnect ─────────────────────────────────────────────
 
 export const GmailDisconnectResponseSchema = z.object({
