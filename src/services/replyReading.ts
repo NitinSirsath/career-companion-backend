@@ -1,17 +1,30 @@
 /**
  * The AI reads the user's own replies (owner, 17 and 24 Oct 2026). A sent message is read once,
  * and only when its conversation had an open ask when it was sent: the AI gets those asks and the
- * user's new text, without the quoted earlier mail, and says which asks the reply settles. Those
- * close as YOUR_REPLY. The text is read from Gmail for the call and dropped: never stored, never
- * logged. When the AI cannot read it, the conversation keeps today's "Replied" from the send time.
+ * user's new text, without the quoted earlier mail, and says what the reply does with each ask.
+ * reply-read/v2 (owner, 17 Nov 2026): an answered ask closes as YOUR_REPLY, a declined one as
+ * YOU_DECLINED; a question back keeps the reply "Replied" until their next mail; a reply that says
+ * the user no longer wants the job asks to close the application. The text is read from Gmail for
+ * the call and dropped: never stored, never logged. When the AI cannot read it, the conversation
+ * keeps today's "Replied" from the send time.
  */
+import type { RequestClosedReason } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { logEvent, logWarn } from '../utils/log';
 import { AIAccessError } from './ai/errors';
-import { REPLY_READ_CONTRACT, REPLY_TEXT_LIMIT } from './ai/replyRead';
+import {
+  REPLY_READ_V2_CONTRACT,
+  REPLY_TEXT_LIMIT,
+  replyOutcomes,
+  replyReadContractFor,
+  type ReplyOutcome,
+  type ReplyReadV2,
+} from './ai/replyRead';
 import { runUserCall } from './ai/userCall';
+import { noteDecline } from './applicationDecline';
 import { enqueueReplyReading } from './enqueue';
 import { fetchMessageBody } from './gmailFetcher';
+import { splitQuoted } from './mailText';
 import { closeNamedAsks, openAsksBefore } from './threadAsks';
 
 /** Tries before a reply is left unread: the same cap as a mail's AI step. */
@@ -19,13 +32,11 @@ export const REPLY_READ_TRIES = 3;
 /** When a failed read with no known end of a pause is tried again. */
 const RETRY_AFTER_MS = 60_000;
 
-/** The first line of the quoted earlier mail, as Gmail and other mail apps write it. */
-const QUOTE_START = [
-  /^On .+ wrote:\s*$/,
-  /^-{2,}\s*Original Message\s*-{2,}/i,
-  /^From: .+/,
-  /^_{5,}\s*$/,
-];
+/** How an ask the reply settled closes. */
+const CLOSES_AS: Partial<Record<ReplyOutcome, RequestClosedReason>> = {
+  ANSWERED: 'YOUR_REPLY',
+  DECLINED: 'YOU_DECLINED',
+};
 
 /** The conversation a sent message belongs to. */
 const conversationOf = (sent: { userId: string; threadId: string }) => ({
@@ -34,15 +45,7 @@ const conversationOf = (sent: { userId: string; threadId: string }) => ({
 });
 
 /** The user's own new text: everything above the quoted earlier mail, without quoted lines. */
-export function ownText(body: string): string {
-  const lines = body.replace(/\r\n/g, '\n').split('\n');
-  const end = lines.findIndex((line) => QUOTE_START.some((start) => start.test(line.trim())));
-  return (end === -1 ? lines : lines.slice(0, end))
-    .filter((line) => !line.trimStart().startsWith('>'))
-    .join('\n')
-    .trim()
-    .slice(0, REPLY_TEXT_LIMIT);
-}
+export const ownText = (body: string) => splitQuoted(body).own.slice(0, REPLY_TEXT_LIMIT);
 
 /**
  * A sent message was just recorded: when its conversation has an open ask from before it, mark
@@ -56,9 +59,10 @@ export async function noteSentForReading(userId: string, outgoingEmailId: string
     if (!sent) return;
     const open = await openAsksBefore(prisma, conversationOf(sent), sent.sentAt);
     if (!open.length) return;
+    // New replies only: the version is fixed now, and a reply never moves to a newer one.
     await prisma.outgoingEmail.update({
       where: { id: sent.id },
-      data: { replyReadState: 'WAITING' },
+      data: { replyReadState: 'WAITING', replyReadVersion: REPLY_READ_V2_CONTRACT.version },
     });
     await enqueueReplyReading(userId, sent.id);
   } catch (err) {
@@ -85,36 +89,57 @@ export async function readSentReply(userId: string, outgoingEmailId: string): Pr
     return null;
   }
   try {
+    const version = sent.replyReadVersion ?? replyReadContractFor(null).version;
     const reply = ownText(await fetchMessageBody(userId, sent.gmailMessageId));
-    const answered = reply
-      ? (
-          await runUserCall({
-            userId,
-            purpose: 'reply-read',
-            contract: REPLY_READ_CONTRACT,
-            call: (ai) =>
-              ai.replies.read({
-                openAsks: open.map(({ id, ask, kind, askedAt }) => ({ id, ask, kind, askedAt })),
-                reply,
-              }),
-          })
-        ).data.answeredAsks
-      : [];
+    const read = reply ? await readReply(userId, version, open, reply) : NOTHING_READ;
+    const outcomeOf = new Map(read.asks.map((entry) => [entry.id, entry.outcome]));
+    const closes = open.flatMap(({ id }) => {
+      const outcome = outcomeOf.get(id);
+      const reason = outcome && CLOSES_AS[outcome];
+      return reason ? [{ id, reason }] : [];
+    });
     const closed = await closeNamedAsks(
       userId,
       { ...conversationOf(sent), before: sent.sentAt },
-      answered.map((id) => ({ id, reason: 'YOUR_REPLY' as const })),
+      closes,
       sent.gmailMessageId,
     );
+    // A question back about an ask that stays open: the reply waits for their answer.
+    const askedBack = open.some(({ id }) => outcomeOf.get(id) === 'ASKED_BACK');
     await prisma.outgoingEmail.update({
       where: { id: sent.id },
-      data: { replyReadState: 'READ', replyReadAt: new Date() },
+      data: { replyReadState: askedBack ? 'ASKED_BACK' : 'READ', replyReadAt: new Date() },
     });
-    logEvent('reply_read', { userId, closed });
+    const declined = read.leavesJob && (await noteDecline(userId, sent.threadId, sent.sentAt));
+    logEvent('reply_read', { userId, version, closed, askedBack, declined });
     return null;
   } catch (err) {
     return tryLater(sent.id, sent.replyReadTries, err);
   }
+}
+
+/** An empty reply (only quoted mail) settles nothing. */
+const NOTHING_READ: ReplyReadV2 = { asks: [], leavesJob: false };
+
+/** One AI read of the reply with the version it was queued for, as v2 reads it. */
+async function readReply(
+  userId: string,
+  version: string,
+  open: Awaited<ReturnType<typeof openAsksBefore>>,
+  reply: string,
+): Promise<ReplyReadV2> {
+  const contract = replyReadContractFor(version);
+  const { data } = await runUserCall({
+    userId,
+    purpose: 'reply-read',
+    contract,
+    call: (ai) =>
+      ai.replies.read(
+        { openAsks: open.map(({ id, ask, kind, askedAt }) => ({ id, ask, kind, askedAt })), reply },
+        contract.version,
+      ),
+  });
+  return replyOutcomes(contract.version, data);
 }
 
 /** A failed read: try again later, or leave the reply unread ("Replied", as before). */
