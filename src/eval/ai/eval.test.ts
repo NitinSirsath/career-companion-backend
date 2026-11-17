@@ -42,6 +42,8 @@ describe('synthetic evaluation dataset', () => {
       'job-alerts': 3,
       irrelevant: 7,
       adversarial: 4,
+      platform: 10,
+      'career-contact': 5,
     }))
       expect(groups[group]?.length ?? 0, group).toBeGreaterThanOrEqual(minimum);
   });
