@@ -22,7 +22,12 @@ export interface ConversationRow {
   sentCount: number;
   lastSentAt: Date | null;
   /** Whether the AI read the user's newest message: WAITING, READ, NOT_READ, or null (not read). */
-  lastReadState: 'WAITING' | 'READ' | 'NOT_READ' | null;
+  lastReadState: 'WAITING' | 'READ' | 'NOT_READ' | 'ASKED_BACK' | null;
+  /**
+   * The newest mail received in the thread, a job mail or not: after a question back, their
+   * answer may be one the AI sorted out of Job mails (owner, 17 Nov 2026).
+   */
+  lastMailAt: Date | null;
   isNew: boolean;
 }
 
@@ -73,7 +78,8 @@ function filterConditions(filters: ConversationFilters, pattern: string | null):
  * is finished, when something closed it (a newer mail, the user's reply, "I did this" or the
  * application closing), or, while it has no action, when the user marked it done; REPLIED when
  * the user sent a message after it, unless they reopened it later or the AI read that message
- * and it did not settle the request; otherwise OPEN.
+ * and it did not settle the request (a message that asked them a question stays REPLIED until
+ * their next mail); otherwise OPEN.
  */
 function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql): Prisma.Sql {
   return Prisma.sql`
@@ -126,7 +132,7 @@ function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql):
     conversations AS (
       SELECT l.key, l."latestEmailId", l."lastReceivedAt", t.category, q."requestEmailId",
              k."applicationId", t."mailCount", t."isNew", t.hit, s."lastSentAt",
-             s."lastReadState", COALESCE(s."sentCount", 0) AS "sentCount",
+             s."lastReadState", COALESCE(s."sentCount", 0) AS "sentCount", w."lastMailAt",
              CASE
                WHEN q."requestEmailId" IS NULL THEN 'NONE'
                WHEN a.status IN ('COMPLETED', 'DISMISSED') THEN 'DONE'
@@ -134,7 +140,11 @@ function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql):
                WHEN a.status IS NULL AND q."requestUserState" = 'DONE' THEN 'DONE'
                WHEN s."lastSentAt" > q."requestAt" AND NOT COALESCE(
                  q."requestUserState" = 'OPEN' AND q."requestUserStateAt" > s."lastSentAt", FALSE
-               ) AND s."lastReadState" IS DISTINCT FROM 'READ' THEN 'REPLIED'
+               ) AND (
+                 s."lastReadState" IS NULL OR s."lastReadState" IN ('WAITING', 'NOT_READ')
+                 OR (s."lastReadState" = 'ASKED_BACK'
+                   AND NOT COALESCE(w."lastMailAt" > s."lastSentAt", FALSE))
+               ) THEN 'REPLIED'
                ELSE 'OPEN'
              END AS "requestState"
       FROM latest l
@@ -142,6 +152,10 @@ function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql):
       LEFT JOIN request q ON q.key = l.key
       LEFT JOIN linked k ON k.key = l.key
       LEFT JOIN sent s ON s.key = l.key
+      LEFT JOIN LATERAL (
+        SELECT MAX(x."receivedAt") AS "lastMailAt" FROM emails x
+        WHERE x."userId" = ${userId}::uuid AND x."threadId" = l.key
+      ) w ON TRUE
       LEFT JOIN LATERAL (
         SELECT status FROM actions
         WHERE "emailId" = q."requestEmailId" AND "retiredAt" IS NULL
@@ -156,7 +170,8 @@ function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql):
  * thread after the request arrived and before the conversation's next request did. For the newest
  * request that is the mail list's rule; an earlier one keeps the reply it got. A request the user
  * reopened after that reply has none, and so does one whose reply the AI read without it settling
- * the request: it still needs action.
+ * the request: it still needs action. A reply that asked them a question counts until their next
+ * mail arrives.
  */
 export async function repliedRequests(
   db: Db,
@@ -185,11 +200,22 @@ export async function repliedRequests(
       AND o."sentAt" > q."receivedAt"
       AND (q."nextRequestAt" IS NULL OR o."sentAt" < q."nextRequestAt")
     WHERE q.id = ANY(${emails.map((email) => email.id)}::uuid[])
-    GROUP BY q.id, q."requestUserState", q."requestUserStateAt"
+    GROUP BY q.id, q."threadId", q."requestUserState", q."requestUserStateAt"
     HAVING NOT COALESCE(
       q."requestUserState" = 'OPEN' AND q."requestUserStateAt" > MAX(o."sentAt"), FALSE
-    ) AND (ARRAY_AGG(o."replyReadState"::text ORDER BY o."sentAt" DESC, o.id DESC))[1]
-      IS DISTINCT FROM 'READ'`;
+    ) AND (
+      COALESCE(
+        (ARRAY_AGG(o."replyReadState"::text ORDER BY o."sentAt" DESC, o.id DESC))[1], 'NONE'
+      ) IN ('NONE', 'WAITING', 'NOT_READ')
+      OR (
+        (ARRAY_AGG(o."replyReadState"::text ORDER BY o."sentAt" DESC, o.id DESC))[1] = 'ASKED_BACK'
+        AND NOT EXISTS (
+          SELECT 1 FROM emails x
+          WHERE x."userId" = ${userId}::uuid AND x."threadId" = q."threadId"
+            AND x."receivedAt" > MAX(o."sentAt")
+        )
+      )
+    )`;
   return new Map(rows.map((row) => [row.id, row.repliedAt]));
 }
 
@@ -219,7 +245,7 @@ export async function conversationRows(
     ${conversationsCte(userId, hit, onlyKey)}
     SELECT c.key, c."latestEmailId", c."lastReceivedAt", c.category, c."requestEmailId",
            c."requestState", c."applicationId", c."mailCount", c."sentCount", c."lastSentAt",
-           c."lastReadState", c."isNew"
+           c."lastReadState", c."lastMailAt", c."isNew"
     FROM conversations c
     LEFT JOIN applications app ON app.id = c."applicationId"
     ${where}
