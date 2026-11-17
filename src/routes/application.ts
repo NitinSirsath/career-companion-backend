@@ -1,6 +1,7 @@
 import { archiveApplication } from '../services/archive';
 import { deleteApplication } from '../services/removal';
-import { ArchiveApplicationSchema } from '../contracts';
+import { ArchiveApplicationSchema, DeclineAnswerRequestSchema } from '../contracts';
+import { answerDecline } from '../services/applicationDecline';
 import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
 import {
@@ -161,6 +162,25 @@ router.patch('/:id/status', async (req: Request, res: Response, next: NextFuncti
       revision: application.userStatusRevision,
     });
     return res.status(200).json(application);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/applications/:id/decline
+ * The answer to "Close the application?" after the user declined by mail: CLOSE or KEEP_OPEN.
+ * 200 full canonical application · 404 NOT_FOUND · 409 NO_DECLINE_QUESTION (nothing asks now).
+ */
+router.post('/:id/decline', async (req, res, next) => {
+  try {
+    res.json(
+      await answerDecline(
+        req.auth!.user.id,
+        z.uuid().parse(req.params.id),
+        DeclineAnswerRequestSchema.parse(req.body),
+      ),
+    );
   } catch (err) {
     next(err);
   }
