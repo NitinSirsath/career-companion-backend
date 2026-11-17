@@ -61,6 +61,14 @@ enum ApplicationStatus {
   CLOSED
 }
 
+/// What became of "Close the application?" after the user declined by mail.
+enum DeclineAnswer {
+  /// Closed: the user chose Close it, or three days passed.
+  CLOSED
+  /// The user chose Keep open.
+  KEPT_OPEN
+}
+
 model Application {
   archivedAt         DateTime?
   archiveRevision    Int                @default(0)
@@ -74,6 +82,13 @@ model Application {
   userStatusSetAt    DateTime?
   /// Manual-correction revision (S6-01). Changed only by user status set/clear; never by AI.
   userStatusRevision Int                @default(0)
+  /// When the user sent the reply that said they no longer want this job (owner, 17 Nov 2026).
+  /// The app then asks whether to close the application, and closes it by itself three days
+  /// later unless the user answered or the company wrote again.
+  declinedAt         DateTime?
+  /// The user's answer to that question, or CLOSED when it closed by itself. Null: not answered.
+  declineAnswer      DeclineAnswer?
+  declineAnsweredAt  DateTime?
   appliedAt          DateTime?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
@@ -135,6 +150,8 @@ enum RequestClosedReason {
   YOU_SAID_DONE
   /// The user set the application to Rejected or Closed.
   APPLICATION_CLOSED
+  /// The user's own reply said no to it (owner, 17 Nov 2026).
+  YOU_DECLINED
 }
 
 model Email {
@@ -190,24 +207,30 @@ model Email {
 enum ReplyReadState {
   /// The conversation had an open ask when it was sent: the AI reads it.
   WAITING
-  /// Read. What it settled is closed (YOUR_REPLY).
+  /// Read. What it settled is closed (YOUR_REPLY, or YOU_DECLINED).
   READ
+  /// Read, and the reply asked the other side a question about an ask that stays open: the ask
+  /// waits for their answer, shown as Replied until their next mail (owner, 17 Nov 2026).
+  ASKED_BACK
   /// The AI could not read it (not set up, a key problem, or no answer after three tries).
   NOT_READ
 }
 
 model OutgoingEmail {
-  id             String          @id @default(uuid()) @db.Uuid
-  userId         String          @db.Uuid
-  gmailMessageId String
-  threadId       String
-  sentAt         DateTime
-  createdAt      DateTime        @default(now())
+  id               String          @id @default(uuid()) @db.Uuid
+  userId           String          @db.Uuid
+  gmailMessageId   String
+  threadId         String
+  sentAt           DateTime
+  createdAt        DateTime        @default(now())
   /// Null: nothing was open in the conversation when it was sent, so it is not read. The text
   /// itself is never stored.
-  replyReadState ReplyReadState?
-  replyReadTries Int             @default(0)
-  replyReadAt    DateTime?
+  replyReadState   ReplyReadState?
+  replyReadTries   Int             @default(0)
+  replyReadAt      DateTime?
+  /// The reply-read version that reads it, fixed when it is queued: a reply queued before a new
+  /// version finishes on its own. Null: queued before versions were kept (reply-read/v1).
+  replyReadVersion String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
