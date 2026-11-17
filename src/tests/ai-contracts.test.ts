@@ -7,6 +7,7 @@ import {
   AIContract,
   CLASSIFICATION_CONTRACT,
   CLASSIFICATION_V3_CONTRACT,
+  CLASSIFICATION_V4_CONTRACT,
   EXTRACTION_CONTRACT,
   EXTRACTION_V3_CONTRACT,
   EXTRACTION_V4_CONTRACT,
@@ -19,6 +20,7 @@ import {
   LEGACY_RELEVANCE_BATCH_CONTRACT,
   RELEVANCE_BATCH_CONTRACT,
   RELEVANCE_BATCH_V2_CONTRACT,
+  RELEVANCE_BATCH_V3_CONTRACT,
   classificationContractFor,
   relevanceBatchContractFor,
 } from '../services/ai/contracts';
@@ -224,9 +226,11 @@ const FINGERPRINTS: Record<string, string> = {
   'classification/v2': '8a9118222ad635794c226677775f917c897a8a220872b73c15c05e0bab6a3239',
   'classification/v3': '547cbad83e73e6535ef1313d840b684f22ec2dc314137067479025aad5668c2a',
   'classification/v4': '7c6bf16b4feecdd41329b4647cae87cce57267b8adeb843d1e724e6ec40239fb',
+  'classification/v5': 'ee9bbd0e9bd64133ceaa208498124ed1eed59a034463f193e14595434e4927db',
   'relevance-batch/v1': 'ce9d4cbecbba3ff9d6b35755deb50ab1563e5776bbbed7d85550dd36364e25e2',
   'relevance-batch/v2': 'afc1aa14379866a752596ab41b5298ce475abfdaddd986f3d51310e3ab5ff41a',
   'relevance-batch/v3': '9f6f34da7400bed1bfa103ad7fa086ad84b30cff9d9d8ab6000feea3f190ec4a',
+  'relevance-batch/v4': '43a3044358346c31ae15c9a694e980a7e8e82507c5afbba2f08fd466e3dfe6e4',
   'extraction/v2': '2919427b2419d8601aba25567f970f3b708072e3609fbf356e32c199ed02d7b5',
   'extraction/v3': '4b56e0d5642f6c0d0d56f1a41270d3ef79fb70489e2f1ed943a6e83599cf132f',
   'extraction/v4': '91f0d8230dc2a5eba1e9982db78fe2334e3065c645bc9151d2ee451aaac2c8f0',
@@ -259,16 +263,18 @@ describe('provider-neutral AI contracts', () => {
   it('derives the Gemini schema equal to the former hand-written copy', () => {
     // Zod's minimum/maximum on confidence scores are dropped from the Gemini dialect and still
     // enforced by Zod validation; nothing else differs.
-    expect(geminiSchema(CLASSIFICATION_CONTRACT.schema)).toEqual(nativeEmailRelevanceSchema);
+    expect(geminiSchema(CLASSIFICATION_V4_CONTRACT.schema)).toEqual(nativeEmailRelevanceSchema);
     expect(geminiSchema(EXTRACTION_CONTRACT.schema)).toEqual(nativeJobExtractionSchema);
   });
 
   it.each([
     LEGACY_CLASSIFICATION_CONTRACT,
     CLASSIFICATION_V3_CONTRACT,
+    CLASSIFICATION_V4_CONTRACT,
     CLASSIFICATION_CONTRACT,
     LEGACY_RELEVANCE_BATCH_CONTRACT,
     RELEVANCE_BATCH_V2_CONTRACT,
+    RELEVANCE_BATCH_V3_CONTRACT,
     RELEVANCE_BATCH_CONTRACT,
     EXTRACTION_CONTRACT,
     EXTRACTION_V3_CONTRACT,
@@ -295,6 +301,8 @@ describe('strict relevance contracts', () => {
   it.each([
     CLASSIFICATION_V3_CONTRACT,
     RELEVANCE_BATCH_V2_CONTRACT,
+    CLASSIFICATION_V4_CONTRACT,
+    RELEVANCE_BATCH_V3_CONTRACT,
     CLASSIFICATION_CONTRACT,
     RELEVANCE_BATCH_CONTRACT,
   ])(
@@ -315,10 +323,12 @@ describe('strict relevance contracts', () => {
   it('resolves stored versions and never guesses an unknown one', () => {
     expect(classificationContractFor('classification/v2')).toBe(LEGACY_CLASSIFICATION_CONTRACT);
     expect(classificationContractFor('classification/v3')).toBe(CLASSIFICATION_V3_CONTRACT);
-    expect(classificationContractFor('classification/v4')).toBe(CLASSIFICATION_CONTRACT);
+    expect(classificationContractFor('classification/v4')).toBe(CLASSIFICATION_V4_CONTRACT);
+    expect(classificationContractFor('classification/v5')).toBe(CLASSIFICATION_CONTRACT);
     expect(relevanceBatchContractFor('relevance-batch/v1')).toBe(LEGACY_RELEVANCE_BATCH_CONTRACT);
     expect(relevanceBatchContractFor('relevance-batch/v2')).toBe(RELEVANCE_BATCH_V2_CONTRACT);
-    expect(relevanceBatchContractFor('relevance-batch/v3')).toBe(RELEVANCE_BATCH_CONTRACT);
+    expect(relevanceBatchContractFor('relevance-batch/v3')).toBe(RELEVANCE_BATCH_V3_CONTRACT);
+    expect(relevanceBatchContractFor('relevance-batch/v4')).toBe(RELEVANCE_BATCH_CONTRACT);
     expect(extractionContractFor('extraction/v2')).toBe(EXTRACTION_CONTRACT);
     expect(extractionContractFor('extraction/v3')).toBe(EXTRACTION_V3_CONTRACT);
     expect(extractionContractFor('extraction/v4')).toBe(EXTRACTION_V4_CONTRACT);
@@ -336,23 +346,18 @@ describe('strict relevance contracts', () => {
 describe('job offers that ask for money', () => {
   const RULE = 'JOB OFFERS THAT ASK FOR MONEY:';
 
-  it('uses new versions for new mails', () => {
-    expect(AI_CONTRACT_VERSIONS).toEqual({
-      CLASSIFICATION: 'classification/v4',
-      RELEVANCE_BATCH: 'relevance-batch/v3',
-      EXTRACTION: 'extraction/v8',
-    });
-    expect(CLASSIFICATION_CONTRACT.version).toBe('classification/v4');
-    expect(RELEVANCE_BATCH_CONTRACT.version).toBe('relevance-batch/v3');
+  it('came with classification/v4 and relevance-batch/v3', () => {
+    expect(CLASSIFICATION_V4_CONTRACT.version).toBe('classification/v4');
+    expect(RELEVANCE_BATCH_V3_CONTRACT.version).toBe('relevance-batch/v3');
     expect(EXTRACTION_V4_CONTRACT.version).toBe('extraction/v4');
     expect(EXTRACTION_V5_CONTRACT.version).toBe('extraction/v5');
   });
 
-  it.each([CLASSIFICATION_CONTRACT, RELEVANCE_BATCH_CONTRACT])(
+  it.each([CLASSIFICATION_V4_CONTRACT, RELEVANCE_BATCH_V3_CONTRACT])(
     '$version keeps such an offer RELEVANT, after the strict rules and with the same schema',
     (contract) => {
       const frozen =
-        contract === CLASSIFICATION_CONTRACT
+        contract === CLASSIFICATION_V4_CONTRACT
           ? CLASSIFICATION_V3_CONTRACT
           : RELEVANCE_BATCH_V2_CONTRACT;
       expect(contract.instructions).toContain(RULE);
@@ -468,5 +473,47 @@ describe('reading the reply, v2 (owner, 17 Nov 2026)', () => {
     });
     const v2 = { asks: [{ id: 'ask-1', outcome: 'DECLINED' }], leavesJob: true };
     expect(replyOutcomes('reply-read/v2', v2)).toEqual(v2);
+  });
+});
+
+describe('career contact and job platform rules (owner, 17 Nov 2026)', () => {
+  const categories = (contract: AIContract<unknown>) =>
+    JSON.stringify(z.toJSONSchema(contract.schema)).includes('CAREER_CONTACT');
+
+  it('uses new relevance versions for new mails', () => {
+    expect(AI_CONTRACT_VERSIONS).toEqual({
+      CLASSIFICATION: 'classification/v5',
+      RELEVANCE_BATCH: 'relevance-batch/v4',
+      EXTRACTION: 'extraction/v8',
+    });
+  });
+
+  it.each([CLASSIFICATION_CONTRACT, RELEVANCE_BATCH_CONTRACT])(
+    '$version adds the rules after every earlier rule, and only it knows Career contact',
+    (contract) => {
+      const text = contract.instructions;
+      const fee = text.indexOf('JOB OFFERS THAT ASK FOR MONEY:');
+      expect(fee).toBeGreaterThan(text.indexOf('LINKEDIN RULES'));
+      expect(text.indexOf('CAREER CONTACT:')).toBeGreaterThan(fee);
+      expect(text.indexOf('JOB PLATFORM RULES')).toBeGreaterThan(text.indexOf('CAREER CONTACT:'));
+      expect(text).toContain('choose CAREER_CONTACT');
+      expect(text).toContain('is RECRUITER, never CAREER_CONTACT');
+      expect(text).toContain('to many users is IRRELEVANT');
+      expect(text).toContain('RELEVANT with category FOLLOW_UP');
+      expect(text).toContain('writes to the user personally through the platform is RELEVANT');
+      expect(categories(contract as AIContract<unknown>)).toBe(true);
+    },
+  );
+
+  it.each([
+    LEGACY_CLASSIFICATION_CONTRACT,
+    CLASSIFICATION_V3_CONTRACT,
+    CLASSIFICATION_V4_CONTRACT,
+    LEGACY_RELEVANCE_BATCH_CONTRACT,
+    RELEVANCE_BATCH_V2_CONTRACT,
+    RELEVANCE_BATCH_V3_CONTRACT,
+  ])('$version keeps its own list of mail types', (contract) => {
+    expect(categories(contract as AIContract<unknown>)).toBe(false);
+    expect(contract.instructions).not.toContain('CAREER');
   });
 });
