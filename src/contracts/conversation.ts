@@ -22,6 +22,7 @@ export const MailCategorySchema = z.enum([
   'FOLLOW_UP',
   'NEWSLETTER',
   'SPAM',
+  'CAREER_CONTACT',
 ]);
 export type MailCategory = z.infer<typeof MailCategorySchema>;
 
@@ -98,6 +99,13 @@ export const ConversationRequestSchema = z.object({
 export type ConversationRequest = z.infer<typeof ConversationRequestSchema>;
 
 /** How the conversation stands with applications. */
+/** One of the user's applications, as offered when linking a conversation. */
+export const ApplicationCandidateSchema = z.object({
+  id: z.uuid(),
+  companyName: z.string(),
+  jobTitle: z.string().nullable(),
+});
+
 export const ConversationLinkSchema = z.enum(['LINKED', 'UNLINKED', 'NEEDS_REVIEW', 'IGNORED']);
 export type ConversationLink = z.infer<typeof ConversationLinkSchema>;
 
@@ -141,6 +149,12 @@ export const ConversationSchema = z.object({
       closedAfterDeclineAt: IsoDateTime.nullable(),
     })
     .nullable(),
+  /**
+   * The user's active applications at the same company, offered as "Link to …" while the
+   * conversation is UNLINKED (owner, 17 Nov 2026): the AI read another title for the job. Empty
+   * for a linked conversation, a career contact, or when the company is unknown.
+   */
+  sameCompanyApplications: z.array(ApplicationCandidateSchema),
   analyzedBy: AnalyzedBySchema.nullable(),
 });
 export type Conversation = z.infer<typeof ConversationSchema>;
@@ -253,9 +267,7 @@ export type LinkConversationResponse = z.infer<typeof LinkConversationResponseSc
 
 /** Details of 409 APPLICATION_CHOICE_REQUIRED: the applications the conversation may belong to. */
 export const ApplicationChoiceDetailsSchema = z.object({
-  candidates: z.array(
-    z.object({ id: z.uuid(), companyName: z.string(), jobTitle: z.string().nullable() }),
-  ),
+  candidates: z.array(ApplicationCandidateSchema),
 });
 export type ApplicationChoiceDetails = z.infer<typeof ApplicationChoiceDetailsSchema>;
 
