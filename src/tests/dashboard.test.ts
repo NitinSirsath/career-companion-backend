@@ -252,6 +252,14 @@ it('mails scanned come from the daily counts, all time and in the period', async
   });
 });
 
+it('a career contact is a job mail, never an application, and not waiting for a link', async () => {
+  await jobMail(daysAgo(1), { category: 'CAREER_CONTACT', companyName: 'Agensi' });
+  await jobMail(daysAgo(1));
+  const { mailbox, totals } = (await get('?period=30d')).body;
+  expect(mailbox).toMatchObject({ jobMails: { total: 2, inPeriod: 2 }, notLinked: 1 });
+  expect(totals.current.applicationsSent).toBe(0);
+});
+
 it('"all" has no period before it', async () => {
   await prisma.application.create({
     data: { userId: owner, companyName: 'Acme', appliedAt: daysAgo(200) },
