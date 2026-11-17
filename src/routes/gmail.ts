@@ -4,6 +4,7 @@ import { SyncQueueError } from '../services/gmailSyncErrors';
  *
  * Endpoints:
  *   GET  /api/gmail/status       — connection status for authenticated user
+ *   GET  /api/gmail/summary      — what the app has read in the last 30 days
  *   GET  /api/gmail/connect      — initiate OAuth flow (redirect to Google); in dev mode,
  *                                  connect the sandbox mailbox at once. `?returnTo=` names
  *                                  the mail page or the Dashboard to come back to instead of
@@ -40,6 +41,7 @@ import {
   setSyncLookbackDays,
 } from '../services/gmailConnection';
 import { afterGmailConnected } from '../services/gmailFirstRun';
+import { readGmailSummary } from '../services/gmailSummary';
 import { startManualSync } from '../services/gmailSyncRequests';
 import { exchangeGmailCode, gmailConsentUrl, revokeGmailAccess } from '../services/googleOAuth';
 import { GmailAuthError, SyncInProgressError } from '../services/gmailSync';
@@ -76,6 +78,16 @@ router.use(requireAuth);
 router.get('/status', async (req: Request, res: Response, next: NextFunction) => {
   try {
     return res.status(200).json(await readGmailStatus(req.auth!.user.id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── GET /api/gmail/summary ──────────────────────────────────────────────────
+
+router.get('/summary', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    return res.status(200).json(await readGmailSummary(req.auth!.user.id));
   } catch (err) {
     next(err);
   }
