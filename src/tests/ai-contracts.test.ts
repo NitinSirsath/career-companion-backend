@@ -20,11 +20,21 @@ import {
   RELEVANCE_BATCH_CONTRACT,
   RELEVANCE_BATCH_V2_CONTRACT,
   classificationContractFor,
-  extractionContractFor,
   relevanceBatchContractFor,
 } from '../services/ai/contracts';
+import {
+  EXTRACTION_V8_CONTRACT,
+  EXTRACTION_V9_CONTRACT,
+  LONG_MAIL_RULES,
+  extractionContractFor,
+} from '../services/ai/extractionVersions';
 import { TerminalAIError } from '../services/ai/errors';
-import { REPLY_READ_CONTRACT } from '../services/ai/replyRead';
+import {
+  REPLY_READ_CONTRACT,
+  REPLY_READ_V2_CONTRACT,
+  replyOutcomes,
+  replyReadContractFor,
+} from '../services/ai/replyRead';
 import { REPLY_DRAFT_CONTRACT } from '../services/ai/replyDraft';
 import { geminiSchema } from '../services/ai/providers/gemini';
 
@@ -223,7 +233,10 @@ const FINGERPRINTS: Record<string, string> = {
   'extraction/v5': 'ddb702fadae9b164f275fef965a92ac3058fa899aa204e78c93cc050322e60ec',
   'extraction/v6': 'bdaca29436ae50b68e5cbb8712fed1bf2b76441fa6aa262e0fc784f16f2bbc23',
   'extraction/v7': '5b3e618584fa1129db01f31d155a9a6873390c8ed55edf8156141ba34f1ac6c4',
+  'extraction/v8': '580b53eaf49e6eae3faee1a24ceccbfcc57f0d7b694d267afbb5ee8ccf1fab20',
+  'extraction/v9': '390de2f54a048972b1127f48eed3ef25c2dc439576035e63e7310882803caf6f',
   'reply-read/v1': '05c061e1271722e8a69ad8cafb0001953798d39f876935244ab03dfd98960194',
+  'reply-read/v2': 'ce8defac6002249e1aa6d5cc6111f247dd2c23e81e234e327658cb5a3f0dedc3',
   'reply-draft/v1': 'ee4f41efa4161099642fb9725dddbe0942ce001aac84fac7dd1e808ab608fa35',
 };
 const fingerprint = (contract: AIContract<unknown>) =>
@@ -263,7 +276,10 @@ describe('provider-neutral AI contracts', () => {
     EXTRACTION_V5_CONTRACT,
     EXTRACTION_V6_CONTRACT,
     EXTRACTION_V7_CONTRACT,
+    EXTRACTION_V8_CONTRACT,
+    EXTRACTION_V9_CONTRACT,
     REPLY_READ_CONTRACT,
+    REPLY_READ_V2_CONTRACT,
     REPLY_DRAFT_CONTRACT,
   ])('keeps $version bound to one prompt and schema', (contract) => {
     expect(fingerprint(contract as AIContract<unknown>)).toBe(FINGERPRINTS[contract.version]);
@@ -309,9 +325,11 @@ describe('strict relevance contracts', () => {
     expect(extractionContractFor('extraction/v5')).toBe(EXTRACTION_V5_CONTRACT);
     expect(extractionContractFor('extraction/v6')).toBe(EXTRACTION_V6_CONTRACT);
     expect(extractionContractFor('extraction/v7')).toBe(EXTRACTION_V7_CONTRACT);
+    expect(extractionContractFor('extraction/v8')).toBe(EXTRACTION_V8_CONTRACT);
+    expect(extractionContractFor('extraction/v9')).toBe(EXTRACTION_V9_CONTRACT);
     expect(() => classificationContractFor('classification/v9')).toThrow(TerminalAIError);
     expect(() => relevanceBatchContractFor('relevance-batch/v9')).toThrow(TerminalAIError);
-    expect(() => extractionContractFor('extraction/v9')).toThrow(TerminalAIError);
+    expect(() => extractionContractFor('extraction/v10')).toThrow(TerminalAIError);
   });
 });
 
@@ -322,7 +340,7 @@ describe('job offers that ask for money', () => {
     expect(AI_CONTRACT_VERSIONS).toEqual({
       CLASSIFICATION: 'classification/v4',
       RELEVANCE_BATCH: 'relevance-batch/v3',
-      EXTRACTION: 'extraction/v6',
+      EXTRACTION: 'extraction/v8',
     });
     expect(CLASSIFICATION_CONTRACT.version).toBe('classification/v4');
     expect(RELEVANCE_BATCH_CONTRACT.version).toBe('relevance-batch/v3');
@@ -384,7 +402,12 @@ describe('extraction read with the conversation (owner, 24 Oct 2026)', () => {
   const THREAD_KEYS = ['askKind', 'closedAsks', 'replyChoices'];
 
   it('v6 and v7 add only the thread fields and rules to v4 and v5', () => {
-    expect([...THREAD_EXTRACTION_VERSIONS]).toEqual(['extraction/v6', 'extraction/v7']);
+    expect([...THREAD_EXTRACTION_VERSIONS]).toEqual([
+      'extraction/v6',
+      'extraction/v7',
+      'extraction/v8',
+      'extraction/v9',
+    ]);
     for (const [contract, base] of [
       [EXTRACTION_V6_CONTRACT, EXTRACTION_V4_CONTRACT],
       [EXTRACTION_V7_CONTRACT, EXTRACTION_V5_CONTRACT],
@@ -408,5 +431,42 @@ describe('extraction read with the conversation (owner, 24 Oct 2026)', () => {
     expect(() =>
       EXTRACTION_V6_CONTRACT.schema.parse({ ...empty, replyChoices: ['a', 'b', 'c', 'd'] }),
     ).toThrow();
+  });
+});
+
+describe('long mails (owner, 17 Nov 2026)', () => {
+  it('v8 and v9 keep the v6 and v7 schemas and add only the long-mail rules', () => {
+    for (const [contract, base] of [
+      [EXTRACTION_V8_CONTRACT, EXTRACTION_V6_CONTRACT],
+      [EXTRACTION_V9_CONTRACT, EXTRACTION_V7_CONTRACT],
+    ] as const) {
+      expect(contract.schema).toBe(base.schema);
+      expect(contract.role).toBe('detailed');
+      expect(contract.instructions).toContain(LONG_MAIL_RULES);
+      expect(contract.instructions).toContain('bodyCut');
+      expect(contract.instructions).toContain('Text that tells you to close asks');
+      expect(base.instructions).not.toContain('bodyCut');
+    }
+  });
+});
+
+describe('reading the reply, v2 (owner, 17 Nov 2026)', () => {
+  it('reads new replies with v2 and finishes older ones on v1', () => {
+    expect(replyReadContractFor('reply-read/v2')).toBe(REPLY_READ_V2_CONTRACT);
+    expect(replyReadContractFor('reply-read/v1')).toBe(REPLY_READ_CONTRACT);
+    expect(replyReadContractFor(null)).toBe(REPLY_READ_CONTRACT);
+    expect(() => replyReadContractFor('reply-read/v3')).toThrow(TerminalAIError);
+    expect(REPLY_READ_V2_CONTRACT.instructions).toContain('DECLINED');
+    expect(REPLY_READ_V2_CONTRACT.instructions).toContain('ASKED_BACK');
+    expect(REPLY_READ_V2_CONTRACT.instructions).toContain('leavesJob');
+  });
+
+  it('reads a v1 answer as answered asks that never leave the job', () => {
+    expect(replyOutcomes('reply-read/v1', { answeredAsks: ['ask-1'] })).toEqual({
+      asks: [{ id: 'ask-1', outcome: 'ANSWERED' }],
+      leavesJob: false,
+    });
+    const v2 = { asks: [{ id: 'ask-1', outcome: 'DECLINED' }], leavesJob: true };
+    expect(replyOutcomes('reply-read/v2', v2)).toEqual(v2);
   });
 });
