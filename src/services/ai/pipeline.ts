@@ -3,6 +3,7 @@ import type { EmailCategory, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { NOT_JOB_MAIL_FORGETS } from '../mailRetention';
 import { fetchMessageBody, fetchMessageMetadata } from '../gmailFetcher';
+import { boundedBody } from '../mailText';
 import { matchEmailToApplication } from '../matcher';
 import { canReplyTo, closeAsksFromRead, openAsksBefore } from '../threadAsks';
 import { AIAccess, resolveAIAccess } from './access';
@@ -16,11 +17,9 @@ import {
   THREAD_EXTRACTION_VERSIONS,
   ThreadReadSchema,
   classificationContractFor,
-  extractionContractFor,
   usesStrictRules,
   CLASSIFICATION_INPUT_LIMITS as LIMITS,
   EXTRACTION_BODY_LIMIT,
-  EXTRACTION_V7_CONTRACT,
   JobExtractionSchema,
   JobExtractionV3Schema,
   JobExtractionV4Schema,
@@ -28,6 +27,7 @@ import {
   JobExtractionResult,
   RelevanceClassifierInput,
 } from './contracts';
+import { EXTRACTION_V9_CONTRACT, extractionContractFor } from './extractionVersions';
 import { TerminalAIError } from './errors';
 import { runOperation } from './operations';
 import { agendaExtractionV3Enabled } from '../../utils/config';
@@ -237,11 +237,12 @@ async function extract(run: EmailRun) {
     contract,
     access: run.access,
     call: async (ai) => {
-      const bounded = body.slice(0, EXTRACTION_BODY_LIMIT);
+      const { body: bounded, cut } = boundedBody(body, EXTRACTION_BODY_LIMIT);
       const output = await ai.analyzer.extractJobData(bounded, {
         version: contract.version,
         receivedAt: email.receivedAt?.toISOString() ?? null,
         thread,
+        bodyCut: cut,
       });
       if (schedule) {
         const parsed = JobExtractionV3Schema.parse(output.data);
@@ -337,11 +338,11 @@ export async function selectExtractionContract(
       throw new TerminalAIError(
         'The AI details of this email have conflicting versions; NorthList must check it',
       );
-    // New mails only: an email that started on an older version (v2 to v5) finishes on it.
+    // New mails only: an email that started on an older version (v2 to v7) finishes on it.
     const version =
       rows[0]?.version ??
       (agendaExtractionV3Enabled()
-        ? EXTRACTION_V7_CONTRACT.version
+        ? EXTRACTION_V9_CONTRACT.version
         : AI_CONTRACT_VERSIONS.EXTRACTION);
     if (!rows.length)
       await tx.aIOperation.create({ data: { emailId, operation: 'extraction', version } });
