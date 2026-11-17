@@ -12,6 +12,7 @@ import {
   AI_CONTRACT_VERSIONS,
   LEGACY_CONTRACT_VERSIONS,
   STRICT_V1_CONTRACT_VERSIONS,
+  FEE_OFFER_CONTRACT_VERSIONS,
   buildRelevanceBatchInput,
   mapBatchResults,
   RelevanceBatchItemSchema,
@@ -173,6 +174,11 @@ describe('COM-125 relevance batch pure behavior', () => {
         [{ key: 'other', decision: 'IRRELEVANT', confidence: 1, category: null }],
       ).ignored,
     ).toBeGreaterThan(0);
+  });
+  it('accepts Career contact only from the version that knows it', () => {
+    const item = { key: 'e1', decision: 'RELEVANT', confidence: 1, category: 'CAREER_CONTACT' };
+    expect(mapBatchResults(['e1'], [item]).decided.get('e1')?.category).toBe('CAREER_CONTACT');
+    expect(mapBatchResults(['e1'], [item], 'relevance-batch/v3').undecided).toEqual(['e1']);
   });
   it('6 ignores invalid items', () => {
     expect(mapBatchResults(['e1'], [{ key: 'e1', decision: 'BAD' }]).undecided).toEqual(['e1']);
@@ -1265,9 +1271,10 @@ describe('the rule for job offers that ask for money applies to new mails only',
     return email;
   };
 
-  it('starts new mails on classification/v4 and relevance-batch/v3', () => {
-    expect(AI_CONTRACT_VERSIONS.CLASSIFICATION).toBe('classification/v4');
-    expect(AI_CONTRACT_VERSIONS.RELEVANCE_BATCH).toBe('relevance-batch/v3');
+  it('came with classification/v4 and relevance-batch/v3, frozen since the next versions', () => {
+    expect(FEE_OFFER_CONTRACT_VERSIONS.CLASSIFICATION).toBe('classification/v4');
+    expect(FEE_OFFER_CONTRACT_VERSIONS.RELEVANCE_BATCH).toBe('relevance-batch/v3');
+    expect(AI_CONTRACT_VERSIONS.CLASSIFICATION).not.toBe('classification/v4');
   });
 
   it('triage keeps an email on relevance-batch/v2, under the strict Social rule, and starts a new one on v3', async () => {
