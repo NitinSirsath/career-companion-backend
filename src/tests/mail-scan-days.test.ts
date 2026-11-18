@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import request from 'supertest';
 
 // The count is checked on the real sync over the dev-mode sandbox mailbox; no Google client.
-vi.mock('googleapis', () => ({ google: {} }));
+vi.mock('../services/google', () => ({ google: {} }));
 vi.mock('../services/enqueue', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/enqueue')>()),
   enqueueEmailProcessingJob: vi.fn(async () => 'email-job'),
