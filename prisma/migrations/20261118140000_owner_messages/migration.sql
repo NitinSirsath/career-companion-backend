@@ -34,3 +34,4 @@ ALTER TABLE "owner_message_dismissals" ADD CONSTRAINT "owner_message_dismissals_
 
 -- AddForeignKey
 ALTER TABLE "owner_message_dismissals" ADD CONSTRAINT "owner_message_dismissals_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
