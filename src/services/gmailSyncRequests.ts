@@ -77,8 +77,9 @@ export async function runScheduledGmailSync(source: 'schedule' | 'startup', now 
   const started = Date.now();
   const { timezone } = gmailScheduleConfig();
   const slot = latestSlot(now, timezone);
+  // A suspended account is not synced; Resume lets the next sync read what came in meanwhile.
   const connections = await prisma.gmailConnection.findMany({
-    where: { status: 'CONNECTED' },
+    where: { status: 'CONNECTED', user: { suspendedAt: null } },
     select: { userId: true, lastSyncedAt: true },
   });
   const counts = {
