@@ -8,6 +8,7 @@ import { prisma } from '../../db/prisma';
 import { discordUserId, vapidKeys } from '../../utils/config';
 import { logDebug, logError, logEvent, logWarn } from '../../utils/log';
 import { suppressNotifications } from '../notificationSuppression';
+import { isSuspended } from '../suspension';
 import {
   NotificationPayload,
   NotificationProvider,
@@ -67,6 +68,10 @@ export async function deliverActionPushAlert(actionId: string) {
     return;
   }
   if (!(await stillWanted(action, 'WEB_PUSH'))) return;
+  if (await isSuspended(action.application.userId)) {
+    logDebug('notification_skipped', { reason: 'account_suspended', actionId });
+    return;
+  }
   const devices = await devicesOf(action.application.userId);
   if (!devices.length) {
     logDebug('notification_skipped', { reason: 'no_devices', actionId });
