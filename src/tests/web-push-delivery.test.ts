@@ -122,6 +122,17 @@ describe('push alert for a new step', () => {
     expect(sendNotification).toHaveBeenCalledTimes(2);
   });
 
+  it('sends nothing while the account is suspended (owner, 18 Nov 2026)', async () => {
+    await prisma.user.update({ where: { id: userId }, data: { suspendedAt: new Date() } });
+    try {
+      const action = await step({ description: 'Reply with your availability' });
+      await deliver(action.id);
+      expect(sendNotification).not.toHaveBeenCalled();
+    } finally {
+      await prisma.user.update({ where: { id: userId }, data: { suspendedAt: null } });
+    }
+  });
+
   it('names a step with no text by its kind, and cuts long text', async () => {
     const followUp = await step({ type: 'FOLLOW_UP_REQUIRED' });
     await deliver(followUp.id);
