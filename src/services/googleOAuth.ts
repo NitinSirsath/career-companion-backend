@@ -5,7 +5,7 @@
  *
  * The authorization code and the tokens are never logged.
  */
-import { google } from 'googleapis';
+import { google } from './google';
 import { devMode, gmailOAuth, googleLoginOAuth, missingGoogleLoginVars } from '../utils/config';
 import { decryptToken, loadEncryptionKey } from '../utils/gmailTokenEncryption';
 import { logWarn } from '../utils/log';
