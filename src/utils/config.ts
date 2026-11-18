@@ -262,6 +262,20 @@ export function parseBETA_USER_LIMIT(value: string | undefined): number {
 }
 export const betaUserLimit = () => parseBETA_USER_LIMIT(process.env.BETA_USER_LIMIT);
 
+/**
+ * Who may open the Admin page (owner, 18 Nov 2026): a comma list of account emails. Empty or unset:
+ * nobody, and every admin request answers 404.
+ */
+export function parseADMIN_EMAILS(value: string | undefined): string[] {
+  if (value === undefined || value.trim() === '') return [];
+  const emails = value.split(',').map((email) => email.trim().toLowerCase());
+  if (emails.some((email) => !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(email)))
+    throw new Error('Invalid ADMIN_EMAILS: must be a comma list of email addresses');
+  return emails;
+}
+export const adminEmails = () => parseADMIN_EMAILS(process.env.ADMIN_EMAILS);
+export const isAdminEmail = (email: string) => adminEmails().includes(email.toLowerCase());
+
 export const DEFAULT_DAILY_SUBMISSION_LIMIT = 500;
 
 /** New submissions per user per UTC day, 0–5000. 0 stops all new submissions. */
@@ -427,6 +441,7 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env) {
   parseTEST_ACCOUNTS(env.TEST_ACCOUNTS);
   parseAI_SHOW_HIDDEN_PROVIDERS(env.AI_SHOW_HIDDEN_PROVIDERS);
   parseBETA_USER_LIMIT(env.BETA_USER_LIMIT);
+  parseADMIN_EMAILS(env.ADMIN_EMAILS);
   parseRATE_LIMITS(env.RATE_LIMITS);
   parseMAIL_DAILY_REPLY_LIMIT(env.MAIL_DAILY_REPLY_LIMIT);
   if (env.NODE_ENV !== 'production') return;
