@@ -17,8 +17,8 @@ import type { JobWithMetadata } from 'pg-boss';
 import type { GmailSyncJobData } from '../services/enqueue';
 
 const transport = vi.hoisted(() => ({ root: '', dataBound: 200, budget: 350 }));
-vi.mock('googleapis', async (importOriginal) => {
-  const real = await importOriginal<typeof import('googleapis')>();
+vi.mock('../services/google', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../services/google')>();
   class LocalOAuth extends real.google.auth.OAuth2 {
     constructor(options: ConstructorParameters<typeof real.google.auth.OAuth2>[0]) {
       if (typeof options !== 'object') throw new Error('Expected options-object OAuth client');
