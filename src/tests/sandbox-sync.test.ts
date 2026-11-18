@@ -3,7 +3,7 @@ import request from 'supertest';
 
 // Dev mode has no Google account. Building any Google client here is a failure.
 const google = vi.hoisted(() => ({ built: vi.fn() }));
-vi.mock('googleapis', () => {
+vi.mock('../services/google', () => {
   const refuse = () => {
     google.built();
     throw new Error('A Google client was built');
