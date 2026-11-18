@@ -1,4 +1,4 @@
-import { google } from 'googleapis';
+import { google } from '../services/google';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
@@ -6,7 +6,7 @@ import { app } from '../index';
 import { prisma } from '../db/prisma';
 
 // ─── Mock Google OAuth factory import ────────────────────────────────────────────────────────
-vi.mock('googleapis', () => {
+vi.mock('../services/google', () => {
   const mockGetToken = vi.fn().mockResolvedValue({
     tokens: {
       access_token: 'mock_google_auth_access_token',
