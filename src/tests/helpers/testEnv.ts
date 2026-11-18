@@ -18,6 +18,7 @@ export const PINNED_TEST_ENV: Record<string, string> = {
   TEST_ACCOUNTS: '', // none
   AI_SHOW_HIDDEN_PROVIDERS: '', // off
   BETA_USER_LIMIT: '0', // no limit; the beta limit tests set their own
+  ADMIN_EMAILS: '', // nobody; the admin tests set their own
   VAPID_PUBLIC_KEY: '', // no alerts
   VAPID_PRIVATE_KEY: '',
   VAPID_SUBJECT: '',
