@@ -20,7 +20,7 @@ async function until(check, label) {
   throw new Error(`Timed out: ${label}`);
 }
 async function worker() {
-  const { google } = require('googleapis');
+  const { google } = require('../dist/services/google');
   google.gmail = () => ({
     users: {
       getProfile: async () => ({ data: { historyId: 'fixture-checkpoint' } }),
