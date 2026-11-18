@@ -53,6 +53,16 @@ it('skips recent, busy and disconnected users, including duplicate fan-outs', as
   );
   expect(await prisma.gmailConnection.findUnique({ where: { userId: ids[2] } })).toEqual(before);
 });
+it('skips a suspended account (owner, 18 Nov 2026)', async () => {
+  await prisma.user.update({ where: { id: ids[0] }, data: { suspendedAt: new Date() } });
+  try {
+    const counts = await runScheduledGmailSync('startup', now);
+    expect(counts).toMatchObject({ connected: 2, requested: 0 });
+    expect(mocks.send).not.toHaveBeenCalled();
+  } finally {
+    await prisma.user.update({ where: { id: ids[0] }, data: { suspendedAt: null } });
+  }
+});
 it('continues after a user queue failure then rejects for retry', async () => {
   await prisma.gmailConnection.update({ where: { userId: ids[1] }, data: { lastSyncedAt: null } });
   mocks.send.mockRejectedValueOnce(new Error('fixture failure'));
