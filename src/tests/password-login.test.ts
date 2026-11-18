@@ -71,6 +71,8 @@ describe('POST /api/auth/login', () => {
       hasPassword: true,
       hasGoogle: false,
       testAccount: false,
+      admin: false,
+      suspension: null,
     });
     expect(JSON.stringify(res.body)).not.toContain('scrypt');
     expect(String(res.headers['set-cookie'])).toContain('cc_session=');
