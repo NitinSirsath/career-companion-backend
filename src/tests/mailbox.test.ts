@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   attachmentsGet: vi.fn(),
   credentials: {} as { access_token?: string; refresh_token?: string },
 }));
-vi.mock('googleapis', () => ({
+vi.mock('../services/google', () => ({
   google: {
     auth: {
       OAuth2: class {
