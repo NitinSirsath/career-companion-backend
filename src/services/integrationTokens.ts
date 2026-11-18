@@ -134,8 +134,10 @@ export async function verifyIntegrationToken(
   if (!TOKEN_FORMAT.test(presented)) return null;
   const row = await prisma.integrationToken.findUnique({
     where: { tokenHash: hashToken(presented) },
+    include: { user: { select: { suspendedAt: true } } },
   });
-  if (!row || statusOf(row, now) !== 'active') return null;
+  // A suspended account's tokens work again after Resume.
+  if (!row || statusOf(row, now) !== 'active' || row.user.suspendedAt) return null;
   await prisma.integrationToken.updateMany({
     where: { id: row.id, revokedAt: null },
     data: { lastUsedAt: now },

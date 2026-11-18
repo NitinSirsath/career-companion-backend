@@ -7,7 +7,8 @@
  *   POST /api/auth/test-login sign in to a test account (see services/testAccounts.ts)
  *   POST /api/auth/password   set the first password, or change it
  *   POST /api/auth/register   create a user with a password (dev mode only)
- *   GET  /api/auth/me         the signed-in user
+ *   GET  /api/auth/me         the signed-in user (also a suspended one)
+ *   POST /api/auth/resume-request  a suspended user asks the owner to resume the account
  *   GET|POST /api/auth/logout
  *
  * `?returnTo=` on connect: the app page to open after sign-in (`next` on /login if it fails).
@@ -18,10 +19,11 @@ import { Router, Request, Response, NextFunction } from 'express';
 import {
   PasswordLoginRequestSchema,
   RegisterRequestSchema,
+  ResumeRequestSchema,
   SetPasswordRequestSchema,
 } from '../contracts/auth';
 import { devModeOnly, prodModeOnly } from '../middleware/appMode';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireSignedIn } from '../middleware/auth';
 import {
   googleLoginUrl,
   verifyGoogleLogin,
@@ -29,6 +31,7 @@ import {
 } from '../services/googleOAuth';
 import { loginWithPassword, registerUser, setPassword } from '../services/passwordLogin';
 import { isTestAccountEmail } from '../services/testAccounts';
+import { saveResumeRequest } from '../services/suspension';
 import { BetaFullError, findOrCreateGoogleUser, getUserProfile } from '../services/user';
 import { AppError } from '../errors';
 import { frontendUrl, isProduction } from '../utils/config';
@@ -191,7 +194,7 @@ router.post(
   }),
 );
 
-router.get('/me', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/me', requireSignedIn, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.auth?.user) {
       return res
@@ -211,6 +214,16 @@ router.get('/me', requireAuth, async (req: Request, res: Response, next: NextFun
     next(err);
   }
 });
+
+router.post(
+  '/resume-request',
+  requireSignedIn,
+  handle(200, async (req) => {
+    const userId = req.auth!.user.id;
+    await saveResumeRequest(userId, ResumeRequestSchema.parse(req.body).text);
+    return getUserProfile(userId);
+  }),
+);
 
 const logoutHandler = async (req: Request, res: Response, next: NextFunction) => {
   try {

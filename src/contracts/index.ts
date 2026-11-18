@@ -28,3 +28,4 @@ export * from './mailbox';
 export * from './sandbox';
 export * from './blockedSender';
 export * from './alerts';
+export * from './admin';

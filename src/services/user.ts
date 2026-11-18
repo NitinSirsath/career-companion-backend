@@ -1,7 +1,7 @@
 import type { UserProfile } from '../contracts/auth';
 import { prisma } from '../db/prisma';
 import { LOCK_NAMESPACE, lockUser } from '../utils/advisoryLock';
-import { betaUserLimit, testAccounts } from '../utils/config';
+import { betaUserLimit, isAdminEmail, testAccounts } from '../utils/config';
 import { isTestAccountEmail } from './testAccounts';
 
 /** A new account was refused: the beta has all its places (`BETA_USER_LIMIT`). */
@@ -58,7 +58,17 @@ export async function findOrCreateGoogleUser(googleId: string, email: string, na
 export async function getUserProfile(userId: string): Promise<UserProfile | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, email: true, name: true, passwordHash: true, googleId: true },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      passwordHash: true,
+      googleId: true,
+      suspendedAt: true,
+      suspendReason: true,
+      resumeRequest: true,
+      resumeRequestedAt: true,
+    },
   });
   if (!user) return null;
   return {
@@ -68,5 +78,25 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
     hasPassword: user.passwordHash !== null,
     hasGoogle: user.googleId !== null,
     testAccount: isTestAccountEmail(user.email),
+    admin: isAdminEmail(user.email),
+    suspension: suspensionOf(user),
+  };
+}
+
+/** The suspension as the user and the Admin page see it; null when the account is not suspended. */
+export function suspensionOf(user: {
+  suspendedAt: Date | null;
+  suspendReason: string | null;
+  resumeRequest: string | null;
+  resumeRequestedAt: Date | null;
+}) {
+  if (!user.suspendedAt) return null;
+  return {
+    suspendedAt: user.suspendedAt.toISOString(),
+    reason: user.suspendReason ?? '',
+    request:
+      user.resumeRequest && user.resumeRequestedAt
+        ? { text: user.resumeRequest, sentAt: user.resumeRequestedAt.toISOString() }
+        : null,
   };
 }

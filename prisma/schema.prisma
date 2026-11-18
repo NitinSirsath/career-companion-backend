@@ -8,14 +8,25 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  email        String   @unique
-  googleId     String?  @unique
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
+  googleId     String?   @unique
   name         String?
   /// Salted scrypt hash for sign-in with email and password; null when the user has none.
   passwordHash String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  /// When the user last used the app: set on a signed-in request at most once an hour (owner, 18 Nov 2026).
+  lastActiveAt DateTime?
+
+  /// Set by the owner on the Admin page (owner, 18 Nov 2026). While set, the user signs in but sees only
+  /// the "suspended" page; Gmail sync, NorthList Apply and alerts stop. Cleared by Resume. Data is kept.
+  suspendedAt       DateTime?
+  /// The owner's reason, shown to the user. Required when suspending.
+  suspendReason     String?
+  /// The user's "Ask to resume" text, kept until the owner resumes the account.
+  resumeRequest     String?
+  resumeRequestedAt DateTime?
 
   agendaItems         AgendaItem[]
   applications        Application[]

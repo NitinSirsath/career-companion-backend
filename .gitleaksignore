@@ -2,6 +2,8 @@
 # Made-up AI keys in tests and a test import line; none of them is a real key.
 006aef01c658c5048de17c0bc79dd00d65d61897:src/tests/ai-trace-logs.test.ts:generic-api-key:102
 041e5801424236dce9c1351e36f9e8e2996581d1:src/tests/ai-settings.test.ts:generic-api-key:147
+25685674f3c8a0be2be040cc8703ab5d03868050:src/tests/admin.test.ts:generic-api-key:225
+25685674f3c8a0be2be040cc8703ab5d03868050:src/tests/admin.test.ts:generic-api-key:251
 593bfa43541d1333e741ae49b9a023102b83badb:src/tests/ai-settings.test.ts:generic-api-key:147
 5ab15a127cbfdc7e6e946a0bdf3e776d81c4b58e:src/tests/ai-trace-logs.test.ts:generic-api-key:102
 b6eb1c0138ce0b6ae4dc74d36587ad457450f311:src/tests/ai-triage.test.ts:linkedin-client-id:5
