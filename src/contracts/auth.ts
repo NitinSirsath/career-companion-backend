@@ -20,8 +20,27 @@ export const UserProfileSchema = z.object({
   hasGoogle: z.boolean(),
   /** True for a test account: it signs in on the test sign-in page and uses the mail sandbox. */
   testAccount: z.boolean(),
+  /** True when the account's email is in `ADMIN_EMAILS`: the app shows the Admin page. */
+  admin: z.boolean(),
+  /** Set while the owner has suspended the account: the app shows only the suspended page. */
+  suspension: z
+    .object({
+      suspendedAt: z.iso.datetime(),
+      reason: z.string(),
+      /** The user's "Ask to resume" text, null until they send one. */
+      request: z.object({ text: z.string(), sentAt: z.iso.datetime() }).nullable(),
+    })
+    .nullable(),
 });
 export type UserProfile = z.infer<typeof UserProfileSchema>;
+
+export const RESUME_REQUEST_MAX_LENGTH = 1000;
+
+// POST /api/auth/resume-request (suspended accounts only): sends or replaces the request.
+export const ResumeRequestSchema = z.strictObject({
+  text: z.string().trim().min(1).max(RESUME_REQUEST_MAX_LENGTH),
+});
+export type ResumeRequest = z.infer<typeof ResumeRequestSchema>;
 
 // POST /api/auth/login
 export const PasswordLoginRequestSchema = z.strictObject({
