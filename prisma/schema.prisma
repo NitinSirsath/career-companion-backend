@@ -45,8 +45,42 @@ model User {
   sandboxMessages     SandboxMessage[]
   pushDevices         PushDevice[]
   mailScanDays        MailScanDay[]
+  ownerMessages       OwnerMessage[]
+  messageDismissals   OwnerMessageDismissal[]
 
   @@map("users")
+}
+
+/// A message the owner sends from the Admin page (owner, 18 Nov 2026): to one account, or to every
+/// account that existed when it was sent (`userId` null). Shown at the top of the app until closed.
+model OwnerMessage {
+  id         String                  @id @default(uuid()) @db.Uuid
+  /// Null: every account made before `createdAt`.
+  userId     String?                 @db.Uuid
+  text       String
+  /// Devices that took the push alert, when the owner asked for one; null when not asked.
+  alertsSent Int?
+  createdAt  DateTime                @default(now())
+  /// Set by Remove: the message is no longer shown.
+  removedAt  DateTime?
+  user       User?                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dismissals OwnerMessageDismissal[]
+
+  @@index([createdAt])
+  @@map("owner_messages")
+}
+
+/// A user closed an owner message: it stays hidden on every device.
+model OwnerMessageDismissal {
+  messageId   String       @db.Uuid
+  userId      String       @db.Uuid
+  dismissedAt DateTime     @default(now())
+  message     OwnerMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId])
+  @@map("owner_message_dismissals")
 }
 
 /// One failed sign-in with email and password. Kept only for the short window in which tries
