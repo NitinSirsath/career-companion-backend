@@ -3,7 +3,7 @@ import { fetchMessageBody } from '../services/gmailFetcher';
 import { prisma } from '../db/prisma';
 import { encryptToken } from '../utils/gmailTokenEncryption';
 
-vi.mock('googleapis', () => {
+vi.mock('../services/google', () => {
   const mockMessagesGet = vi.fn().mockImplementation((args: { id: string }) => {
     if (args.id === 'msg-401') {
       const err = Object.assign(new Error('Unauthorized'), { code: 401 });

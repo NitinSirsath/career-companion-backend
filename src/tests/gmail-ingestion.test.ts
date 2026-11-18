@@ -16,7 +16,7 @@ vi.mock('../services/enqueue', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/enqueue')>()),
   enqueueEmailProcessingJob: vi.fn(),
 }));
-vi.mock('googleapis', () => ({
+vi.mock('../services/google', () => ({
   google: {
     auth: {
       OAuth2: class {

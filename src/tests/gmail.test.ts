@@ -36,7 +36,7 @@ const TEST_COOKIE_SECRET = 'test-cookie-secret-for-vitest';
 // ─── Mock googleapis ────────────────────────────────────────────────────────
 // We do NOT make real Google API calls in tests. The mock simulates successful
 // token exchange and profile fetch.
-vi.mock('googleapis', () => {
+vi.mock('../services/google', () => {
   const mockGetToken = vi.fn().mockResolvedValue({
     tokens: {
       access_token: 'mock_access_token_from_google',
@@ -588,7 +588,7 @@ describe('Gmail OAuth Routes (COM-19)', () => {
       // Simulate expired/invalid access token by making messages.list reject with
       // a GaxiosError status 401 — the exact failure observed in backend.log.
       const { GaxiosError } = await import('gaxios');
-      const { google } = await import('googleapis');
+      const { google } = await import('../services/google');
 
       const mockGmail = vi.mocked(google.gmail);
       const original = mockGmail.getMockImplementation();

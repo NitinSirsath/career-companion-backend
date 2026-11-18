@@ -2,7 +2,7 @@
  * The user's Gmail read live for the Mails page: the inbox list, one thread with its text, and
  * attachments. Nothing read here is stored or logged; it goes straight to the signed-in user.
  */
-import { gmail_v1 } from 'googleapis';
+import { gmail_v1 } from './google';
 import { prisma } from '../db/prisma';
 import {
   mailAddressOf,

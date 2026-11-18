@@ -1,4 +1,4 @@
-import { gmail_v1 } from 'googleapis';
+import { gmail_v1 } from './google';
 import { gmailCallOptions } from './googleTransport';
 import { withGmail } from './gmailClient';
 

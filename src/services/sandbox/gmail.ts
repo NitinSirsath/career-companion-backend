@@ -4,7 +4,7 @@
  * code on sandbox mail. It answers, in Gmail's own response shapes, exactly the calls the app
  * makes; `src/tests/sandbox-gmail.test.ts` fails when the app starts to make another one.
  */
-import { gmail_v1 } from 'googleapis';
+import { gmail_v1 } from '../google';
 import { prisma } from '../../db/prisma';
 import { AppError } from '../../errors';
 import { deliverSentMail } from './mailbox';

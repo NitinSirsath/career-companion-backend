@@ -6,7 +6,7 @@ import { randomUUID } from 'crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 
-vi.mock('googleapis', () => {
+vi.mock('../services/google', () => {
   const refuse = () => {
     throw new Error('A Google client was built');
   };

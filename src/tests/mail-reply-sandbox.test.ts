@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import request from 'supertest';
 
 const google = vi.hoisted(() => ({ built: vi.fn() }));
-vi.mock('googleapis', () => {
+vi.mock('../services/google', () => {
   const refuse = () => {
     google.built();
     throw new Error('A Google client was built');

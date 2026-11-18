@@ -9,7 +9,7 @@ import {
   SyncDeadlineError,
   SyncCancelledError,
 } from './gmailSyncErrors';
-import { google, gmail_v1 } from 'googleapis';
+import { google, gmail_v1 } from './google';
 import { prisma } from '../db/prisma';
 import { gmailOAuth } from '../utils/config';
 import { decryptToken, encryptToken } from '../utils/gmailTokenEncryption';

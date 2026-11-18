@@ -3,7 +3,7 @@
  * the same code as real mail (`gmailSync.ts`, `gmailFetcher.ts`, `mailbox.ts`).
  */
 import type { SandboxMessage } from '@prisma/client';
-import { gmail_v1 } from 'googleapis';
+import { gmail_v1 } from '../google';
 
 /** Gmail's name for the "Primary" tab. Every received sandbox mail arrives there. */
 export const RECEIVED_LABELS = ['INBOX', 'CATEGORY_PERSONAL'];
