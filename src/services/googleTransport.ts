@@ -1,4 +1,4 @@
-import { google } from 'googleapis';
+import { google } from './google';
 
 export const GMAIL_REQUEST_TIMEOUT_MS = 15_000;
 export const GOOGLE_OAUTH_TIMEOUT_MS = 10_000;
