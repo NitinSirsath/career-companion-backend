@@ -1,6 +1,6 @@
 import { gmailCallOptions, SYNC_ATTEMPT_BUDGET_MS } from './googleTransport';
 import { randomUUID } from 'crypto';
-import { gmail_v1 } from 'googleapis';
+import { gmail_v1 } from './google';
 import { prisma } from '../db/prisma';
 import { withGmail, googleStatus, googleAuthFailure } from './gmailClient';
 import { enqueueForProcessing, reofferPendingEmails } from './ai/offer';
