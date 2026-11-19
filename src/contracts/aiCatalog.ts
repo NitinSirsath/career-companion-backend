@@ -92,7 +92,7 @@ export const AI_SUBSCRIPTION_NOTE =
  * name a draft sends (`services/replyDraft.ts`), under the same rule.
  */
 export const AI_DATA_SENT_SUMMARY =
-  'For each new email: sender, subject, Gmail labels and a short preview (up to 1,000 characters). For job-related emails, also the email text (up to 8,000 characters). When a conversation still needs something from you, also the new text of your own replies in it. When you ask the AI to write a reply, the whole conversation, any hint you type or reply choice you click, and your first name. Nothing else from your mailbox is sent.';
+  'For each new email: sender, subject, Gmail labels and a short preview (up to 1,000 characters). For job-related emails, also the email text (up to 8,000 characters). When a conversation still needs something from you, also the new text of your own replies in it. When you ask to reanalyze a conversation, the same again for its job mails and your replies in it. When you ask the AI to write a reply, the whole conversation, any hint you type or reply choice you click, and your first name. Nothing else from your mailbox is sent.';
 
 const GPT_6_LUNA: CatalogModel = {
   id: 'openai/gpt-6-luna',
