@@ -28,6 +28,7 @@ import {
   RelevanceClassifierInput,
 } from './contracts';
 import { EXTRACTION_V9_CONTRACT, extractionContractFor } from './extractionVersions';
+import type { ThreadInput } from './threadRead';
 import { TerminalAIError } from './errors';
 import { runOperation } from './operations';
 import { agendaExtractionV3Enabled } from '../../utils/config';
@@ -132,12 +133,7 @@ async function classify(run: EmailRun, plan: ClassificationPlan): Promise<Decisi
   const labels = gmail.labelIds ?? [];
   const deterministic = autoIrrelevant(labels, email.sender, plan.strictRules);
   const threshold = relevanceThreshold();
-  const input = {
-    sender: email.sender?.slice(0, LIMITS.sender) ?? null,
-    subject: email.subject?.slice(0, LIMITS.subject) ?? null,
-    labels: labels.slice(0, LIMITS.labels),
-    snippet: gmail.snippet?.slice(0, LIMITS.snippet) ?? null,
-  };
+  const input = relevanceInput(email, gmail);
   const relevance = deterministic ? DETERMINISTIC_IRRELEVANT : await askRelevance(run, plan, input);
 
   const decision = relevance.data.confidence < threshold ? 'UNCERTAIN' : relevance.data.decision;
@@ -160,6 +156,19 @@ async function classify(run: EmailRun, plan: ClassificationPlan): Promise<Decisi
     update: data,
   });
   return decision;
+}
+
+/** What the first check reads: sender, subject, Gmail's labels and its short preview. Never the text. */
+export function relevanceInput(
+  email: { sender: string | null; subject: string | null },
+  gmail: { labelIds: string[] | null; snippet: string | null },
+): RelevanceClassifierInput {
+  return {
+    sender: email.sender?.slice(0, LIMITS.sender) ?? null,
+    subject: email.subject?.slice(0, LIMITS.subject) ?? null,
+    labels: (gmail.labelIds ?? []).slice(0, LIMITS.labels),
+    snippet: gmail.snippet?.slice(0, LIMITS.snippet) ?? null,
+  };
 }
 
 const DETERMINISTIC_IRRELEVANT: RelevanceOutcome = {
@@ -218,11 +227,9 @@ async function extract(run: EmailRun) {
   const emailId = email.id;
   const body = await fetchMessageBody(userId, email.gmailMessageId, run.options);
   const contract = await selectExtractionContract(userId, emailId);
-  const schedule = SCHEDULE_EXTRACTION_VERSIONS.includes(contract.version);
-  const threaded = THREAD_EXTRACTION_VERSIONS.includes(contract.version);
   const senderCanReply = canReplyTo(email.sender);
   // The conversation's open asks, so the read can say which of them this mail closes.
-  const thread = threaded
+  const thread = THREAD_EXTRACTION_VERSIONS.includes(contract.version)
     ? {
         senderCanReply,
         openAsks: (await openAsksBefore(prisma, email, email.receivedAt)).map(
@@ -236,51 +243,70 @@ async function extract(run: EmailRun) {
     operation: 'extraction',
     contract,
     access: run.access,
-    call: async (ai) => {
-      const { body: bounded, cut } = boundedBody(body, EXTRACTION_BODY_LIMIT);
-      const output = await ai.analyzer.extractJobData(bounded, {
-        version: contract.version,
-        receivedAt: email.receivedAt?.toISOString() ?? null,
-        thread,
-        bodyCut: cut,
-      });
-      if (schedule) {
-        const parsed = JobExtractionV3Schema.parse(output.data);
-        return {
-          ...output,
-          data: {
-            ...output.data,
-            ...parsed,
-            scheduleCandidates: verifiedCandidates(parsed.scheduleCandidates, bounded),
-          },
-        };
-      }
-      return output;
-    },
+    call: extractionCall(contract.version, { body, receivedAt: email.receivedAt, thread }),
   });
   await prisma.aIProcessingResult.update({
     where: { emailId },
     data: {
-      ...JobExtractionSchema.parse(extraction.data),
-      ...(schedule
-        ? {
-            scheduleCandidates: candidateEnvelope(
-              JobExtractionV3Schema.parse(extraction.data).scheduleCandidates,
-            ),
-          }
-        : {}),
-      ...(FAKE_OFFER_EXTRACTION_VERSIONS.includes(contract.version)
-        ? {
-            fakeOfferWarning:
-              JobExtractionV4Schema.parse(extraction.data).fakeOfferWarning?.trim() || null,
-          }
-        : {}),
-      ...(threaded ? threadResult(extraction.data, senderCanReply) : {}),
+      ...extractionFields(contract.version, extraction.data, senderCanReply),
       ...provenance(extraction, email.aiProcessingResult),
       contractVersion: contract.version,
       processingStatus: 'COMPLETED',
     },
   });
+}
+
+/** What the detailed read gets besides its version: the mail's text and date, and its thread. */
+export interface MailReadInput {
+  body: string;
+  receivedAt: Date | null;
+  /** The conversation's open asks, for the versions that read them. */
+  thread?: ThreadInput;
+}
+
+/**
+ * The detailed read's call: the mail's own text first within the AI's limit, and for the versions
+ * that read times, only the evidence found in that text. Shared by new mail and Reanalyze.
+ */
+export function extractionCall(version: string, input: MailReadInput) {
+  const schedule = SCHEDULE_EXTRACTION_VERSIONS.includes(version);
+  return async (ai: AIAccess) => {
+    const { body: bounded, cut } = boundedBody(input.body, EXTRACTION_BODY_LIMIT);
+    const output = await ai.analyzer.extractJobData(bounded, {
+      version,
+      receivedAt: input.receivedAt?.toISOString() ?? null,
+      thread: input.thread,
+      bodyCut: cut,
+    });
+    if (!schedule) return output;
+    const parsed = JobExtractionV3Schema.parse(output.data);
+    return {
+      ...output,
+      data: {
+        ...output.data,
+        ...parsed,
+        scheduleCandidates: verifiedCandidates(parsed.scheduleCandidates, bounded),
+      },
+    };
+  };
+}
+
+/** The fields a detailed read sets on the mail's AI result. Shared by new mail and Reanalyze. */
+export function extractionFields(version: string, data: unknown, senderCanReply: boolean) {
+  return {
+    ...JobExtractionSchema.parse(data),
+    ...(SCHEDULE_EXTRACTION_VERSIONS.includes(version)
+      ? {
+          scheduleCandidates: candidateEnvelope(
+            JobExtractionV3Schema.parse(data).scheduleCandidates,
+          ),
+        }
+      : {}),
+    ...(FAKE_OFFER_EXTRACTION_VERSIONS.includes(version)
+      ? { fakeOfferWarning: JobExtractionV4Schema.parse(data).fakeOfferWarning?.trim() || null }
+      : {}),
+    ...(THREAD_EXTRACTION_VERSIONS.includes(version) ? threadResult(data, senderCanReply) : {}),
+  };
 }
 
 /** Longest reply choice kept; the AI is asked for six words. */
@@ -339,13 +365,16 @@ export async function selectExtractionContract(
         'The AI details of this email have conflicting versions; NorthList must check it',
       );
     // New mails only: an email that started on an older version (v2 to v7) finishes on it.
-    const version =
-      rows[0]?.version ??
-      (agendaExtractionV3Enabled()
-        ? EXTRACTION_V9_CONTRACT.version
-        : AI_CONTRACT_VERSIONS.EXTRACTION);
+    const version = rows[0]?.version ?? newMailExtractionVersion();
     if (!rows.length)
       await tx.aIOperation.create({ data: { emailId, operation: 'extraction', version } });
     return extractionContractFor(version);
   });
 }
+
+/**
+ * The detailed-read version new mail is read with: v9 (with interview and assessment times) while
+ * the agenda switch is on, else v8. One home for new mail and Reanalyze.
+ */
+export const newMailExtractionVersion = () =>
+  agendaExtractionV3Enabled() ? EXTRACTION_V9_CONTRACT.version : AI_CONTRACT_VERSIONS.EXTRACTION;

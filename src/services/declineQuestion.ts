@@ -38,9 +38,18 @@ export interface DeclineFields {
   userStatus: ApplicationStatus | null;
   userStatusSetAt: Date | null;
   declinedAt: Date | null;
+  /** When Reanalyze found the decline in an older reply; null when it was read as it came. */
+  declineNotedAt?: Date | null;
   declineAnswer: DeclineAnswer | null;
   declineAnsweredAt: Date | null;
 }
+
+/**
+ * When the three days start: the reply, or, for a decline Reanalyze found in an older reply, when it
+ * found it, so the user can still answer (owner, 19 Nov 2026).
+ */
+export const declineClockStart = (app: { declinedAt: Date; declineNotedAt?: Date | null }) =>
+  app.declineNotedAt ?? app.declinedAt;
 
 const isOpen = (app: DeclineFields) => {
   const status = app.userStatus ?? app.aiStatus;
@@ -71,7 +80,7 @@ export function declineView(app: DeclineFields, lastMailAt: Date | null) {
           repliedAt: app.declinedAt.toISOString(),
           closesAt: wroteAgain
             ? null
-            : new Date(app.declinedAt.getTime() + DECLINE_CLOSES_AFTER_MS).toISOString(),
+            : new Date(declineClockStart(app).getTime() + DECLINE_CLOSES_AFTER_MS).toISOString(),
         }
       : null,
     closedAfterDeclineAt: closedAfterDecline ? answeredAt.toISOString() : null,

@@ -23,6 +23,7 @@ import {
 } from './ai/replyRead';
 import { runUserCall } from './ai/userCall';
 import { noteDecline } from './applicationDecline';
+import { openRun } from './reanalysisRuns';
 import { enqueueReplyReading } from './enqueue';
 import { fetchMessageBody } from './gmailFetcher';
 import { splitQuoted } from './mailText';
@@ -33,8 +34,8 @@ export const REPLY_READ_TRIES = 3;
 /** When a failed read with no known end of a pause is tried again. */
 const RETRY_AFTER_MS = 60_000;
 
-/** How an ask the reply settled closes. */
-const CLOSES_AS: Partial<Record<ReplyOutcome, RequestClosedReason>> = {
+/** How an ask the reply settled closes. Reanalyze's replay reads replies the same way. */
+export const CLOSES_AS: Partial<Record<ReplyOutcome, RequestClosedReason>> = {
   ANSWERED: 'YOUR_REPLY',
   DECLINED: 'YOU_DECLINED',
 };
@@ -83,6 +84,9 @@ const READ_AGAIN_STATES = new Set(['READ', 'NOT_READ']);
  * before it is still open; the read itself is the same job as for a new reply.
  */
 export async function readReplyAgain(userId: string, key: string) {
+  // Reanalyze reads every reply again: it and this must not run at the same time.
+  if (await openRun(prisma, userId))
+    throw new AppError(409, 'RUN_OPEN', 'A Reanalyze is running. Try again when it is done.');
   const sent = await prisma.outgoingEmail.findFirst({
     where: { userId, threadId: key },
     orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
@@ -152,10 +156,10 @@ export async function readSentReply(userId: string, outgoingEmailId: string): Pr
 }
 
 /** An empty reply (only quoted mail) settles nothing. */
-const NOTHING_READ: ReplyReadV2 = { asks: [], leavesJob: false };
+export const NOTHING_READ: ReplyReadV2 = { asks: [], leavesJob: false };
 
 /** One AI read of the reply with the version it was queued for, as v2 reads it. */
-async function readReply(
+export async function readReply(
   userId: string,
   version: string,
   open: Awaited<ReturnType<typeof openAsksBefore>>,

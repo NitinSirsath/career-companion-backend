@@ -17,6 +17,7 @@ export const QUEUE_NAMES = [
   'mail-cleanup-job',
   'web-push-notification-job',
   'decline-close-job',
+  'reanalysis-job',
 ] as const;
 
 /**

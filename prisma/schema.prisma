@@ -47,6 +47,7 @@ model User {
   mailScanDays        MailScanDay[]
   ownerMessages       OwnerMessage[]
   messageDismissals   OwnerMessageDismissal[]
+  reanalysisRuns      ReanalysisRun[]
 
   @@map("users")
 }
@@ -134,6 +135,9 @@ model Application {
   /// The user's answer to that question, or CLOSED when it closed by itself. Null: not answered.
   declineAnswer      DeclineAnswer?
   declineAnsweredAt  DateTime?
+  /// When Reanalyze found the decline in an older reply: the three days count from here, so the
+  /// user can still answer (owner, 19 Nov 2026). Null when the reply was read as it arrived.
+  declineNotedAt     DateTime?
   appliedAt          DateTime?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
@@ -493,6 +497,8 @@ model AIProcessingResult {
 enum RetiredReason {
   EMAIL_MOVED
   EMAIL_UNLINKED
+  /// Reanalyze read the mail again and no longer finds this step or date (owner, 19 Nov 2026).
+  REANALYZED
 }
 
 model ApplicationEvent {
@@ -1034,4 +1040,43 @@ model AgendaItem {
   @@unique([applicationId, emailId, candidateKey])
   @@index([userId, state, date])
   @@map("agenda_items")
+}
+
+/// Where a Reanalyze stands (owner, 19 Nov 2026).
+enum ReanalysisState {
+  QUEUED
+  RUNNING
+  /// Every conversation of the run was read again and saved.
+  SAVED
+  /// It stopped; `stopReason` says why. Conversations saved before the stop stay saved.
+  STOPPED
+}
+
+/// One Reanalyze the user asked for (owner, 19 Nov 2026): the AI reads the mails and replies of these
+/// conversations again with today's rules, and each conversation is saved only when all its reads
+/// worked. Ids, counts and times only, never mail text.
+model ReanalysisRun {
+  id            String          @id @default(uuid()) @db.Uuid
+  userId        String          @db.Uuid
+  /// The application whose page started it; null when it was started from a conversation.
+  applicationId String?         @db.Uuid
+  /// The conversations to read, newest first.
+  keys          String[]
+  /// The conversations saved so far.
+  savedKeys     String[]        @default([])
+  state         ReanalysisState @default(QUEUED)
+  /// Why it stopped, as a code the screens turn into words; null unless STOPPED.
+  stopReason    String?
+  /// How many things the saves changed, for "Reanalyzed. 2 things changed".
+  changed       Int             @default(0)
+  /// Mails or replies no longer in Gmail: they kept their old read.
+  gone          Int             @default(0)
+  createdAt     DateTime        @default(now())
+  startedAt     DateTime?
+  finishedAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("reanalysis_runs")
 }

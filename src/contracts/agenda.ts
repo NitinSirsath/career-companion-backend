@@ -53,7 +53,8 @@ export const AgendaItemSchema = z.object({
   revision: z.number().int().nonnegative(),
   decisionSourceId: z.uuid().nullable(),
   retiredAt: z.iso.datetime().nullable(),
-  retiredReason: z.enum(['EMAIL_MOVED', 'EMAIL_UNLINKED']).nullable(),
+  /** REANALYZED: Reanalyze read the mail again and no longer finds it (owner, 19 Nov 2026). */
+  retiredReason: z.enum(['EMAIL_MOVED', 'EMAIL_UNLINKED', 'REANALYZED']).nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   application: z.object({ companyName: z.string(), jobTitle: z.string().nullable() }),

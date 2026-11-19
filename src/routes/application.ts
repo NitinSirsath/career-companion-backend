@@ -2,6 +2,8 @@ import { archiveApplication } from '../services/archive';
 import { deleteApplication } from '../services/removal';
 import { ArchiveApplicationSchema, DeclineAnswerRequestSchema } from '../contracts';
 import { answerDecline } from '../services/applicationDecline';
+import { ReanalysisQuerySchema } from '../contracts/reanalysis';
+import { applicationReanalysis, startApplicationReanalysis } from '../services/reanalysis';
 import { z } from 'zod';
 import { Router, Request, Response, NextFunction } from 'express';
 import {
@@ -181,6 +183,34 @@ router.post('/:id/decline', async (req, res, next) => {
         DeclineAnswerRequestSchema.parse(req.body),
       ),
     );
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/applications/:id/reanalyze   what a Reanalyze of its conversations would read, and its
+ * newest run. POST starts it: 202, or 409 with the reason it cannot start (`ReanalysisBlock`).
+ */
+router.get('/:id/reanalyze', async (req, res, next) => {
+  try {
+    res.json(
+      await applicationReanalysis(
+        req.auth!.user.id,
+        z.uuid().parse(req.params.id),
+        ReanalysisQuerySchema.parse(req.query).preview === '1',
+      ),
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+router.post('/:id/reanalyze', async (req, res, next) => {
+  try {
+    z.strictObject({}).parse(req.body ?? {});
+    res
+      .status(202)
+      .json(await startApplicationReanalysis(req.auth!.user.id, z.uuid().parse(req.params.id)));
   } catch (err) {
     next(err);
   }

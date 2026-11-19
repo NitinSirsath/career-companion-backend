@@ -198,7 +198,8 @@ export type DeclineAnswerRequest = z.infer<typeof DeclineAnswerRequestSchema>;
 
 export const ApplicationEventResponseSchema = z.object({
   retiredAt: IsoDateTimeSchema.nullable(),
-  retiredReason: z.enum(['EMAIL_MOVED', 'EMAIL_UNLINKED']).nullable(),
+  /** REANALYZED: Reanalyze read the mail again and no longer finds it (owner, 19 Nov 2026). */
+  retiredReason: z.enum(['EMAIL_MOVED', 'EMAIL_UNLINKED', 'REANALYZED']).nullable(),
   id: z.string(),
   applicationId: z.string(),
   emailId: z.string().nullable(),

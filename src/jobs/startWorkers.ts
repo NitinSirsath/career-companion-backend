@@ -7,6 +7,7 @@ import { DECLINE_CLOSE_QUEUE, startDeclineCloseWorker } from './declineCloseJob'
 import { startEmailProcessingWorker } from './emailProcessingJob';
 import { startNotificationWorker, startWebPushNotificationWorker } from './notificationJob';
 import { startRelevanceTriageWorker } from './relevanceTriageJob';
+import { startReanalysisWorker } from './reanalysisJob';
 import { startReplyReadingWorker } from './replyReadingJob';
 import { WEB_PUSH_NOTIFICATION_JOB } from '../services/enqueue';
 import { stopQueue, QUEUE_NAMES } from '../services/queue';
@@ -69,6 +70,11 @@ export function defaultWorkers(): WorkerRegistration[] {
       queue: DECLINE_CLOSE_QUEUE,
       start: startDeclineCloseWorker,
       failureEvent: 'decline_close_worker_start_failed',
+    },
+    {
+      queue: QUEUE_NAMES[9],
+      start: startReanalysisWorker,
+      failureEvent: 'reanalysis_worker_start_failed',
     },
   ];
 }

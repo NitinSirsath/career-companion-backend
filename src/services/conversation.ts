@@ -44,6 +44,7 @@ const applicationSummary = {
   userStatusSetAt: true,
   archivedAt: true,
   declinedAt: true,
+  declineNotedAt: true,
   declineAnswer: true,
   declineAnsweredAt: true,
   emails: newestMail,
