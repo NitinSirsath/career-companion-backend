@@ -3,7 +3,7 @@
  * closing them when a newer mail or the user's reply settles them. A closed ask stays visible
  * with why it closed, and Reopen undoes it.
  */
-import type { AskKind, Prisma, RequestClosedReason } from '@prisma/client';
+import type { AskKind, EmailRequestState, Prisma, RequestClosedReason } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { lockUser, LOCK_NAMESPACE } from '../utils/advisoryLock';
 import { THREAD_EXTRACTION_VERSIONS, ThreadReadSchema } from './ai/contracts';
@@ -74,23 +74,58 @@ export async function openAsksBefore(
     },
     orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
   });
-  return rows
+  return openAsksAmong(
+    rows.map((row) => ({ ...row, result: row.aiProcessingResult! })),
+    { before: null },
+  );
+}
+
+/** A mail of the conversation as the open-asks rule reads it. */
+export interface AskSource {
+  id: string;
+  receivedAt: Date | null;
+  sender: string | null;
+  requestClosedReason: RequestClosedReason | null;
+  requestUserState: EmailRequestState | null;
+  /** Its application actions that are not retired. */
+  actions: { status: string }[];
+  result: Parameters<typeof requestOf>[0];
+}
+
+/**
+ * The open-asks rule on mails already in hand, newest five, oldest first: the database query above,
+ * and Reanalyze's replay, which keeps the conversation in memory while it reads it again. An ask
+ * is open while it asks for something, is not a fake offer's safe step, nothing closed it, the user
+ * did not mark it done, and its actions are all pending.
+ */
+export function openAsksAmong(
+  mails: AskSource[],
+  { before, except }: { before: Date | null; except?: string },
+): OpenAsk[] {
+  const time = (mail: AskSource) => mail.receivedAt?.getTime() ?? Number.POSITIVE_INFINITY;
+  return mails
     .filter(
-      (row) =>
-        row.requestUserState !== 'DONE' &&
-        row.actions.every((action) => action.status === 'PENDING'),
+      (mail) =>
+        mail.id !== except &&
+        (!before || (mail.receivedAt !== null && mail.receivedAt < before)) &&
+        mail.requestClosedReason === null &&
+        mail.result.fakeOfferWarning === null &&
+        (!!mail.result.actionRequired || !!mail.result.followUpRequired) &&
+        mail.requestUserState !== 'DONE' &&
+        mail.actions.every((action) => action.status === 'PENDING'),
     )
+    .sort((a, b) => time(b) - time(a) || (a.id < b.id ? 1 : -1))
     .slice(0, OPEN_ASKS_LIMIT)
     .reverse()
-    .map((row) => {
-      const request = requestOf(row.aiProcessingResult!, row.receivedAt, row.sender);
+    .map((mail) => {
+      const request = requestOf(mail.result, mail.receivedAt, mail.sender);
       const fallback = request?.kind === 'FOLLOW_UP' ? 'Follow up' : 'Action needed';
       return {
-        id: askId(row.id),
-        emailId: row.id,
+        id: askId(mail.id),
+        emailId: mail.id,
         ask: request?.text?.trim() || fallback,
-        kind: row.aiProcessingResult!.askKind,
-        askedAt: row.receivedAt?.toISOString() ?? null,
+        kind: mail.result.askKind,
+        askedAt: mail.receivedAt?.toISOString() ?? null,
       };
     });
 }
