@@ -273,6 +273,10 @@ export type ApplicationChoiceDetails = z.infer<typeof ApplicationChoiceDetailsSc
 
 export const ConversationSeenResponseSchema = z.object({ seen: z.literal(true) });
 
+/** "Read my reply again": the newest reply is queued for one more AI read (owner, 19 Nov 2026). */
+export const ReadReplyAgainResponseSchema = z.object({ reading: z.literal(true) });
+export type ReadReplyAgainResponse = z.infer<typeof ReadReplyAgainResponseSchema>;
+
 // ─── POST /api/conversations/:key/reply-draft ───────────────────────────────
 
 /**

@@ -16,6 +16,7 @@ import { createProviderClient } from '../services/ai/providers';
 import { fetchMessageBody } from '../services/gmailFetcher';
 import { closeDueDeclines } from '../services/applicationDecline';
 import { noteSentForReading, readSentReply } from '../services/replyReading';
+import { enqueueReplyReading } from '../services/enqueue';
 import { configureAI } from './helpers/aiAccess';
 import { fakeProviderClient } from './helpers/fakeProviderClient';
 
@@ -343,5 +344,75 @@ describe('a reply that asks them a question (owner, 17 Nov 2026)', () => {
       state: 'OPEN',
       replyRead: null,
     });
+  });
+});
+
+describe('Read my reply again (owner, 19 Nov 2026)', () => {
+  const readAgain = (key: string) =>
+    request(app).post(`/api/conversations/${key}/read-reply-again`).set(HEADERS).send({});
+
+  it('reads a reply that older rules read as "does not answer" with today\'s rules', async () => {
+    const { ask } = await interviewThread('t-again');
+    // Read before reply-read/v2: read, and the ask stayed open.
+    const sent = await prisma.outgoingEmail.create({
+      data: {
+        userId: owner,
+        gmailMessageId: `sent-${++counter}`,
+        threadId: 't-again',
+        sentAt: at(15),
+        replyReadState: 'READ',
+        replyReadVersion: 'reply-read/v1',
+        replyReadTries: 2,
+      },
+    });
+    expect((await conversation('t-again')).request).toMatchObject({
+      state: 'OPEN',
+      replyRead: 'NOT_ANSWERED',
+    });
+
+    const res = await readAgain('t-again');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ reading: true });
+    expect(await prisma.outgoingEmail.findUniqueOrThrow({ where: { id: sent.id } })).toMatchObject({
+      replyReadState: 'WAITING',
+      replyReadTries: 0,
+    });
+    expect(vi.mocked(enqueueReplyReading)).toHaveBeenCalledWith(owner, sent.id);
+    expect((await conversation('t-again')).request).toMatchObject({ replyRead: 'WAITING' });
+
+    vi.mocked(fetchMessageBody).mockResolvedValue('Before I confirm: is the interview remote?');
+    vi.mocked(createProviderClient).mockReturnValue(
+      fakeProviderClient({
+        extraction: (input: string) => ({
+          asks: (JSON.parse(input) as { openAsks: { id: string }[] }).openAsks.map((a) => ({
+            id: a.id,
+            outcome: 'ASKED_BACK',
+          })),
+          leavesJob: false,
+        }),
+      }),
+    );
+    expect(await readSentReply(owner, sent.id)).toBeNull();
+    expect((await conversation('t-again')).request).toMatchObject({
+      emailId: ask.id,
+      state: 'REPLIED',
+      replyRead: 'ASKED_BACK',
+    });
+  });
+
+  it("says there is nothing to read without a reply, or once it is read with today's rules", async () => {
+    await interviewThread('t-none');
+    const none = await readAgain('t-none');
+    expect(none.status).toBe(409);
+    expect(none.body.error.code).toBe('NOTHING_TO_READ');
+
+    vi.mocked(fetchMessageBody).mockResolvedValue('Is the interview remote?');
+    await replyRead('t-none', at(15), (ids) => ({
+      asks: ids.map((id) => ({ id, outcome: 'ASKED_BACK' })),
+      leavesJob: false,
+    }));
+    const queued = vi.mocked(enqueueReplyReading).mock.calls.length;
+    expect((await readAgain('t-none')).status).toBe(409);
+    expect(vi.mocked(enqueueReplyReading).mock.calls.length).toBe(queued);
   });
 });

@@ -7,6 +7,7 @@
  *   POST  /api/conversations/:key/seen         ends the "new" mark
  *   PATCH /api/conversations/:key/request      the user's answer to the newest request
  *   POST  /api/conversations/:key/reply-draft  an AI draft of the user's reply, never stored
+ *   POST  /api/conversations/:key/read-reply-again  reads the newest reply once more (today's rules)
  *   POST  /api/conversations/:key/application  create or choose the conversation's application
  *   DELETE /api/conversations/:key             delete it from the app; `block` blocks its company
  *   POST  /api/conversations/:key/block        block its company's new mail; the conversation stays
@@ -36,6 +37,7 @@ import { blockConversationSender } from '../services/blockedSenders';
 import { linkConversation } from '../services/conversationApplication';
 import { deleteConversation } from '../services/removal';
 import { writeReplyDraft } from '../services/replyDraft';
+import { readReplyAgain } from '../services/replyReading';
 import { createPaginatedResponse, getPaginationParams } from '../utils/pagination';
 
 const router = Router();
@@ -102,6 +104,14 @@ router.post(
   handle((req) => {
     EmptyBody.parse(req.body ?? {});
     return markConversationSeen(req.auth!.user.id, Key.parse(req.params.key));
+  }),
+);
+
+router.post(
+  '/:key/read-reply-again',
+  handle((req) => {
+    EmptyBody.parse(req.body ?? {});
+    return readReplyAgain(req.auth!.user.id, Key.parse(req.params.key));
   }),
 );
 

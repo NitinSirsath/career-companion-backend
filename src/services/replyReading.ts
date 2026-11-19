@@ -10,6 +10,7 @@
  */
 import type { RequestClosedReason } from '@prisma/client';
 import { prisma } from '../db/prisma';
+import { AppError } from '../errors';
 import { logEvent, logWarn } from '../utils/log';
 import { AIAccessError } from './ai/errors';
 import {
@@ -59,7 +60,7 @@ export async function noteSentForReading(userId: string, outgoingEmailId: string
     if (!sent) return;
     const open = await openAsksBefore(prisma, conversationOf(sent), sent.sentAt);
     if (!open.length) return;
-    // New replies only: the version is fixed now, and a reply never moves to a newer one.
+    // The version is fixed now; only "Read my reply again" moves a reply to a newer one.
     await prisma.outgoingEmail.update({
       where: { id: sent.id },
       data: { replyReadState: 'WAITING', replyReadVersion: REPLY_READ_V2_CONTRACT.version },
@@ -71,6 +72,38 @@ export async function noteSentForReading(userId: string, outgoingEmailId: string
       reason: err instanceof Error ? err.name : 'UNKNOWN',
     });
   }
+}
+
+/** Reply states the user may ask to read again: read with older rules, or not read at all. */
+const READ_AGAIN_STATES = new Set(['READ', 'NOT_READ']);
+
+/**
+ * "Read my reply again" (owner, 19 Nov 2026): the newest reply in a conversation, read before
+ * reply-read/v2 or left unread, gets one more read with today's rules. Only while an ask from
+ * before it is still open; the read itself is the same job as for a new reply.
+ */
+export async function readReplyAgain(userId: string, key: string) {
+  const sent = await prisma.outgoingEmail.findFirst({
+    where: { userId, threadId: key },
+    orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
+  });
+  const open =
+    sent && READ_AGAIN_STATES.has(sent.replyReadState ?? '')
+      ? await openAsksBefore(prisma, conversationOf(sent), sent.sentAt)
+      : [];
+  if (!sent || !open.length)
+    throw new AppError(409, 'NOTHING_TO_READ', 'There is no reply to read again here.');
+  await prisma.outgoingEmail.update({
+    where: { id: sent.id },
+    data: {
+      replyReadState: 'WAITING',
+      replyReadVersion: REPLY_READ_V2_CONTRACT.version,
+      replyReadTries: 0,
+    },
+  });
+  await enqueueReplyReading(userId, sent.id);
+  logEvent('reply_read_again', { userId });
+  return { reading: true as const };
 }
 
 /**
