@@ -24,6 +24,7 @@ export * from './dashboard';
 export * from './agenda';
 export * from './temporal';
 export * from './conversation';
+export * from './reanalysis';
 export * from './mailbox';
 export * from './sandbox';
 export * from './blockedSender';
