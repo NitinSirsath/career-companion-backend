@@ -117,7 +117,7 @@ router.post(
     EmptyBody.parse(req.body ?? {});
     return readReplyAgain(req.auth!.user.id, Key.parse(req.params.key));
   }),
- );
+);
 
 router.get(
   '/:key/reanalyze',
