@@ -168,3 +168,22 @@ export async function enqueueReplyReading(
     replyReadingJobOptions(outgoingEmailId, startAfter),
   );
 }
+
+export const REANALYSIS_JOB = 'reanalysis-job';
+
+export interface ReanalysisJobData {
+  userId: string;
+  runId: string;
+}
+
+/**
+ * One Reanalyze run. Never tried again by itself: a stopped run says why and the user starts a new
+ * one. Its time limit is above the run's own 10 minutes, so a slow run stops itself first.
+ */
+export async function enqueueReanalysis(userId: string, runId: string) {
+  return (await getQueue()).send(
+    REANALYSIS_JOB,
+    { userId, runId },
+    { singletonKey: `reanalysis:${runId}`, retryLimit: 0, expireInSeconds: 15 * 60 },
+  );
+}
