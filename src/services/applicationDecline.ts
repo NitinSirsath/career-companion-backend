@@ -32,7 +32,12 @@ export async function noteDecline(userId: string, threadId: string, sentAt: Date
       ...STILL_OPEN,
       AND: [{ OR: [{ declinedAt: null }, { declinedAt: { lt: sentAt } }] }],
     },
-    data: { declinedAt: sentAt, declineAnswer: null, declineAnsweredAt: null },
+    data: {
+      declinedAt: sentAt,
+      declineNotedAt: null,
+      declineAnswer: null,
+      declineAnsweredAt: null,
+    },
   });
   if (count) logEvent('decline_noted', { userId, applicationId: linked.applicationId });
   return count > 0;
@@ -79,11 +84,21 @@ export async function answerDecline(
  * from the company. Runs every hour. Returns how many closed.
  */
 export async function closeDueDeclines(): Promise<number> {
+  const cutoff = new Date(Date.now() - DECLINE_CLOSES_AFTER_MS);
   const due = await prisma.application.findMany({
     where: {
       ...STILL_OPEN,
       declineAnswer: null,
-      declinedAt: { lte: new Date(Date.now() - DECLINE_CLOSES_AFTER_MS) },
+      declinedAt: { not: null },
+      // The three days count from the reply, or from when Reanalyze found the decline.
+      AND: [
+        {
+          OR: [
+            { declineNotedAt: null, declinedAt: { lte: cutoff } },
+            { declineNotedAt: { lte: cutoff } },
+          ],
+        },
+      ],
     },
     select: { id: true, userId: true, declinedAt: true },
   });
