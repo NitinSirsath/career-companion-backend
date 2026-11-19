@@ -8,8 +8,8 @@
  *   PATCH /api/conversations/:key/request      the user's answer to the newest request
  *   POST  /api/conversations/:key/reply-draft  an AI draft of the user's reply, never stored
  *   POST  /api/conversations/:key/read-reply-again  reads the newest reply once more (today's rules)
- *  GET   /api/conversations/:key/reanalyze   what a Reanalyze would read, and its newest run
- *  POST  /api/conversations/:key/reanalyze   the AI reads the conversation again (202)
+ * GET   /api/conversations/:key/reanalyze   what a Reanalyze would read, and its newest run
+ * POST  /api/conversations/:key/reanalyze   the AI reads the conversation again (202)
  *   POST  /api/conversations/:key/application  create or choose the conversation's application
  *   DELETE /api/conversations/:key             delete it from the app; `block` blocks its company
  *   POST  /api/conversations/:key/block        block its company's new mail; the conversation stays
