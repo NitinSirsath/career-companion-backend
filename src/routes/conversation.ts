@@ -8,6 +8,8 @@
  *   PATCH /api/conversations/:key/request      the user's answer to the newest request
  *   POST  /api/conversations/:key/reply-draft  an AI draft of the user's reply, never stored
  *   POST  /api/conversations/:key/read-reply-again  reads the newest reply once more (today's rules)
+ *  GET   /api/conversations/:key/reanalyze   what a Reanalyze would read, and its newest run
+ *  POST  /api/conversations/:key/reanalyze   the AI reads the conversation again (202)
  *   POST  /api/conversations/:key/application  create or choose the conversation's application
  *   DELETE /api/conversations/:key             delete it from the app; `block` blocks its company
  *   POST  /api/conversations/:key/block        block its company's new mail; the conversation stays
@@ -37,7 +39,9 @@ import { blockConversationSender } from '../services/blockedSenders';
 import { linkConversation } from '../services/conversationApplication';
 import { deleteConversation } from '../services/removal';
 import { writeReplyDraft } from '../services/replyDraft';
+import { ReanalysisQuerySchema } from '../contracts/reanalysis';
 import { readReplyAgain } from '../services/replyReading';
+import { conversationReanalysis, startConversationReanalysis } from '../services/reanalysis';
 import { createPaginatedResponse, getPaginationParams } from '../utils/pagination';
 
 const router = Router();
@@ -113,7 +117,30 @@ router.post(
     EmptyBody.parse(req.body ?? {});
     return readReplyAgain(req.auth!.user.id, Key.parse(req.params.key));
   }),
+ );
+
+router.get(
+  '/:key/reanalyze',
+  handle((req) =>
+    conversationReanalysis(
+      req.auth!.user.id,
+      Key.parse(req.params.key),
+      ReanalysisQuerySchema.parse(req.query).preview === '1',
+    ),
+  ),
 );
+
+/** 202: the run is queued. 409 with the reason it cannot start (`ReanalysisBlock`). */
+router.post('/:key/reanalyze', async (req, res, next) => {
+  try {
+    EmptyBody.parse(req.body ?? {});
+    res
+      .status(202)
+      .json(await startConversationReanalysis(req.auth!.user.id, Key.parse(req.params.key)));
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.patch(
   '/:key/request',
