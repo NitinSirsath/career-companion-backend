@@ -15,6 +15,8 @@ export const LOCK_NAMESPACE = {
   sandboxMailbox: 0x4d435004,
   /** Creating an account, so two sign-ups at once cannot both take the beta's last place. */
   newAccounts: 0x4d435005,
+  /** Starting a Reanalyze, so two clicks or two tabs cannot start two runs at once. */
+  reanalysis: 0x4d435006,
 } as const;
 
 /** Holds the lock until the surrounding transaction ends. */
