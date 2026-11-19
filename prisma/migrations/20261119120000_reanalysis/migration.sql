@@ -30,4 +30,4 @@ CREATE TABLE "reanalysis_runs" (
 CREATE INDEX "reanalysis_runs_userId_createdAt_idx" ON "reanalysis_runs"("userId", "createdAt");
 
 -- AddForeignKey
-ALTER TABLE "reanalysis_runs" ADD CONSTRAINT "reanalysis_runs_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE
+ALTER TABLE "reanalysis_runs" ADD CONSTRAINT "reanalysis_runs_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
