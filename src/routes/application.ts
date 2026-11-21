@@ -22,6 +22,7 @@ import { countApplicationGroups } from '../services/applicationGroups';
 import { requireAuth } from '../middleware/auth';
 import { ApplicationSubmission, SubmittedAnswerSchema } from '../contracts/submission';
 import { listApplicationSubmissions } from '../services/externalSubmission';
+import { portalAccountView } from '../services/portalAccount';
 
 import { getPaginationParams, createPaginatedResponse } from '../utils/pagination';
 import { logEvent } from '../utils/log';
@@ -129,17 +130,20 @@ router.get('/:id/submissions', async (req: Request, res: Response, next: NextFun
     const rows = await listApplicationSubmissions(req.auth!.user.id, z.uuid().parse(req.params.id));
     if (rows === null)
       return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Access denied' } });
-    const items: ApplicationSubmission[] = rows.map(({ submittedAnswers, ...row }) => ({
-      ...row,
-      matchState: row.matchState as ApplicationSubmission['matchState'],
-      submittedAt: row.submittedAt.toISOString(),
-      receivedAt: row.receivedAt.toISOString(),
-      // Stored JSON is re-checked; anything that is not a question-answer pair is left out.
-      submittedAnswers: z
-        .array(SubmittedAnswerSchema)
-        .catch([])
-        .parse(submittedAnswers ?? []),
-    }));
+    const items: ApplicationSubmission[] = rows.map(
+      ({ submittedAnswers, portalAccount, ...row }) => ({
+        ...row,
+        portalAccount: portalAccount && portalAccountView(portalAccount),
+        matchState: row.matchState as ApplicationSubmission['matchState'],
+        submittedAt: row.submittedAt.toISOString(),
+        receivedAt: row.receivedAt.toISOString(),
+        // Stored JSON is re-checked; anything that is not a question-answer pair is left out.
+        submittedAnswers: z
+          .array(SubmittedAnswerSchema)
+          .catch([])
+          .parse(submittedAnswers ?? []),
+      }),
+    );
     return res.status(200).json({ items });
   } catch (err) {
     next(err);
