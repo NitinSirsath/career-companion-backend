@@ -81,6 +81,27 @@ export type ApplicationAutomation = z.infer<typeof ApplicationAutomationSchema>;
 export const SubmittedAnswerSchema = z.object({ question: z.string(), answer: z.string() });
 export type SubmittedAnswer = z.infer<typeof SubmittedAnswerSchema>;
 
+/**
+ * The company-portal account the automation used (owner, 21 Nov 2026). Never carries the password:
+ * `hasPassword` says whether one is stored; the owner opens it with the reveal route below.
+ */
+export const PortalAccountSchema = z.object({
+  id: z.string(),
+  company: z.string(),
+  /** Stored http/https URL of the portal's sign-in page. */
+  signInUrl: z.string(),
+  loginEmail: z.string(),
+  hasPassword: z.boolean(),
+  emailVerified: z.boolean().nullable(),
+  /** Who made the account: the automation, or the user in the browser. */
+  madeBy: z.enum(['NORTHLIST_APPLY', 'USER']).nullable(),
+  /** YYYY-MM-DD from the automation's account record. */
+  createdOn: z.iso.date().nullable(),
+  /** How many other applications used this account. */
+  otherApplications: z.number().int().min(0),
+});
+export type PortalAccount = z.infer<typeof PortalAccountSchema>;
+
 /** Everything the automation reported for one submission behind an application. */
 export const ApplicationSubmissionSchema = PendingSubmissionSchema.extend({
   matchState: z.enum(['LINKED', 'CREATED']),
@@ -88,6 +109,7 @@ export const ApplicationSubmissionSchema = PendingSubmissionSchema.extend({
   applyUrl: z.string().nullable(),
   resumeFilename: z.string().nullable(),
   submittedAnswers: z.array(SubmittedAnswerSchema),
+  portalAccount: PortalAccountSchema.nullable(),
 });
 export type ApplicationSubmission = z.infer<typeof ApplicationSubmissionSchema>;
 
@@ -98,6 +120,12 @@ export const ListApplicationSubmissionsResponseSchema = z.object({
 export type ListApplicationSubmissionsResponse = z.infer<
   typeof ListApplicationSubmissionsResponseSchema
 >;
+
+// ─── POST /api/submissions/portal-accounts/:id/password ─────────────────────
+
+/** The owner's saved portal password, opened on request. Never cached or logged. */
+export const PortalPasswordResponseSchema = z.object({ password: z.string() });
+export type PortalPasswordResponse = z.infer<typeof PortalPasswordResponseSchema>;
 
 // ─── GET /api/submissions/not-submitted ─────────────────────────────────────
 
