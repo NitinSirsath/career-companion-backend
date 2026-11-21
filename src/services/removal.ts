@@ -10,6 +10,7 @@ import { blockDomain, conversationSender } from './blockedSenders';
 import { threadKey } from './conversation';
 import { conversationWhere } from './conversationQuery';
 import { NOT_JOB_MAIL_FORGETS } from './mailRetention';
+import { removeUnusedPortalAccounts } from './portalAccount';
 
 const BEING_READ =
   'The AI is reading a mail of this conversation right now. Try again in a minute.';
@@ -97,6 +98,8 @@ export async function deleteApplication(userId: string, id: string) {
       data: { applicationId: null, matchState: 'UNMATCHED', matchConfirmedBy: null },
     });
     await tx.externalSubmission.deleteMany({ where: { userId, applicationId: id } });
+    // A portal account no other submission uses goes with it, password included.
+    await removeUnusedPortalAccounts(tx, userId);
     // Steps, history and agenda items go with it (cascade).
     await tx.application.delete({ where: { id } });
     return { deleted: true as const };

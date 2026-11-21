@@ -1,7 +1,8 @@
 /**
- * The MCP server: two write-only, idempotent tools (ADR-0002 decision 3, amended 21 Oct 2026):
- * `record_application_submission` for a confirmed application and `record_not_submitted_job` for
- * a job the automation did not apply to. No resources, no prompts, no read tools.
+ * The MCP server: two write-only, idempotent tools (ADR-0002 decision 3, amended 21 Oct 2026; the
+ * portal account added 21 Nov 2026): `record_application_submission` for a confirmed application
+ * and `record_not_submitted_job` for a job the automation did not apply to. No resources, no
+ * prompts, no read tools.
  *
  * Input is validated inside the handler with the strict intake schema, so every failure reaches
  * the client as `isError` with code `invalid_input` and the failing field names (never values).
@@ -107,6 +108,31 @@ export const ADVERTISED_INPUT_SCHEMA = {
         additionalProperties: false,
       },
     },
+    portalAccount: {
+      type: 'object',
+      description:
+        'The company-portal account used for this application (Workday or another company portal), copied from the account record. Leave out when no portal account was used.',
+      properties: {
+        signInUrl: HTTP_URL('Full http or https URL of the portal sign-in page'),
+        loginEmail: { type: 'string', maxLength: 254, description: 'The login email' },
+        password: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          description:
+            'The portal password, exactly as saved in the account record; leave out if unknown',
+        },
+        emailVerified: { type: 'boolean' },
+        madeBy: { type: 'string', enum: ['northlist_apply', 'user'] },
+        createdOn: {
+          type: 'string',
+          pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$',
+          description: 'YYYY-MM-DD, the date in the account record',
+        },
+      },
+      required: ['signInUrl', 'loginEmail'],
+      additionalProperties: false,
+    },
   },
   required: ['sourceRecordRef', 'platform', 'company', 'jobTitle', 'submittedAt'],
   additionalProperties: false,
@@ -170,7 +196,9 @@ function toolError(code: ToolErrorCode, fields?: string[]) {
 const DESCRIPTION = [
   "Record one job application that the user's own automation has just submitted, so it appears in NorthList.",
   'Call it once per submission, only after the site showed a submission confirmation and the applied entry was appended to the daily file.',
-  'Send only the listed fields, copied from that entry, including the resume file name and every submitted question and answer. Never send resume content, credentials, or skipped or needs_user entries.',
+  'Send only the listed fields, copied from that entry, including the resume file name and every submitted question and answer.',
+  'When a Workday or other company-portal account was used, also send portalAccount from the account record; NorthList stores its password encrypted for the user.',
+  'Never send resume content, any other credential, or skipped or needs_user entries.',
   'Idempotent on sourceRecordRef: a repeat returns already_recorded and only fills fields that are still empty. On invalid_input do not retry until the entry is fixed.',
 ].join(' ');
 
@@ -236,7 +264,7 @@ export function identityOf(authInfo: AuthInfo | undefined) {
 }
 
 export function createMcpServer(authInfo: AuthInfo | undefined) {
-  const server = new McpServer({ name: 'northlist', version: '1.1.0' });
+  const server = new McpServer({ name: 'northlist', version: '1.2.0' });
   server.registerTool(
     TOOL_NAME,
     {

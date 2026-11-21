@@ -92,6 +92,12 @@ export const gmailScheduleConfig = () => (gmailSchedule ??= parseGmailSchedule(p
 /** Raw value; `services/ai/credentials.ts` checks it and turns it into the key. */
 export const aiCredentialEncryptionKey = () => process.env.AI_CREDENTIAL_ENCRYPTION_KEY;
 
+/**
+ * Raw value; `services/portalAccount.ts` checks it and turns it into the key. Optional: without it
+ * portal accounts are still recorded, but their passwords are not stored.
+ */
+export const portalCredentialEncryptionKey = () => process.env.PORTAL_CREDENTIAL_ENCRYPTION_KEY;
+
 export function parseAI_TRIAGE_BATCH_ENABLED(value: string | undefined): boolean {
   if (value === undefined || value === '' || value === 'false') return false;
   if (value === 'true') return true;
@@ -429,6 +435,23 @@ export function validateRequiredSecrets(env: NodeJS.ProcessEnv = process.env) {
   ) {
     throw new Error('AI_CREDENTIAL_ENCRYPTION_KEY must differ from GMAIL_TOKEN_ENCRYPTION_KEY');
   }
+  validatePortalCredentialKey(env);
+}
+
+/**
+ * PORTAL_CREDENTIAL_ENCRYPTION_KEY is optional (portal passwords are then not stored), but when set
+ * it must be a valid key of its own, never one of the other two.
+ */
+export function validatePortalCredentialKey(env: NodeJS.ProcessEnv = process.env) {
+  const key = env.PORTAL_CREDENTIAL_ENCRYPTION_KEY;
+  if (key === undefined || key === '') return;
+  if (!HEX_KEY.test(key))
+    throw new Error(
+      'PORTAL_CREDENTIAL_ENCRYPTION_KEY is not 64 hex characters. Generate one with the command in .env.example.',
+    );
+  for (const other of ['GMAIL_TOKEN_ENCRYPTION_KEY', 'AI_CREDENTIAL_ENCRYPTION_KEY'] as const)
+    if (key.toLowerCase() === env[other]?.toLowerCase())
+      throw new Error(`PORTAL_CREDENTIAL_ENCRYPTION_KEY must differ from ${other}`);
 }
 
 /** Refuses to start on a value that would fail later. Most checks apply to production only. */

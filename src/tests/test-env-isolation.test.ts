@@ -25,6 +25,7 @@ const DEV_VALUES: Record<string, string> = {
   VAPID_PUBLIC_KEY: 'dev-public-key',
   VAPID_PRIVATE_KEY: 'dev-private-key',
   VAPID_SUBJECT: 'mailto:dev@example.com',
+  PORTAL_CREDENTIAL_ENCRYPTION_KEY: 'e5'.repeat(32),
 };
 const pinned = Object.keys(PINNED_TEST_ENV);
 let before: Record<string, string | undefined>;
