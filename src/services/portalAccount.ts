@@ -7,7 +7,7 @@
  *   updates it (latest email, password and email check win; the date made is kept).
  * - The password is sealed with its own key (PORTAL_CREDENTIAL_ENCRYPTION_KEY, AES-256-GCM) and
  *   bound to its owner. Without that key the account is recorded with no password.
- * - The password is opened only in \`revealPortalPassword\`, for the owner, on request. It never
+ * - The password is opened only in `revealPortalPassword`, for the owner, on request. It never
  *   appears in lists, logs, the tool answer or error messages.
  */
 import { Prisma } from '@prisma/client';
@@ -21,7 +21,7 @@ import { decrypt, encrypt } from '../utils/gmailTokenEncryption';
 const FORMAT = 'v1';
 export const PORTAL_PASSWORD_LIMIT = 200;
 
-/** The tool's \`portalAccount\` field. Strict: unknown keys are rejected. */
+/** The tool's `portalAccount` field. Strict: unknown keys are rejected. */
 export const PortalAccountInputSchema = z
   .strictObject({
     signInUrl: z
@@ -71,7 +71,7 @@ export function canonicalPortalAccount(input: PortalAccountInput): CanonicalPort
     password: input.password ?? null,
     emailVerified: input.emailVerified ?? null,
     madeBy: input.madeBy ? MADE_BY[input.madeBy] : null,
-    createdOn: input.createdOn ? new Date(\`\${input.createdOn}T00:00:00Z\`) : null,
+    createdOn: input.createdOn ? new Date(`${input.createdOn}T00:00:00Z`) : null,
   };
 }
 
@@ -94,14 +94,14 @@ function portalKey(): Buffer | null {
 
 export const portalPasswordsEnabled = () => portalKey() !== null;
 
-const aad = (userId: string) => Buffer.from(\`portal-credential:\${FORMAT}:\${userId}\`, 'utf8');
+const aad = (userId: string) => Buffer.from(`portal-credential:${FORMAT}:${userId}`, 'utf8');
 
 /** null when the server has no key. */
 export function sealPortalPassword(userId: string, password: string): string | null {
   const key = portalKey();
   if (!key) return null;
   const { iv, ciphertext } = encrypt(password, key, aad(userId));
-  return \`\${FORMAT}:\${iv}:\${ciphertext}\`;
+  return `${FORMAT}:${iv}:${ciphertext}`;
 }
 
 export function openPortalPassword(userId: string, sealed: string): string {
@@ -195,7 +195,7 @@ export const PORTAL_ACCOUNT_SELECT = {
 
 type SelectedAccount = Prisma.PortalAccountGetPayload<{ select: typeof PORTAL_ACCOUNT_SELECT }>;
 
-/** The contract view: \`hasPassword\` instead of the sealed value. */
+/** The contract view: `hasPassword` instead of the sealed value. */
 export function portalAccountView(account: SelectedAccount): PortalAccountView {
   return {
     id: account.id,
