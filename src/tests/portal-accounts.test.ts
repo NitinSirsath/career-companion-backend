@@ -37,17 +37,17 @@ const account = {
   createdOn: '2026-11-21',
 };
 const submission = (n: number, extra: Record<string, unknown> = {}) => ({
-  sourceRecordRef: \`2026-11-21/10:00:0\${n}\`,
+  sourceRecordRef: `2026-11-21/10:00:0${n}`,
   platform: 'workday',
   company: 'Acme Corp',
-  jobTitle: \`Engineer \${n}\`,
+  jobTitle: `Engineer ${n}`,
   submittedAt: '2026-11-21T10:00:00+05:30',
   portalAccount: account,
   ...extra,
 });
 
 const signSid = (sid: string, secret: string) =>
-  \`\${sid}.\${crypto.createHmac('sha256', secret).update(sid).digest('base64').replace(/=+$/, '')}\`;
+  `${sid}.${crypto.createHmac('sha256', secret).update(sid).digest('base64').replace(/=+$/, '')}`;
 async function sessionCookie(userId: string) {
   const sid = crypto.randomUUID();
   await prisma.session.create({
@@ -57,7 +57,7 @@ async function sessionCookie(userId: string) {
       expire: new Date(Date.now() + 2 * 86_400_000),
     },
   });
-  return \`cc_session=\${encodeURIComponent(\`s:\${signSid(sid, process.env.SESSION_SECRET!)}\`)}\`;
+  return `cc_session=${encodeURIComponent(`s:${signSid(sid, process.env.SESSION_SECRET!)}`)}`;
 }
 const record = (args: Record<string, unknown>) =>
   client.callTool({ name: 'record_application_submission', arguments: args });
@@ -65,13 +65,13 @@ const errorOf = (result: Awaited<ReturnType<typeof record>>) =>
   JSON.parse((result.content as { text: string }[])[0].text);
 const detailsOf = async (applicationId: string) => {
   const res = await request(app)
-    .get(\`/api/applications/\${applicationId}/submissions\`)
+    .get(`/api/applications/${applicationId}/submissions`)
     .set('Cookie', ownCookie);
   expect(res.status).toBe(200);
   return ListApplicationSubmissionsResponseSchema.parse(res.body).items;
 };
 const reveal = (accountId: string, cookie = ownCookie) =>
-  request(app).post(\`/api/submissions/portal-accounts/\${accountId}/password\`).set('Cookie', cookie);
+  request(app).post(`/api/submissions/portal-accounts/${accountId}/password`).set('Cookie', cookie);
 /**
  * The application behind an entry. A second job at the same company waits for review (matching
  * rule), so it is resolved by creating its own application, as the user would.
@@ -82,14 +82,14 @@ async function appOf(ref: string) {
   });
   if (sub.applicationId) return sub.applicationId;
   const res = await request(app)
-    .post(\`/api/submissions/\${sub.id}/resolve\`)
+    .post(`/api/submissions/${sub.id}/resolve`)
     .set('Cookie', ownCookie)
     .send({ action: 'create' });
   expect(res.status).toBe(200);
   return res.body.applicationId as string;
 }
 
-/** Captures console output while \`run\` executes. */
+/** Captures console output while `run` executes. */
 async function captureLogs(run: () => Promise<unknown>) {
   const lines: string[] = [];
   const spies = (['log', 'info', 'warn', 'error', 'debug'] as const).map((level) =>
@@ -107,18 +107,18 @@ async function captureLogs(run: () => Promise<unknown>) {
 
 beforeAll(async () => {
   await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
-  owner = (await prisma.user.create({ data: { email: \`owner\${DOMAIN}\` } })).id;
-  foreign = (await prisma.user.create({ data: { email: \`foreign\${DOMAIN}\` } })).id;
+  owner = (await prisma.user.create({ data: { email: `owner${DOMAIN}` } })).id;
+  foreign = (await prisma.user.create({ data: { email: `foreign${DOMAIN}` } })).id;
   ownCookie = await sessionCookie(owner);
   otherCookie = await sessionCookie(foreign);
   const token = (await createIntegrationToken(owner, { name: 'laptop' })).plaintextToken;
   server = app.listen(0, '127.0.0.1');
   await new Promise((r) => server.once('listening', r));
-  const baseUrl = \`http://127.0.0.1:\${(server.address() as AddressInfo).port}\`;
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   client = new Client({ name: 'cc-test', version: '1.0.0' });
   await client.connect(
-    new StreamableHTTPClientTransport(new URL(\`\${baseUrl}/mcp\`), {
-      requestInit: { headers: { Authorization: \`Bearer \${token}\` } },
+    new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), {
+      requestInit: { headers: { Authorization: `Bearer ${token}` } },
     }),
   );
 });
@@ -241,7 +241,7 @@ describe('showing the account', () => {
   it('lists the account on the application without the password', async () => {
     await record(submission(1));
     const res = await request(app)
-      .get(\`/api/applications/\${await appOf('2026-11-21/10:00:01')}/submissions\`)
+      .get(`/api/applications/${await appOf('2026-11-21/10:00:01')}/submissions`)
       .set('Cookie', ownCookie);
     expect(JSON.stringify(res.body)).not.toContain(PASSWORD);
     expect(JSON.stringify(res.body)).not.toContain('passwordSealed');
@@ -275,7 +275,7 @@ describe('showing the account', () => {
     expect((await reveal(id, otherCookie)).status).toBe(404);
     expect((await reveal('not-a-uuid')).status).toBe(404);
     expect(
-      (await request(app).post(\`/api/submissions/portal-accounts/\${id}/password\`)).status,
+      (await request(app).post(`/api/submissions/portal-accounts/${id}/password`)).status,
     ).toBe(401);
   });
 
@@ -299,7 +299,7 @@ describe('showing the account', () => {
     const first = await appOf('2026-11-21/10:00:01');
     const second = await appOf('2026-11-21/10:00:02');
     const del = (id: string) =>
-      request(app).delete(\`/api/applications/\${id}\`).set('Cookie', ownCookie);
+      request(app).delete(`/api/applications/${id}`).set('Cookie', ownCookie);
     expect((await del(first)).status).toBeLessThan(300);
     expect(await prisma.portalAccount.count({ where: { userId: owner } })).toBe(1);
     expect((await del(second)).status).toBeLessThan(300);
