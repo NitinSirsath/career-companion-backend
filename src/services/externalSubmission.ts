@@ -13,6 +13,13 @@ import { z } from 'zod';
 import { prisma } from '../db/prisma';
 import { LOCK_NAMESPACE, lockUser } from '../utils/advisoryLock';
 import { submissionDailyLimit } from '../utils/config';
+import {
+  CanonicalPortalAccount,
+  PORTAL_ACCOUNT_SELECT,
+  PortalAccountInputSchema,
+  canonicalPortalAccount,
+  savePortalAccount,
+} from './portalAccount';
 
 export const SUBMISSION_PLATFORMS = [
   'linkedin',
@@ -58,8 +65,9 @@ const httpUrl = () =>
 
 /**
  * The tool contract (ADR-0002, v1, amended 21 Oct 2026 with the apply page link, the resume file
- * name and the submitted answers). Strict: unknown keys are rejected, so there is no field for
- * resume content or credentials. Required strings are trimmed before their length check.
+ * name and the submitted answers, and 21 Nov 2026 with the company-portal account). Strict: unknown
+ * keys are rejected, so there is no field for resume content, and the only credential is the
+ * portal account's. Required strings are trimmed before their length check.
  */
 export const RecordApplicationSubmissionInputSchema = z.strictObject({
   sourceRecordRef: z
@@ -100,6 +108,7 @@ export const RecordApplicationSubmissionInputSchema = z.strictObject({
     .max(SUBMITTED_ANSWERS_LIMIT)
     .nullish()
     .describe('Every screening question and the answer given, as written in the daily file'),
+  portalAccount: PortalAccountInputSchema.nullish(),
 });
 
 export type SubmissionResult = 'created' | 'linked' | 'needs_review' | 'already_recorded';
@@ -134,6 +143,8 @@ export interface CanonicalSubmission {
   resumeFilename: string | null;
   /** null when none were reported. */
   submittedAnswers: { question: string; answer: string }[] | null;
+  /** null when none was reported. Stored apart from the submission (services/portalAccount.ts). */
+  portalAccount: CanonicalPortalAccount | null;
 }
 
 const KNOWN_FIELDS = new Set(Object.keys(RecordApplicationSubmissionInputSchema.shape));
@@ -214,6 +225,7 @@ export function parseSubmissionInput(raw: unknown, now = new Date()): CanonicalS
     applyUrl: input.applyUrl ? canonicalApplyUrl(input.applyUrl) : null,
     resumeFilename: blankToNull(input.resumeFilename),
     submittedAnswers: input.submittedAnswers?.length ? input.submittedAnswers : null,
+    portalAccount: input.portalAccount ? canonicalPortalAccount(input.portalAccount) : null,
   };
 }
 
@@ -370,7 +382,21 @@ export interface IntakeOutcome {
   payloadDiffered?: boolean;
 }
 
-/** A repeat of a stored entry: fills its empty fields; null when the entry is new. */
+/** The portal account sent with a submission, saved for the user; null when none was sent. */
+const savedAccountOf = (
+  db: Tx | typeof prisma,
+  userId: string,
+  company: string,
+  account: CanonicalPortalAccount | null,
+) =>
+  account
+    ? savePortalAccount(db, userId, { name: company, key: companyKey(company) || company }, account)
+    : Promise.resolve(null);
+
+/**
+ * A repeat of a stored entry: fills its empty fields; null when the entry is new. A portal account
+ * sent again is saved again (a newer password wins) and linked when the entry had none.
+ */
 async function repeatOf(
   db: Tx | typeof prisma,
   ref: { userId: string; source: 'AUTOMATION'; sourceRecordRef: string },
@@ -381,6 +407,14 @@ async function repeatOf(
   });
   if (!stored) return null;
   const fill = fillEmptyFields(stored, submission);
+  const accountId = await savedAccountOf(
+    db,
+    ref.userId,
+    submission.company,
+    submission.portalAccount,
+  );
+  if (accountId && stored.portalAccountId === null)
+    fill.portalAccount = { connect: { id: accountId } };
   if (Object.keys(fill).length)
     await db.externalSubmission.update({ where: { id: stored.id }, data: fill });
   return {
@@ -451,11 +485,13 @@ export async function recordSubmission(
         else decision = { state: 'NEEDS_REVIEW' };
       }
       const settled = decision.state !== 'NEEDS_REVIEW';
-      const { submittedAnswers, ...fields } = submission;
+      const { submittedAnswers, portalAccount, ...fields } = submission;
+      const portalAccountId = await savedAccountOf(tx, userId, submission.company, portalAccount);
       const record = await tx.externalSubmission.create({
         data: {
           ...ref,
           ...fields,
+          portalAccountId,
           submittedAnswers: submittedAnswers ?? Prisma.DbNull,
           receivedAt: now,
           tokenId,
@@ -590,6 +626,7 @@ export async function listApplicationSubmissions(userId: string, applicationId: 
       confirmationText: true,
       resumeFilename: true,
       submittedAnswers: true,
+      portalAccount: { select: PORTAL_ACCOUNT_SELECT },
     },
   });
 }
