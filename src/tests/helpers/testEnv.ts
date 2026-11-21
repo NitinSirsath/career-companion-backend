@@ -22,6 +22,7 @@ export const PINNED_TEST_ENV: Record<string, string> = {
   VAPID_PUBLIC_KEY: '', // no alerts
   VAPID_PRIVATE_KEY: '',
   VAPID_SUBJECT: '',
+  PORTAL_CREDENTIAL_ENCRYPTION_KEY: '', // portal passwords off; the portal account tests set their own
 };
 
 /** `fromEnvTest`: the values `.env.test` sets. The name must exist, even empty, to stay pinned. */
