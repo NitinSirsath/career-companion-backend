@@ -1,0 +1,53 @@
+name: Finish effect-fix once (temporary)
+# Commits the reviewed package-lock.json change on fix/effect-override and nothing else.
+# Lives only on the throwaway branch tmp/effect-fix-finish, which is deleted afterwards.
+on:
+  push:
+    branches: [tmp/effect-fix-finish]
+permissions:
+  contents: write
+concurrency:
+  group: effect-fix-finish-once
+  cancel-in-progress: false
+jobs:
+  finish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: fix/effect-override
+      - name: Check the branch
+        run: |
+          if [ "$(git rev-parse 'HEAD^{tree}')" != "0618cbe06972bd03f46984b3c6cda019be256c9d" ]; then
+            echo "fix/effect-override is not at the expected commit. Nothing was changed."
+            exit 1
+          fi
+      - name: Apply the reviewed change
+        run: |
+          cat > /tmp/change.diff <<'PATCH'
+          diff --git a/package-lock.json b/package-lock.json
+          index cd7c07a..48a7d9e 100644
+          --- a/package-lock.json
+          +++ b/package-lock.json
+          @@ -2431,3 +2431,3 @@
+          -      "version": "3.21.0",
+          -      "resolved": "https://registry.npmjs.org/effect/-/effect-3.21.0.tgz",
+          -      "integrity": "sha512-PPN80qRokCd1f015IANNhrwOnLO7GrrMQfk4/lnZRE/8j7UPWrNNjPV0uBrZutI/nHzernbW+J0hdqQysHiSnQ==",
+          +      "version": "3.22.4",
+          +      "resolved": "https://registry.npmjs.org/effect/-/effect-3.22.4.tgz",
+          +      "integrity": "sha512-RNshu7AXVxxDh6aS4lothhJ+QoZ4xSykbWNaaVdvDN72RMyVwhCGdALkyl1TbEydgAmRIdD1eTyJqBUGwSBGDA==",
+          PATCH
+          git apply --unidiff-zero /tmp/change.diff
+          git add -A
+          if [ "$(git write-tree)" != "6088b7e0538755637e768456028de18bb3a508f4" ]; then
+            echo "The result does not match the reviewed files. Nothing was pushed."
+            git status --short
+            exit 1
+          fi
+      - name: Commit only the reviewed result
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(deps): package-lock.json for the effect pin'
+          git push origin HEAD:fix/effect-override
