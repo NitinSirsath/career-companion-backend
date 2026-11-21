@@ -41,6 +41,7 @@ model User {
   aiUsageDays         AIUsageDay[]
   integrationTokens   IntegrationToken[]
   externalSubmissions ExternalSubmission[]
+  portalAccounts      PortalAccount[]
   notSubmittedJobs    NotSubmittedJob[]
   sandboxMessages     SandboxMessage[]
   pushDevices         PushDevice[]
@@ -954,6 +955,8 @@ model ExternalSubmission {
   submittedAnswers Json?
   receivedAt       DateTime                     @default(now())
   tokenId          String?                      @db.Uuid
+  /// The company-portal account the automation used (owner, 21 Nov 2026); null when none was sent.
+  portalAccountId  String?                      @db.Uuid
   matchState       ExternalSubmissionMatchState
   /// null while NEEDS_REVIEW.
   resolvedBy       SubmissionResolvedBy?
@@ -962,15 +965,52 @@ model ExternalSubmission {
   resolvedAt       DateTime?
 
   user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token       IntegrationToken? @relation(fields: [tokenId], references: [id], onDelete: SetNull)
-  application Application?      @relation(fields: [applicationId], references: [id], onDelete: SetNull)
-  event       ApplicationEvent?
+  token         IntegrationToken? @relation(fields: [tokenId], references: [id], onDelete: SetNull)
+  application   Application?      @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  portalAccount PortalAccount?    @relation(fields: [portalAccountId], references: [id], onDelete: SetNull)
+  event         ApplicationEvent?
 
   @@unique([userId, source, sourceRecordRef])
   @@index([userId, matchState])
   @@index([userId, receivedAt])
   @@index([applicationId])
   @@map("external_submissions")
+}
+
+/// A company-portal account (Workday and other company systems) the user's automation signed in
+/// with, sent with an application (owner, 21 Nov 2026; ADR-0002 amendment). One per user, portal
+/// host and company. The password is sealed with PORTAL_CREDENTIAL_ENCRYPTION_KEY and opened only
+/// when the owner asks to see it; it never appears in lists, logs or the tool answer.
+model PortalAccount {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @db.Uuid
+  /// Normalized company name (legal suffixes dropped), part of the identity.
+  companyKey     String
+  company        String
+  signInUrl      String
+  /// Lowercase host of signInUrl, part of the identity.
+  signInHost     String
+  loginEmail     String
+  /// `v1:<iv>:<ciphertext+tag>`; null when none was sent or the server has no key.
+  passwordSealed String?
+  emailVerified  Boolean?
+  /// NORTHLIST_APPLY or USER (the user made the account in the browser themselves).
+  madeBy         PortalAccountMadeBy?
+  /// The date the account was made, from the automation's account record.
+  createdOn      DateTime? @db.Date
+  firstSeenAt    DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  submissions ExternalSubmission[]
+
+  @@unique([userId, signInHost, companyKey])
+  @@map("portal_accounts")
+}
+
+enum PortalAccountMadeBy {
+  NORTHLIST_APPLY
+  USER
 }
 
 enum NotSubmittedOutcome {
