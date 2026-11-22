@@ -131,11 +131,11 @@ describe('Connect Gmail from the first run', () => {
       .query({ returnTo: '/welcome' })
       .set(as(NEW_USER));
     expect(back.status).toBe(302);
-    expect(back.headers.location).toBe(${process.env.FRONTEND_URL}/welcome);
+    expect(back.headers.location).toBe(`${process.env.FRONTEND_URL}/welcome`);
     const elsewhere = await request(app)
       .get('/api/gmail/connect')
       .query({ returnTo: '/welcome/other' })
       .set(as(OTHER));
-    expect(elsewhere.headers.location).toBe(${process.env.FRONTEND_URL}/gmail);
+    expect(elsewhere.headers.location).toBe(`${process.env.FRONTEND_URL}/gmail`);
   });
 });
