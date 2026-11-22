@@ -1126,3 +1126,28 @@ model ReanalysisRun {
   @@index([userId, createdAt])
   @@map("reanalysis_runs")
 }
+
+/// Where someone heard about NorthList, picked on the "Get an invite" form (owner, 22 Nov 2026).
+enum InviteSource {
+  FRIEND
+  LINKEDIN
+  X
+  YOUTUBE
+  SEARCH
+  OTHER
+}
+
+/// A request for an invite to the release, sent from the sign-in page while the beta is full
+/// (owner, 22 Nov 2026). Not an account: the email, the answer and the date only. One per email.
+model ReleaseInvite {
+  id          String       @id @default(uuid()) @db.Uuid
+  /// Lower case; a second request with the same email changes nothing.
+  email       String       @unique
+  source      InviteSource
+  /// The person's own words when they picked Other; null otherwise.
+  otherSource String?
+  createdAt   DateTime     @default(now())
+
+  @@index([createdAt])
+  @@map("release_invites")
+}
