@@ -16,6 +16,7 @@ import { logWarn } from '../utils/log';
  */
 
 const MINUTE_MS = 60_000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
 
 /** Signed in: per user. The app's own polling stays far below this. */
 export const SIGNED_IN_PER_MINUTE = 600;
@@ -26,6 +27,9 @@ export const SIGN_IN_PER_MINUTE = 20;
 /** NorthList Apply: per network address before the token check, then per token. */
 export const MCP_ADDRESS_PER_MINUTE = 120;
 export const MCP_TOKEN_PER_MINUTE = 60;
+/** "Get an invite" from the sign-in page: per network address, a minute and a day. */
+export const INVITE_PER_MINUTE = 5;
+export const INVITE_PER_DAY = 20;
 
 /** The routes that start or check a sign-in, below `/api/auth`. */
 const SIGN_IN_ROUTES = new Set([
@@ -72,12 +76,14 @@ function refuseJson(_req: Request, res: Response, seconds: number) {
 export function limiter(
   name: string,
   options: Pick<Options, 'limit' | 'keyGenerator'> & {
+    /** A minute unless said. */
+    windowMs?: number;
     applies?: (req: Request) => boolean;
     refuse?: (req: Request, res: Response, seconds: number) => void;
   },
 ) {
   return rateLimit({
-    windowMs: MINUTE_MS,
+    windowMs: options.windowMs ?? MINUTE_MS,
     limit: options.limit,
     keyGenerator: options.keyGenerator,
     skip: (req) => !rateLimitsOn() || (options.applies ? !options.applies(req) : false),
@@ -106,3 +112,21 @@ export const apiLimit = limiter('api', {
   keyGenerator: (req) =>
     req.session?.userId ? `user:${req.session.userId}` : addressKey(req as Request),
 });
+
+/** On `POST /api/invites` only, after `apiLimit`: few requests per network address. */
+export const inviteLimits = [
+  limiter('invite_minute', { limit: INVITE_PER_MINUTE, keyGenerator: addressKey }),
+  limiter('invite_day', {
+    limit: INVITE_PER_DAY,
+    keyGenerator: addressKey,
+    windowMs: DAY_MS,
+    refuse: (_req, res, seconds) =>
+      res.status(429).json({
+        error: {
+          code: 'TOO_MANY_REQUESTS',
+          message: 'Too many requests from this network today. Try again tomorrow.',
+          details: { retryAfterSeconds: seconds },
+        },
+      }),
+  }),
+];
