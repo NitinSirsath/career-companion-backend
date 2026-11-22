@@ -7,7 +7,7 @@ import { SyncQueueError } from '../services/gmailSyncErrors';
  *   GET  /api/gmail/summary      — what the app has read in the last 30 days
  *   GET  /api/gmail/connect      — initiate OAuth flow (redirect to Google); in dev mode,
  *                                  connect the sandbox mailbox at once. `?returnTo=` names
- *                                  the mail page or the Dashboard to come back to instead of
+ *                                  the mail page, the Dashboard or the first run to come back to instead of
  *                                  the Gmail page; `?freeAI=` is the free AI data-use version
  *                                  the user agreed to on the Connect Gmail button
  *   GET  /api/gmail/callback     — Google OAuth callback handler
@@ -59,10 +59,10 @@ const OAUTH_COOKIE_MAX_AGE_MS = 5 * 60 * 1000; // enough time to complete the OA
 
 /**
  * Where to send the user after connecting: the mail they came from, the Dashboard (a new user,
- * owner 15 Nov 2026), or the Gmail page. Only those paths are accepted here, a narrower rule than
- * the shared in-app path check.
+ * owner 15 Nov 2026), the first run (owner, 22 Nov 2026), or the Gmail page. Only those paths are
+ * accepted here, a narrower rule than the shared in-app path check.
  */
-const RETURN_PAGE = /^\/(dashboard|mails\/(gmail\/)?[A-Za-z0-9_-]{1,128})$/;
+const RETURN_PAGE = /^\/(dashboard|welcome|mails\/(gmail\/)?[A-Za-z0-9_-]{1,128})$/;
 const connectReturnPath = (value: unknown) => returnPath(value, FRONTEND_GMAIL_PATH, RETURN_PAGE);
 
 /** The free AI data-use version the user agreed to on the Connect Gmail button, or null. */
