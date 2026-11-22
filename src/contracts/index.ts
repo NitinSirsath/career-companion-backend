@@ -31,3 +31,4 @@ export * from './blockedSender';
 export * from './alerts';
 export * from './admin';
 export * from './messages';
+export * from './invites';

@@ -9,6 +9,7 @@
  *   GET  /api/admin/messages                 the last messages sent, and devices with alerts on
  *   POST /api/admin/messages                 send a message to everyone or one account
  *   POST /api/admin/messages/:id/remove      stop showing a message
+ *   GET  /api/admin/invites                  requests for an invite to the release, newest first
  */
 import { Router } from 'express';
 import { z } from 'zod';
@@ -17,6 +18,7 @@ import { SendOwnerMessageRequestSchema } from '../contracts/messages';
 import { requireAdmin } from '../middleware/auth';
 import { readAdminAccount, readAdminOverview, readFreeAIMoney } from '../services/admin';
 import { adminListMessages, removeOwnerMessage, sendOwnerMessage } from '../services/ownerMessages';
+import { listReleaseInvites } from '../services/releaseInvites';
 import { resumeAccount, suspendAccount } from '../services/suspension';
 
 const IdSchema = z.uuid();
@@ -58,6 +60,14 @@ adminRouter.post('/accounts/:id/resume', async (req, res, next) => {
     const userId = IdSchema.parse(req.params.id);
     await resumeAccount(userId);
     res.json({ account: await readAdminAccount(adminUserId, userId) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+adminRouter.get('/invites', async (_req, res, next) => {
+  try {
+    res.json({ invites: await listReleaseInvites() });
   } catch (error) {
     next(error);
   }
