@@ -277,8 +277,8 @@ export async function listSandboxSenders(userId: string): Promise<SandboxSenders
 /**
  * Empties the user's sandbox mailbox and deletes what the app made from it: emails (with their
  * AI rows), recorded replies, applications (with events, actions and agenda), automation
- * submissions, AI batches, AI day counts and the daily counts of mails scanned. Clears every AI model's pause and the sync
- * checkpoint. Keeps the user, the AI settings and the sandbox connection.
+ * submissions, portal accounts, AI batches, AI day counts and the daily counts of mails scanned.
+ * Clears every AI model's pause and the sync checkpoint. Keeps the user, the AI settings and the sandbox connection.
  */
 export async function resetSandbox(userId: string): Promise<ResetSandboxResponse> {
   return prisma.$transaction(async (tx) => {
@@ -289,6 +289,7 @@ export async function resetSandbox(userId: string): Promise<ResetSandboxResponse
     await tx.outgoingEmail.deleteMany({ where: { userId } });
     const applications = await tx.application.deleteMany({ where: { userId } });
     await tx.externalSubmission.deleteMany({ where: { userId } });
+    await tx.portalAccount.deleteMany({ where: { userId } });
     await tx.aIBatch.deleteMany({ where: { userId } });
     await tx.aIUsageDay.deleteMany({ where: { userId } });
     await tx.mailScanDay.deleteMany({ where: { userId } });

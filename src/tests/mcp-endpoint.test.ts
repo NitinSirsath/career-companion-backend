@@ -307,6 +307,7 @@ describe('official SDK client', () => {
         'jobUrl',
         'location',
         'platform',
+        'portalAccount',
         'portalJobId',
         'resumeFilename',
         'sourceRecordRef',

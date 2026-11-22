@@ -20,6 +20,7 @@ const { assertTestDatabase } = require('../dist/utils/testDatabase');
 const NEW_MIGRATIONS = [
   '20261002150000_automation_submissions',
   '20261021100000_automation_details',
+  '20261121120000_portal_accounts',
 ];
 const NEW_UNIQUES = [
   'application_events_externalSubmissionId_key',
@@ -29,6 +30,8 @@ const NEW_UNIQUES = [
   'integration_tokens_tokenHash_key',
   'not_submitted_jobs_pkey',
   'not_submitted_jobs_userId_source_sourceRecordRef_key',
+  'portal_accounts_pkey',
+  'portal_accounts_userId_signInHost_companyKey_key',
 ];
 const NEW_TRIGGERS = [
   'event_submission_ownership',
