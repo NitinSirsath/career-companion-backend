@@ -73,6 +73,7 @@ describe('POST /api/auth/login', () => {
       testAccount: false,
       admin: false,
       suspension: null,
+      onboarding: { step: 'welcome' },
     });
     expect(JSON.stringify(res.body)).not.toContain('scrypt');
     expect(String(res.headers['set-cookie'])).toContain('cc_session=');
