@@ -1,4 +1,5 @@
 import type { UserProfile } from '../contracts/auth';
+import { onboardingOf } from './onboarding';
 import { prisma } from '../db/prisma';
 import { LOCK_NAMESPACE, lockUser } from '../utils/advisoryLock';
 import { betaUserLimit, isAdminEmail, testAccounts } from '../utils/config';
@@ -68,6 +69,8 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
       suspendReason: true,
       resumeRequest: true,
       resumeRequestedAt: true,
+      onboardingStep: true,
+      onboardingDoneAt: true,
     },
   });
   if (!user) return null;
@@ -80,6 +83,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
     testAccount: isTestAccountEmail(user.email),
     admin: isAdminEmail(user.email),
     suspension: suspensionOf(user),
+    onboarding: onboardingOf(user),
   };
 }
 

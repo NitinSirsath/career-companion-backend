@@ -9,6 +9,23 @@ export const PASSWORD_MAX_LENGTH = 200;
 const Email = z.string().trim().toLowerCase().pipe(z.email().max(320));
 const NewPassword = z.string().min(PASSWORD_MIN_LENGTH).max(PASSWORD_MAX_LENGTH);
 
+/**
+ * The guided first run (owner, 22 Nov 2026), in order. The app shows only the steps this device
+ * can do (no Install where the browser cannot install, for example).
+ */
+export const ONBOARDING_STEPS = [
+  'welcome',
+  'gmail',
+  'install',
+  'alerts',
+  'theme',
+  'tour',
+  'ai',
+  'done',
+] as const;
+export const OnboardingStepSchema = z.enum(ONBOARDING_STEPS);
+export type OnboardingStep = z.infer<typeof OnboardingStepSchema>;
+
 /** What a signed-in user may see about their own account. */
 export const UserProfileSchema = z.object({
   id: z.uuid(),
@@ -31,6 +48,11 @@ export const UserProfileSchema = z.object({
       request: z.object({ text: z.string(), sentAt: z.iso.datetime() }).nullable(),
     })
     .nullable(),
+  /**
+   * While the first run is not finished: the step to open, where the user stopped. Null once it is
+   * finished or skipped, and for every account made before it existed.
+   */
+  onboarding: z.object({ step: OnboardingStepSchema }).nullable(),
 });
 export type UserProfile = z.infer<typeof UserProfileSchema>;
 
@@ -41,6 +63,10 @@ export const ResumeRequestSchema = z.strictObject({
   text: z.string().trim().min(1).max(RESUME_REQUEST_MAX_LENGTH),
 });
 export type ResumeRequest = z.infer<typeof ResumeRequestSchema>;
+
+// POST /api/auth/onboarding: the step the user reached (ignored once the first run is finished).
+export const OnboardingStepRequestSchema = z.strictObject({ step: OnboardingStepSchema });
+export type OnboardingStepRequest = z.infer<typeof OnboardingStepRequestSchema>;
 
 // POST /api/auth/login
 export const PasswordLoginRequestSchema = z.strictObject({

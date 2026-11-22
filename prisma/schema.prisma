@@ -28,6 +28,12 @@ model User {
   resumeRequest     String?
   resumeRequestedAt DateTime?
 
+  /// The guided first run (owner, 22 Nov 2026): the step the user last reached, so leaving halfway
+  /// continues there.
+  onboardingStep   String    @default("welcome")
+  /// When the first run was finished or skipped. Accounts made before it existed were marked done.
+  onboardingDoneAt DateTime?
+
   agendaItems         AgendaItem[]
   applications        Application[]
   gmailConnection     GmailConnection?

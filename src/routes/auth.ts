@@ -9,6 +9,8 @@
  *   POST /api/auth/register   create a user with a password (dev mode only)
  *   GET  /api/auth/me         the signed-in user (also a suspended one)
  *   POST /api/auth/resume-request  a suspended user asks the owner to resume the account
+ *   POST /api/auth/onboarding         save the first-run step the user reached
+ *   POST /api/auth/onboarding/finish  end the first run (finished or skipped)
  *   GET|POST /api/auth/logout
  *
  * `?returnTo=` on connect: the app page to open after sign-in (`next` on /login if it fails).
@@ -17,6 +19,7 @@
 import { randomBytes } from 'crypto';
 import { Router, Request, Response, NextFunction } from 'express';
 import {
+  OnboardingStepRequestSchema,
   PasswordLoginRequestSchema,
   RegisterRequestSchema,
   ResumeRequestSchema,
@@ -31,6 +34,7 @@ import {
 } from '../services/googleOAuth';
 import { loginWithPassword, registerUser, setPassword } from '../services/passwordLogin';
 import { isTestAccountEmail } from '../services/testAccounts';
+import { finishOnboarding, saveOnboardingStep } from '../services/onboarding';
 import { saveResumeRequest } from '../services/suspension';
 import { BetaFullError, findOrCreateGoogleUser, getUserProfile } from '../services/user';
 import { AppError } from '../errors';
@@ -221,6 +225,26 @@ router.post(
   handle(200, async (req) => {
     const userId = req.auth!.user.id;
     await saveResumeRequest(userId, ResumeRequestSchema.parse(req.body).text);
+    return getUserProfile(userId);
+  }),
+);
+
+router.post(
+  '/onboarding',
+  requireAuth,
+  handle(200, async (req) => {
+    const userId = req.auth!.user.id;
+    await saveOnboardingStep(userId, OnboardingStepRequestSchema.parse(req.body).step);
+    return getUserProfile(userId);
+  }),
+);
+
+router.post(
+  '/onboarding/finish',
+  requireAuth,
+  handle(200, async (req) => {
+    const userId = req.auth!.user.id;
+    await finishOnboarding(userId);
     return getUserProfile(userId);
   }),
 );
