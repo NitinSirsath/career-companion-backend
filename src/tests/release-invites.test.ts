@@ -8,19 +8,19 @@ import { INVITE_PER_DAY, INVITE_PER_MINUTE, inviteLimits } from '../middleware/r
 import { RELEASE_INVITES_MAX } from '../services/releaseInvites';
 
 const DOMAIN = 'release-invites.test';
-const ADMIN = \`owner@\${DOMAIN}\`;
-const USER = \`user@\${DOMAIN}\`;
+const ADMIN = `owner@${DOMAIN}`;
+const USER = `user@${DOMAIN}`;
 const as = (email: string) => ({ 'X-Development-User': email });
 const ask = (body: Record<string, unknown>) => request(app).post('/api/invites').send(body);
 const invites = () =>
   prisma.releaseInvite.findMany({
-    where: { email: { endsWith: \`@\${DOMAIN}\` } },
+    where: { email: { endsWith: `@${DOMAIN}` } },
     orderBy: { createdAt: 'asc' },
   });
 
 const clean = async () => {
-  await prisma.releaseInvite.deleteMany({ where: { email: { endsWith: \`@\${DOMAIN}\` } } });
-  await prisma.user.deleteMany({ where: { email: { endsWith: \`@\${DOMAIN}\` } } });
+  await prisma.releaseInvite.deleteMany({ where: { email: { endsWith: `@${DOMAIN}` } } });
+  await prisma.user.deleteMany({ where: { email: { endsWith: `@${DOMAIN}` } } });
 };
 
 beforeEach(async () => {
@@ -37,17 +37,17 @@ afterAll(clean);
 
 describe('POST /api/invites', () => {
   it('saves the email, lower case, with where the person heard about NorthList', async () => {
-    const answer = await ask({ email: \`  Ada@\${DOMAIN.toUpperCase()} \`, source: 'LINKEDIN' });
+    const answer = await ask({ email: `  Ada@${DOMAIN.toUpperCase()} `, source: 'LINKEDIN' });
     expect(answer.status).toBe(200);
     expect(InviteResponseSchema.parse(answer.body)).toEqual({ saved: true });
     expect(await invites()).toMatchObject([
-      { email: \`ada@\${DOMAIN}\`, source: 'LINKEDIN', otherSource: null },
+      { email: `ada@${DOMAIN}`, source: 'LINKEDIN', otherSource: null },
     ]);
   });
 
   it('keeps the person’s own words with Other', async () => {
     const answer = await ask({
-      email: \`bo@\${DOMAIN}\`,
+      email: `bo@${DOMAIN}`,
       source: 'OTHER',
       otherSource: ' A podcast ',
     });
@@ -56,9 +56,9 @@ describe('POST /api/invites', () => {
   });
 
   it('gives the same answer for the same email again and keeps the first request', async () => {
-    await ask({ email: \`cy@\${DOMAIN}\`, source: 'FRIEND' });
+    await ask({ email: `cy@${DOMAIN}`, source: 'FRIEND' });
     const [first] = await invites();
-    const again = await ask({ email: \`CY@\${DOMAIN}\`, source: 'X' });
+    const again = await ask({ email: `CY@${DOMAIN}`, source: 'X' });
     expect(again.status).toBe(200);
     expect(again.body).toEqual({ saved: true });
     expect(await invites()).toEqual([first]);
@@ -67,12 +67,12 @@ describe('POST /api/invites', () => {
   it('refuses a wrong email, an unknown source, Other without words, words without Other and extra fields', async () => {
     const wrong = [
       { email: 'not-an-email', source: 'FRIEND' },
-      { email: \`dee@\${DOMAIN}\`, source: 'TV' },
-      { email: \`dee@\${DOMAIN}\`, source: 'OTHER' },
-      { email: \`dee@\${DOMAIN}\`, source: 'OTHER', otherSource: '   ' },
-      { email: \`dee@\${DOMAIN}\`, source: 'FRIEND', otherSource: 'A podcast' },
-      { email: \`dee@\${DOMAIN}\`, source: 'OTHER', otherSource: 'x'.repeat(101) },
-      { email: \`dee@\${DOMAIN}\`, source: 'FRIEND', name: 'Dee' },
+      { email: `dee@${DOMAIN}`, source: 'TV' },
+      { email: `dee@${DOMAIN}`, source: 'OTHER' },
+      { email: `dee@${DOMAIN}`, source: 'OTHER', otherSource: '   ' },
+      { email: `dee@${DOMAIN}`, source: 'FRIEND', otherSource: 'A podcast' },
+      { email: `dee@${DOMAIN}`, source: 'OTHER', otherSource: 'x'.repeat(101) },
+      { email: `dee@${DOMAIN}`, source: 'FRIEND', name: 'Dee' },
       { source: 'FRIEND' },
     ];
     for (const body of wrong) {
@@ -86,7 +86,7 @@ describe('POST /api/invites', () => {
   });
 
   it('works signed out and signed in alike', async () => {
-    expect((await ask({ email: \`eve@\${DOMAIN}\`, source: 'SEARCH' }).set(as(USER))).status).toBe(
+    expect((await ask({ email: `eve@${DOMAIN}`, source: 'SEARCH' }).set(as(USER))).status).toBe(
       200,
     );
     expect(await invites()).toHaveLength(1);
@@ -94,7 +94,7 @@ describe('POST /api/invites', () => {
 
   it('stops saving new emails once the list is full, with words to show', async () => {
     vi.spyOn(prisma.releaseInvite, 'count').mockResolvedValue(RELEASE_INVITES_MAX);
-    const answer = await ask({ email: \`fay@\${DOMAIN}\`, source: 'YOUTUBE' });
+    const answer = await ask({ email: `fay@${DOMAIN}`, source: 'YOUTUBE' });
     expect(answer.status).toBe(503);
     expect(answer.body.error).toMatchObject({
       code: 'INVITE_LIST_FULL',
@@ -107,7 +107,7 @@ describe('POST /api/invites', () => {
 describe('request limits for invites', () => {
   let server: Server;
   let address = 0;
-  const nextAddress = () => \`198.51.100.\${(address += 1)}\`;
+  const nextAddress = () => `198.51.100.${(address += 1)}`;
 
   beforeAll(async () => {
     app.set('trust proxy', 1);
@@ -128,7 +128,7 @@ describe('request limits for invites', () => {
       request(server)
         .post('/api/invites')
         .set('X-Forwarded-For', ip)
-        .send({ email: \`limit\${n}@\${DOMAIN}\`, source: 'FRIEND' });
+        .send({ email: `limit${n}@${DOMAIN}`, source: 'FRIEND' });
     for (let n = 0; n < INVITE_PER_MINUTE; n += 1) expect((await send(n)).status).toBe(200);
     const refused = await send(99);
     expect(refused.status).toBe(429);
@@ -138,7 +138,7 @@ describe('request limits for invites', () => {
     const other = await request(server)
       .post('/api/invites')
       .set('X-Forwarded-For', nextAddress())
-      .send({ email: \`other@\${DOMAIN}\`, source: 'FRIEND' });
+      .send({ email: `other@${DOMAIN}`, source: 'FRIEND' });
     expect(other.status).toBe(200);
   });
 });
@@ -152,9 +152,9 @@ describe('GET /api/admin/invites', () => {
   it('lists every request, newest first, with the source and the date', async () => {
     await prisma.releaseInvite.createMany({
       data: [
-        { email: \`old@\${DOMAIN}\`, source: 'FRIEND', createdAt: new Date('2026-11-20T10:00:00Z') },
+        { email: `old@${DOMAIN}`, source: 'FRIEND', createdAt: new Date('2026-11-20T10:00:00Z') },
         {
-          email: \`new@\${DOMAIN}\`,
+          email: `new@${DOMAIN}`,
           source: 'OTHER',
           otherSource: 'A podcast',
           createdAt: new Date('2026-11-22T10:00:00Z'),
@@ -164,17 +164,17 @@ describe('GET /api/admin/invites', () => {
     const answer = await request(app).get('/api/admin/invites').set(as(ADMIN));
     expect(answer.status).toBe(200);
     const mine = AdminInvitesResponseSchema.parse(answer.body).invites.filter((row) =>
-      row.email.endsWith(\`@\${DOMAIN}\`),
+      row.email.endsWith(`@${DOMAIN}`),
     );
     expect(mine).toEqual([
       {
-        email: \`new@\${DOMAIN}\`,
+        email: `new@${DOMAIN}`,
         source: 'OTHER',
         otherSource: 'A podcast',
         createdAt: '2026-11-22T10:00:00.000Z',
       },
       {
-        email: \`old@\${DOMAIN}\`,
+        email: `old@${DOMAIN}`,
         source: 'FRIEND',
         otherSource: null,
         createdAt: '2026-11-20T10:00:00.000Z',
