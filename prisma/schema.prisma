@@ -48,6 +48,7 @@ model User {
   integrationTokens   IntegrationToken[]
   externalSubmissions ExternalSubmission[]
   portalAccounts      PortalAccount[]
+  setupCodes          SetupCode[]
   notSubmittedJobs    NotSubmittedJob[]
   sandboxMessages     SandboxMessage[]
   pushDevices         PushDevice[]
@@ -914,6 +915,25 @@ model IntegrationToken {
 
   @@index([userId, createdAt])
   @@map("integration_tokens")
+}
+
+/// One-click setup of NorthList Apply (owner, 23 Nov 2026): a short code the app puts in an "Open in Codex /
+/// Claude Code" link instead of a token. It works once, for 10 minutes; the AI swaps it for an integration token.
+/// Only its SHA-256 hash is stored.
+model SetupCode {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  codeHash  String    @unique
+  /// The name the new token gets, for example the computer.
+  name      String
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("setup_codes")
 }
 
 enum ExternalSubmissionSource {

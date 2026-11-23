@@ -5,6 +5,7 @@
  *   GET    /api/integration-tokens       list, newest first, offset pagination
  *   GET    /api/integration-tokens/connection   the server address the automation uses
  *   DELETE /api/integration-tokens/:id   revoke (keeps the row for the audit trail)
+ *   POST   /api/integration-tokens/setup-codes   a one-time setup code for an "Open in …" link
  *
  * The user always comes from the session. An integration token is never accepted here.
  */
@@ -12,6 +13,7 @@ import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
 import {
   CreateIntegrationTokenRequestSchema,
+  CreateSetupCodeRequestSchema,
   McpConnectionResponse,
 } from '../contracts/integrationToken';
 import { requireAuth } from '../middleware/auth';
@@ -20,6 +22,7 @@ import {
   listIntegrationTokens,
   revokeIntegrationToken,
 } from '../services/integrationTokens';
+import { createSetupCode } from '../services/setupCodes';
 import { mcpServerAddress } from '../utils/config';
 import { createPaginatedResponse, getPaginationParams } from '../utils/pagination';
 
@@ -40,6 +43,13 @@ router.post(
   '/',
   handle(201, (req) =>
     createIntegrationToken(req.auth!.user.id, CreateIntegrationTokenRequestSchema.parse(req.body)),
+  ),
+);
+
+router.post(
+  '/setup-codes',
+  handle(201, (req) =>
+    createSetupCode(req.auth!.user.id, CreateSetupCodeRequestSchema.parse(req.body)),
   ),
 );
 

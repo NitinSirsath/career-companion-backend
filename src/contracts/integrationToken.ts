@@ -72,3 +72,40 @@ export type McpConnectionResponse = z.infer<typeof McpConnectionResponseSchema>;
 
 export const RevokeIntegrationTokenResponseSchema = IntegrationTokenSchema;
 export type RevokeIntegrationTokenResponse = IntegrationToken;
+
+// ─── One-click setup codes (owner, 23 Nov 2026) ─────────────────────────────
+//
+// "Open in Codex / Claude Code" links carry a setup code, never a token. The code works once, for
+// SETUP_CODE_MINUTES; the user's AI swaps it for a new integration token (POST /api/setup-codes/redeem).
+
+export const SETUP_CODE_MINUTES = 10;
+/** NL-XXXX-XXXX-XXXX: letters and digits that are hard to mix up (no 0/O, 1/I/L). */
+export const SETUP_CODE_PATTERN = /^NL-[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$/;
+
+// POST /api/integration-tokens/setup-codes (signed in)
+export const CreateSetupCodeRequestSchema = z.strictObject({
+  /** The name the new token gets, for example the computer. */
+  name: z.string().trim().min(1, 'Name is required').max(100),
+});
+export type CreateSetupCodeRequest = z.input<typeof CreateSetupCodeRequestSchema>;
+
+export const CreateSetupCodeResponseSchema = z.object({
+  code: z.string().regex(SETUP_CODE_PATTERN),
+  expiresAt: IsoDateTime,
+});
+export type CreateSetupCodeResponse = z.infer<typeof CreateSetupCodeResponseSchema>;
+
+// POST /api/setup-codes/redeem (no sign-in; the code is the proof)
+export const RedeemSetupCodeRequestSchema = z.strictObject({
+  code: z.string().trim().min(1).max(40),
+});
+export type RedeemSetupCodeRequest = z.input<typeof RedeemSetupCodeRequestSchema>;
+
+/** The second response that carries a plaintext token, once: to the AI that swapped the code. */
+export const RedeemSetupCodeResponseSchema = z.object({
+  serverAddress: z.string(),
+  name: z.string(),
+  plaintextToken: z.string().regex(/^ccmcp_[A-Za-z0-9_-]{43}$/),
+  expiresAt: IsoDateTime,
+});
+export type RedeemSetupCodeResponse = z.infer<typeof RedeemSetupCodeResponseSchema>;
