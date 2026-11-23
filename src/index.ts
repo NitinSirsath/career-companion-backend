@@ -102,6 +102,7 @@ import { alertsRouter } from './routes/alerts';
 import { adminRouter } from './routes/admin';
 import { messagesRouter } from './routes/messages';
 import { invitesRouter } from './routes/invites';
+import { setupCodesRouter } from './routes/setupCodes';
 import { errorHandler } from './middleware/error';
 
 app.use('/api/app-mode', appModeRouter);
@@ -123,6 +124,7 @@ app.use('/api/alerts', alertsRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/messages', messagesRouter);
 app.use('/api/invites', invitesRouter);
+app.use('/api/setup-codes', setupCodesRouter);
 // Dev mode and test accounts only: answers 404 for everyone else (middleware/appMode.ts).
 app.use('/api/sandbox', sandboxRouter);
 
