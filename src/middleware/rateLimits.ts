@@ -30,6 +30,9 @@ export const MCP_TOKEN_PER_MINUTE = 60;
 /** "Get an invite" from the sign-in page: per network address, a minute and a day. */
 export const INVITE_PER_MINUTE = 5;
 export const INVITE_PER_DAY = 20;
+/** Setup codes swapped for a token: per network address, a minute and a day. */
+export const SETUP_CODE_PER_MINUTE = 10;
+export const SETUP_CODE_PER_DAY = 50;
 
 /** The routes that start or check a sign-in, below `/api/auth`. */
 const SIGN_IN_ROUTES = new Set([
@@ -128,5 +131,15 @@ export const inviteLimits = [
           details: { retryAfterSeconds: seconds },
         },
       }),
+  }),
+];
+
+/** On `POST /api/setup-codes/redeem` only, after `apiLimit`: few tries per network address. */
+export const setupCodeLimits = [
+  limiter('setup_code_minute', { limit: SETUP_CODE_PER_MINUTE, keyGenerator: addressKey }),
+  limiter('setup_code_day', {
+    limit: SETUP_CODE_PER_DAY,
+    keyGenerator: addressKey,
+    windowMs: DAY_MS,
   }),
 ];
