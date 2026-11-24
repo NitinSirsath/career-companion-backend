@@ -50,6 +50,7 @@ model User {
   portalAccounts      PortalAccount[]
   setupCodes          SetupCode[]
   notSubmittedJobs    NotSubmittedJob[]
+  applyTasks          ApplyTask[]
   sandboxMessages     SandboxMessage[]
   pushDevices         PushDevice[]
   mailScanDays        MailScanDay[]
@@ -989,17 +990,21 @@ model ExternalSubmission {
   applicationId    String?                      @db.Uuid
   /// null while NEEDS_REVIEW.
   resolvedAt       DateTime?
+  /// The NorthList Apply run that sent it (owner, 25 Nov 2026); null when the automation sent none.
+  taskId           String?                      @db.Uuid
 
   user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   token         IntegrationToken? @relation(fields: [tokenId], references: [id], onDelete: SetNull)
   application   Application?      @relation(fields: [applicationId], references: [id], onDelete: SetNull)
   portalAccount PortalAccount?    @relation(fields: [portalAccountId], references: [id], onDelete: SetNull)
+  task          ApplyTask?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
   event         ApplicationEvent?
 
   @@unique([userId, source, sourceRecordRef])
   @@index([userId, matchState])
   @@index([userId, receivedAt])
   @@index([applicationId])
+  @@index([taskId])
   @@map("external_submissions")
 }
 
@@ -1062,14 +1067,40 @@ model NotSubmittedJob {
   loggedAt        DateTime
   receivedAt      DateTime                 @default(now())
   tokenId         String?                  @db.Uuid
+  /// The NorthList Apply run that looked at it (owner, 25 Nov 2026); null when none was sent.
+  taskId          String?                  @db.Uuid
 
   user  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   token IntegrationToken? @relation(fields: [tokenId], references: [id], onDelete: SetNull)
+  task  ApplyTask?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
 
   @@unique([userId, source, sourceRecordRef])
   @@index([userId, loggedAt])
   @@index([userId, receivedAt])
+  @@index([taskId])
   @@map("not_submitted_jobs")
+}
+
+/// One NorthList Apply run (owner, 25 Nov 2026): from the user's `ready` to the end of that session,
+/// keyed by the moment it started. The automation sends it with every entry; the first entry makes
+/// the row. Time taken = startedAt to the newest entry of the run.
+model ApplyTask {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  /// The run's `Started` time, with the user's UTC offset as sent.
+  startedAt DateTime
+  /// The user's UTC offset at the start, in minutes (330 for +05:30), so the run is named in their time.
+  utcOffsetMinutes Int
+  /// [{ site, planned }] in run order, as the automation sent it; the newest send wins.
+  plan      Json
+  createdAt DateTime @default(now())
+
+  user             User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  submissions      ExternalSubmission[]
+  notSubmittedJobs NotSubmittedJob[]
+
+  @@unique([userId, startedAt])
+  @@map("apply_tasks")
 }
 
 enum AgendaState {
