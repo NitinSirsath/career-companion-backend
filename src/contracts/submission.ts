@@ -149,3 +149,52 @@ export type NotSubmittedJob = z.infer<typeof NotSubmittedJobSchema>;
 export const ListNotSubmittedJobsResponseSchema =
   createPaginatedResponseSchema(NotSubmittedJobSchema);
 export type ListNotSubmittedJobsResponse = z.infer<typeof ListNotSubmittedJobsResponseSchema>;
+
+// ─── GET /api/submissions/tasks ─────────────────────────────────────────────
+
+/**
+ * One plan item of a NorthList Apply run (owner, 25 Nov 2026): how many jobs the user asked for and
+ * how many were sent. `planned` is null for a site the run sent to that was not in its plan (a
+ * job source's job that ended on another site's form).
+ */
+export const ApplyTaskPlanItemSchema = z.object({
+  site: z.string(),
+  planned: z.number().int().min(0).nullable(),
+  sent: z.number().int().min(0),
+});
+export type ApplyTaskPlanItem = z.infer<typeof ApplyTaskPlanItemSchema>;
+
+/**
+ * One NorthList Apply run: from the user's `ready` to the end of that session. Named by its start
+ * time in the user's own time (`startedAt` plus `utcOffsetMinutes`). Time taken runs from
+ * `startedAt` to `lastAt`, the newest entry of the run; null while it has none.
+ */
+export const ApplyTaskSchema = z.object({
+  id: z.string(),
+  startedAt: IsoDateTime,
+  /** The user's UTC offset when the run started, in minutes (330 for +05:30). */
+  utcOffsetMinutes: z.number().int(),
+  lastAt: IsoDateTime.nullable(),
+  /** Applications the run sent (every confirmed submission except ones the user ignored). */
+  sent: z.number().int().min(0),
+  /** Jobs the run tried but did not apply to. */
+  notSent: z.number().int().min(0),
+  plan: z.array(ApplyTaskPlanItemSchema),
+});
+export type ApplyTask = z.infer<typeof ApplyTaskSchema>;
+
+/** Totals over every run, and how many Apply applications came before runs were sent. */
+export const ApplyTaskSummarySchema = z.object({
+  tasks: z.number().int().min(0),
+  sent: z.number().int().min(0),
+  /** Time taken by all runs together, in whole minutes. */
+  minutes: z.number().int().min(0),
+  /** NorthList Apply applications that belong to no run (sent by an older Apply version). */
+  earlier: z.number().int().min(0),
+});
+export type ApplyTaskSummary = z.infer<typeof ApplyTaskSummarySchema>;
+
+export const ListApplyTasksResponseSchema = createPaginatedResponseSchema(ApplyTaskSchema).extend({
+  summary: ApplyTaskSummarySchema,
+});
+export type ListApplyTasksResponse = z.infer<typeof ListApplyTasksResponseSchema>;
