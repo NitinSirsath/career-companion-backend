@@ -3,6 +3,7 @@
  *
  *   GET  /api/submissions/pending       owner's NEEDS_REVIEW submissions, newest first
  *   GET  /api/submissions/not-submitted owner's jobs the automation did not apply to, newest first
+ *   GET  /api/submissions/tasks         owner's NorthList Apply runs, newest first, with totals (25 Nov 2026)
  *   POST /api/submissions/:id/resolve   { action: link, applicationId } | { action: create } | { action: ignore }
  *   POST /api/submissions/portal-accounts/:id/password   the owner's saved portal password (21 Nov 2026)
  *
@@ -13,12 +14,14 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
 import {
+  ListApplyTasksResponse,
   NotSubmittedJob,
   PendingSubmission,
   PortalPasswordResponse,
   ResolveSubmissionRequestSchema,
 } from '../contracts/submission';
 import { requireAuth } from '../middleware/auth';
+import { applyTaskSummary, listApplyTasks } from '../services/applyTask';
 import { listPendingSubmissions, resolveSubmission } from '../services/externalSubmission';
 import { listNotSubmittedJobs } from '../services/notSubmittedJob';
 import { PortalPasswordUnreadableError, revealPortalPassword } from '../services/portalAccount';
@@ -53,6 +56,24 @@ router.get('/not-submitted', async (req: Request, res: Response, next: NextFunct
       receivedAt: row.receivedAt.toISOString(),
     }));
     res.status(200).json(createPaginatedResponse(items, limit, offset));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/tasks', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.auth!.user.id;
+    const { limit, offset } = getPaginationParams(req.query);
+    const [rows, summary] = await Promise.all([
+      listApplyTasks(userId, limit, offset),
+      applyTaskSummary(userId),
+    ]);
+    const body: ListApplyTasksResponse = {
+      ...createPaginatedResponse(rows, limit, offset),
+      summary,
+    };
+    res.status(200).json(body);
   } catch (err) {
     next(err);
   }

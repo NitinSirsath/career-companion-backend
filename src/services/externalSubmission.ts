@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { prisma } from '../db/prisma';
 import { LOCK_NAMESPACE, lockUser } from '../utils/advisoryLock';
 import { submissionDailyLimit } from '../utils/config';
+import { CanonicalTask, parseTaskInput, saveTask } from './applyTask';
 import {
   CanonicalPortalAccount,
   PORTAL_ACCOUNT_SELECT,
@@ -65,9 +66,10 @@ const httpUrl = () =>
 
 /**
  * The tool contract (ADR-0002, v1, amended 21 Oct 2026 with the apply page link, the resume file
- * name and the submitted answers, and 21 Nov 2026 with the company-portal account). Strict: unknown
- * keys are rejected, so there is no field for resume content, and the only credential is the
- * portal account's. Required strings are trimmed before their length check.
+ * name and the submitted answers, 21 Nov 2026 with the company-portal account, and 25 Nov 2026
+ * with the run). Strict: unknown keys are rejected, so there is no field for resume content, and
+ * the only credential is the portal account's. Required strings are trimmed before their length
+ * check. `task` is checked on its own (services/applyTask.ts): a bad one never refuses the entry.
  */
 export const RecordApplicationSubmissionInputSchema = z.strictObject({
   sourceRecordRef: z
@@ -109,6 +111,7 @@ export const RecordApplicationSubmissionInputSchema = z.strictObject({
     .nullish()
     .describe('Every screening question and the answer given, as written in the daily file'),
   portalAccount: PortalAccountInputSchema.nullish(),
+  task: z.unknown().optional(),
 });
 
 export type SubmissionResult = 'created' | 'linked' | 'needs_review' | 'already_recorded';
@@ -145,6 +148,8 @@ export interface CanonicalSubmission {
   submittedAnswers: { question: string; answer: string }[] | null;
   /** null when none was reported. Stored apart from the submission (services/portalAccount.ts). */
   portalAccount: CanonicalPortalAccount | null;
+  /** The run that sent it; null when none was sent or it was malformed (services/applyTask.ts). */
+  task: CanonicalTask | null;
 }
 
 const KNOWN_FIELDS = new Set(Object.keys(RecordApplicationSubmissionInputSchema.shape));
@@ -226,6 +231,7 @@ export function parseSubmissionInput(raw: unknown, now = new Date()): CanonicalS
     resumeFilename: blankToNull(input.resumeFilename),
     submittedAnswers: input.submittedAnswers?.length ? input.submittedAnswers : null,
     portalAccount: input.portalAccount ? canonicalPortalAccount(input.portalAccount) : null,
+    task: parseTaskInput(input.task, now),
   };
 }
 
@@ -415,6 +421,9 @@ async function repeatOf(
   );
   if (accountId && stored.portalAccountId === null)
     fill.portalAccount = { connect: { id: accountId } };
+  // A replay from a newer Apply version adds the run to an entry sent without one.
+  if (submission.task && stored.taskId === null)
+    fill.task = { connect: { id: await saveTask(db, ref.userId, submission.task) } };
   if (Object.keys(fill).length)
     await db.externalSubmission.update({ where: { id: stored.id }, data: fill });
   return {
@@ -485,13 +494,15 @@ export async function recordSubmission(
         else decision = { state: 'NEEDS_REVIEW' };
       }
       const settled = decision.state !== 'NEEDS_REVIEW';
-      const { submittedAnswers, portalAccount, ...fields } = submission;
+      const { submittedAnswers, portalAccount, task, ...fields } = submission;
       const portalAccountId = await savedAccountOf(tx, userId, submission.company, portalAccount);
+      const taskId = task ? await saveTask(tx, userId, task) : null;
       const record = await tx.externalSubmission.create({
         data: {
           ...ref,
           ...fields,
           portalAccountId,
+          taskId,
           submittedAnswers: submittedAnswers ?? Prisma.DbNull,
           receivedAt: now,
           tokenId,

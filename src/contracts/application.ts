@@ -44,6 +44,8 @@ export const ApplicationFiltersSchema = z.object({
   submittedVia: SubmittedViaSchema.optional(),
   group: ApplicationGroupSchema.optional(),
   reply: ApplyReplySchema.optional(),
+  /** One NorthList Apply run's applications, or `none`: Apply applications that belong to no run. */
+  applyTask: z.union([z.uuid(), z.literal('none')]).optional(),
   sort: ApplicationSortSchema.optional(),
 });
 export type ApplicationFilters = z.infer<typeof ApplicationFiltersSchema>;

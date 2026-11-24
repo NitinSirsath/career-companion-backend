@@ -313,6 +313,7 @@ describe('official SDK client', () => {
         'sourceRecordRef',
         'submittedAnswers',
         'submittedAt',
+        'task',
         'workMode',
       ].sort(),
     );

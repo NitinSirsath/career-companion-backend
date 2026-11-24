@@ -9,12 +9,16 @@ import { z } from 'zod';
 import { prisma } from '../db/prisma';
 import { LOCK_NAMESPACE, lockUser } from '../utils/advisoryLock';
 import { submissionDailyLimit } from '../utils/config';
+import { CanonicalTask, parseTaskInput, saveTask } from './applyTask';
 import { SUBMISSION_PLATFORMS, SubmissionIntakeError, canonicalJobUrl } from './externalSubmission';
 
 const FUTURE_TOLERANCE_MS = 5 * 60_000;
 export const REASON_LIMIT = 1000;
 
-/** The not-submitted tool contract. Strict: unknown keys are rejected. */
+/**
+ * The not-submitted tool contract. Strict: unknown keys are rejected. `task` (25 Nov 2026) is
+ * checked on its own: a bad one never refuses the entry (services/applyTask.ts).
+ */
 export const RecordNotSubmittedJobInputSchema = z.strictObject({
   sourceRecordRef: z.string().regex(/^\d{4}-\d{2}-\d{2}\/\d{2}:\d{2}:\d{2}$/),
   outcome: z.enum(['skipped', 'needs_user']),
@@ -27,6 +31,7 @@ export const RecordNotSubmittedJobInputSchema = z.strictObject({
     .url({ protocol: /^https?$/ })
     .max(2048)
     .nullish(),
+  task: z.unknown().optional(),
 });
 
 const KNOWN_FIELDS = new Set(Object.keys(RecordNotSubmittedJobInputSchema.shape));
@@ -48,6 +53,8 @@ export interface CanonicalNotSubmittedJob {
   loggedAt: Date;
   reason: string;
   jobUrl: string | null;
+  /** The run that looked at it; null when none was sent or it was malformed. */
+  task: CanonicalTask | null;
 }
 
 export function parseNotSubmittedInput(raw: unknown, now = new Date()): CanonicalNotSubmittedJob {
@@ -77,6 +84,7 @@ export function parseNotSubmittedInput(raw: unknown, now = new Date()): Canonica
     loggedAt,
     reason: input.reason,
     jobUrl: input.jobUrl ? canonicalJobUrl(input.jobUrl) : null,
+    task: parseTaskInput(input.task, now),
   };
 }
 
@@ -90,6 +98,8 @@ const TX_OPTIONS = { maxWait: 5000, timeout: 10000 };
 const fillOf = (stored: NotSubmittedJob, incoming: CanonicalNotSubmittedJob) =>
   stored.jobUrl === null && incoming.jobUrl !== null ? { jobUrl: incoming.jobUrl } : null;
 
+type Db = Prisma.TransactionClient | typeof prisma;
+
 /**
  * Records one not-submitted entry for the token's user. Idempotent on
  * (user, AUTOMATION, sourceRecordRef). Counts against its own daily limit, apart from submissions.
@@ -102,13 +112,17 @@ export async function recordNotSubmittedJob(
 ): Promise<{ result: NotSubmittedResult; recordId: string }> {
   const job = parseNotSubmittedInput(raw, now);
   const ref = { userId, source: 'AUTOMATION' as const, sourceRecordRef: job.sourceRecordRef };
-  const repeat = async (db: Prisma.TransactionClient | typeof prisma) => {
+  const repeat = async (db: Db) => {
     const stored = await db.notSubmittedJob.findUnique({
       where: { userId_source_sourceRecordRef: ref },
     });
     if (!stored) return null;
-    const fill = fillOf(stored, job);
-    if (fill) await db.notSubmittedJob.update({ where: { id: stored.id }, data: fill });
+    const fill: Prisma.NotSubmittedJobUpdateInput = { ...fillOf(stored, job) };
+    // A replay from a newer Apply version adds the run to an entry sent without one.
+    if (job.task && stored.taskId === null)
+      fill.task = { connect: { id: await saveTask(db, userId, job.task) } };
+    if (Object.keys(fill).length)
+      await db.notSubmittedJob.update({ where: { id: stored.id }, data: fill });
     return { result: 'already_recorded' as const, recordId: stored.id };
   };
   try {
@@ -124,8 +138,10 @@ export async function recordNotSubmittedJob(
           'rate_limited',
           'The daily limit is reached. Retry the next UTC day.',
         );
+      const { task, ...fields } = job;
+      const taskId = task ? await saveTask(tx, userId, task) : null;
       const record = await tx.notSubmittedJob.create({
-        data: { ...ref, ...job, receivedAt: now, tokenId },
+        data: { ...ref, ...fields, taskId, receivedAt: now, tokenId },
         select: { id: true },
       });
       return { result: 'recorded' as const, recordId: record.id };
