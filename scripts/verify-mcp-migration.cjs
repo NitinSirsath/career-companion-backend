@@ -21,9 +21,12 @@ const NEW_MIGRATIONS = [
   '20261002150000_automation_submissions',
   '20261021100000_automation_details',
   '20261121120000_portal_accounts',
+  '20261125120000_apply_tasks',
 ];
 const NEW_UNIQUES = [
   'application_events_externalSubmissionId_key',
+  'apply_tasks_pkey',
+  'apply_tasks_userId_startedAt_key',
   'external_submissions_pkey',
   'external_submissions_userId_source_sourceRecordRef_key',
   'integration_tokens_pkey',
