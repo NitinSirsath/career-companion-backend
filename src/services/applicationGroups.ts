@@ -37,10 +37,20 @@ function applyReplyFilter(reply: 'replied' | 'waiting'): Prisma.ApplicationWhere
   };
 }
 
+/** One run's applications (25 Nov 2026), or `none`: Apply applications that belong to no run. */
+function applyTaskFilter(
+  settled: Prisma.ExternalSubmissionWhereInput,
+  task: string,
+): Prisma.ApplicationWhereInput {
+  if (task === 'none')
+    return { externalSubmissions: { some: settled, none: { ...settled, taskId: { not: null } } } };
+  return { externalSubmissions: { some: { ...settled, taskId: task } } };
+}
+
 /** progress: all but NorthList Apply applications that are waiting; apply: those sent by it. */
 export function groupFilters(
   userId: string,
-  filters: Pick<ApplicationFilters, 'submittedVia' | 'group' | 'reply'>,
+  filters: Pick<ApplicationFilters, 'submittedVia' | 'group' | 'reply' | 'applyTask'>,
 ): Prisma.ApplicationWhereInput[] {
   const settled = { userId, ...SETTLED } satisfies Prisma.ExternalSubmissionWhereInput;
   const viaApply = {
@@ -52,6 +62,7 @@ export function groupFilters(
     ...(filters.group === 'progress'
       ? [{ OR: [{ externalSubmissions: { none: settled } }, applyReplyFilter('replied')] }]
       : []),
+    ...(filters.applyTask ? [applyTaskFilter(settled, filters.applyTask)] : []),
   ];
 }
 
