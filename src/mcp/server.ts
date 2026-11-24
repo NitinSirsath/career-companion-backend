@@ -22,6 +22,7 @@ import {
   loggableNotSubmittedFields,
   recordNotSubmittedJob,
 } from '../services/notSubmittedJob';
+import { TASK_PLAN_LIMIT } from '../services/applyTask';
 import { currentCall } from './callLog';
 
 export const TOOL_NAME = 'record_application_submission';
@@ -48,6 +49,41 @@ const HTTP_URL = (description: string) => ({
   maxLength: 2048,
   description,
 });
+
+/** The NorthList Apply run an entry belongs to (owner, 25 Nov 2026); the same on both tools. */
+const TASK = {
+  type: 'object',
+  description:
+    "The run this entry belongs to: the session's Started time and today's plan. The same on every entry of the run.",
+  properties: {
+    startedAt: {
+      type: 'string',
+      format: 'date-time',
+      description:
+        'ISO 8601 with a UTC offset: the date the session started and its Started time, for example 2026-11-24T21:02:10+05:30',
+    },
+    plan: {
+      type: 'array',
+      maxItems: TASK_PLAN_LIMIT,
+      description: 'The plan items in run order, with the number the user asked for',
+      items: {
+        type: 'object',
+        properties: {
+          site: {
+            type: 'string',
+            pattern: '^[a-z][a-z0-9_]{0,49}$',
+            description: 'The plan item, for example linkedin or the_reliable_jobs',
+          },
+          planned: { type: 'integer', minimum: 0, maximum: 100 },
+        },
+        required: ['site', 'planned'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['startedAt', 'plan'],
+  additionalProperties: false,
+};
 
 const text = (maxLength: number, description?: string) => ({
   type: 'string',
@@ -133,6 +169,7 @@ export const ADVERTISED_INPUT_SCHEMA = {
       required: ['signInUrl', 'loginEmail'],
       additionalProperties: false,
     },
+    task: TASK,
   },
   required: ['sourceRecordRef', 'platform', 'company', 'jobTitle', 'submittedAt'],
   additionalProperties: false,
@@ -167,6 +204,7 @@ export const ADVERTISED_NOT_SUBMITTED_SCHEMA = {
       description: 'The skip reason, or the unanswered question or next action, from the entry',
     },
     jobUrl: HTTP_URL('http or https job URL'),
+    task: TASK,
   },
   required: ['sourceRecordRef', 'outcome', 'platform', 'company', 'jobTitle', 'loggedAt', 'reason'],
   additionalProperties: false,
@@ -198,13 +236,14 @@ const DESCRIPTION = [
   'Call it once per submission, only after the site showed a submission confirmation and the applied entry was appended to the daily file.',
   'Send only the listed fields, copied from that entry, including the resume file name and every submitted question and answer.',
   'When a Workday or other company-portal account was used, also send portalAccount from the account record; NorthList stores its password encrypted for the user.',
+  'Send task (the run start time and plan) with every entry.',
   'Never send resume content, any other credential, or skipped or needs_user entries.',
   'Idempotent on sourceRecordRef: a repeat returns already_recorded and only fills fields that are still empty. On invalid_input do not retry until the entry is fixed.',
 ].join(' ');
 
 const NOT_SUBMITTED_DESCRIPTION = [
   "Record one job the user's own automation looked at but did not apply to (a skipped or needs_user entry in its daily file), with the reason.",
-  'It never becomes an application. Call it at the end of a session for each such entry, with values copied from the entry. Never send credentials or resume content.',
+  'It never becomes an application. Call it at the end of a session for each such entry, with values copied from the entry, and task (the run start time and plan). Never send credentials or resume content.',
   'Idempotent on sourceRecordRef: a repeat returns already_recorded. On invalid_input do not retry until the entry is fixed.',
 ].join(' ');
 
@@ -264,7 +303,7 @@ export function identityOf(authInfo: AuthInfo | undefined) {
 }
 
 export function createMcpServer(authInfo: AuthInfo | undefined) {
-  const server = new McpServer({ name: 'northlist', version: '1.2.0' });
+  const server = new McpServer({ name: 'northlist', version: '1.3.0' });
   server.registerTool(
     TOOL_NAME,
     {
