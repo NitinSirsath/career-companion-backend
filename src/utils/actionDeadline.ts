@@ -17,11 +17,11 @@ const weekdays = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 const monthPattern =
   '(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|october|oct|november|nov|december|dec)\\.?';
 const namedDate = new RegExp(
-  \`^(?:\${monthPattern} (\\d{1,2})(?:st|nd|rd|th)?|(\\d{1,2})(?:st|nd|rd|th)? \${monthPattern})(?:,? (\\d{4}))?$\`,
+  `^(?:${monthPattern} (\\d{1,2})(?:st|nd|rd|th)?|(\\d{1,2})(?:st|nd|rd|th)? ${monthPattern})(?:,? (\\d{4}))?$`,
 );
 type Rejected = Extract<ParsedDeadline, { deadline: null }>;
 /**
- * A date read from the text, before it is checked against the day the email arrived. \`day\`: the
+ * A date read from the text, before it is checked against the day the email arrived. `day`: the
  * calendar day as written, when a time with an offset moved the deadline off it.
  */
 type Candidate = {
@@ -30,7 +30,7 @@ type Candidate = {
   weekday?: number;
   day?: Date;
 };
-/** A time read next to a written date. \`offset\`: minutes from UTC; null when its zone is unclear. */
+/** A time read next to a written date. `offset`: minutes from UTC; null when its zone is unclear. */
 type Clock = { ms: number; offset: number | null };
 
 const reject = (reason: Rejected['reason']): Rejected => ({
@@ -49,27 +49,27 @@ function calendarDate(year: number, month: number, day: number): Date | null {
 }
 
 /**
- * \`2026-10-03\`, then an optional time after \`T\` or a space. Its zone counts when it is \`Z\`, \`UTC\`,
- * \`GMT\` or an offset; any other zone name is read as no zone.
+ * `2026-10-03`, then an optional time after `T` or a space. Its zone counts when it is `Z`, `UTC`,
+ * `GMT` or an offset; any other zone name is read as no zone.
  */
 const isoDate =
-  /^(\\d{4})-(\\d{2})-(\\d{2})(?:[t ](\\d{2}):(\\d{2})(?::(\\d{2})(?:\\.(\\d{1,3}))?)?(?: ?(z|utc|gmt|[+-]\\d{2}:\\d{2})| [a-z]{2,5})?)?$/;
+  /^(\d{4})-(\d{2})-(\d{2})(?:[t ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(?: ?(z|utc|gmt|[+-]\d{2}:\d{2})| [a-z]{2,5})?)?$/;
 const weekdayPrefix =
   /^(sunday|sun|monday|mon|tuesday|tue|wednesday|wed|thursday|thu|friday|fri|saturday|sat),? /;
 /**
- * A clock time: \`11:59 PM IST\`, \`5 pm\`, \`17:00\`, \`05:30:00 AM +0000 GMT\`. Groups: hour, minute,
+ * A clock time: `11:59 PM IST`, `5 pm`, `17:00`, `05:30:00 AM +0000 GMT`. Groups: hour, minute,
  * second and a/p of a time with minutes; hour and a/p of one without; a written offset; a zone
  * name (never a month or a weekday), plain or in brackets.
  */
-const clock = \`(?:(\\d{1,2}):(\\d{2})(?::(\\d{2}))?(?: ?([ap])\\.?m\\.?)?|(\\d{1,2}) ?([ap])\\.?m\\.?)(?: ?([+-]\\d{2}:?\\d{2}))?(?: (?!(?:\${months.join('|')}|\${weekdays.join('|')}))([a-z]{2,5})| \\(([a-z]{2,5})\\))?\`;
-/** A time after a written date: \`, 11:59 PM IST\`, \` at 5 pm\`, \` 17:00\`. */
-const timeSuffix = new RegExp(\`,? (?:at )?\${clock}$\`);
-/** A time before a written date: \`11:59 PM IST, \`, \`5 pm on \`. */
-const timePrefix = new RegExp(\`^\${clock},? (?:on )?\`);
+const clock = `(?:(\\d{1,2}):(\\d{2})(?::(\\d{2}))?(?: ?([ap])\\.?m\\.?)?|(\\d{1,2}) ?([ap])\\.?m\\.?)(?: ?([+-]\\d{2}:?\\d{2}))?(?: (?!(?:${months.join('|')}|${weekdays.join('|')}))([a-z]{2,5})| \\(([a-z]{2,5})\\))?`;
+/** A time after a written date: `, 11:59 PM IST`, ` at 5 pm`, ` 17:00`. */
+const timeSuffix = new RegExp(`,? (?:at )?${clock}$`);
+/** A time before a written date: `11:59 PM IST, `, `5 pm on `. */
+const timePrefix = new RegExp(`^${clock},? (?:on )?`);
 const endOfDay = '(?:end of (?:the )?day|eod)';
-/** \`End of day, 7 Nov 2026\`: the date alone is the deadline. */
-const endOfDayPrefix = new RegExp(\`^\${endOfDay},? (?:on )?\`);
-const endOfDaySuffix = new RegExp(\`,? (?:by )?\${endOfDay}$\`);
+/** `End of day, 7 Nov 2026`: the date alone is the deadline. */
+const endOfDayPrefix = new RegExp(`^${endOfDay},? (?:on )?`);
+const endOfDaySuffix = new RegExp(`,? (?:by )?${endOfDay}$`);
 
 /** Deliberately narrow grammar: provider prose is never passed to JavaScript's date parser. */
 export function parseActionDeadline(
@@ -77,7 +77,7 @@ export function parseActionDeadline(
   receivedAt: Date | null,
 ): ParsedDeadline {
   if (!text?.trim()) return reject('EMPTY');
-  const value = text.trim().replace(/\\s+/g, ' ').toLowerCase();
+  const value = text.trim().replace(/\s+/g, ' ').toLowerCase();
   const anchor = dayBefore(receivedAt);
   const iso = isoDate.exec(value);
   const parsed = iso ? parseIsoDeadline(iso) : parseNamedDeadline(value, anchor);
@@ -103,7 +103,7 @@ function dayBefore(receivedAt: Date | null): Date | null {
   return anchor;
 }
 
-/** \`2026-10-03\`, optionally with a time. A time counts only when it names its zone. */
+/** `2026-10-03`, optionally with a time. A time counts only when it names its zone. */
 function parseIsoDeadline(iso: RegExpExecArray): Candidate | Rejected {
   const date = calendarDate(+iso[1], +iso[2], +iso[3]);
   if (!date) return reject('INVALID_DATE');
@@ -125,10 +125,10 @@ function parseIsoDeadline(iso: RegExpExecArray): Candidate | Rejected {
   return { deadline, precision: 'DATETIME' };
 }
 
-/** Minutes from UTC of \`Z\`, \`UTC\`, \`GMT\` or \`+05:30\`; null for anything else. */
+/** Minutes from UTC of `Z`, `UTC`, `GMT` or `+05:30`; null for anything else. */
 function zoneOffsetMinutes(zone: string): number | null {
   if (zone === 'z' || zone === 'utc' || zone === 'gmt') return 0;
-  if (!/^[+-]\\d{2}:\\d{2}$/.test(zone)) return null;
+  if (!/^[+-]\d{2}:\d{2}$/.test(zone)) return null;
   const hours = +zone.slice(1, 3),
     minutes = +zone.slice(4, 6);
   if (hours > 23 || minutes > 59) return null;
@@ -143,18 +143,18 @@ function hourOfDay(hour: number, half: string | undefined): number | null {
 }
 
 /**
- * A time's zone as minutes from UTC: clear only as a written offset (\`+0000\`, \`+05:30\`) or as UTC
- * or GMT by name, else unclear (\`offset: null\`). null when the written offset cannot exist.
+ * A time's zone as minutes from UTC: clear only as a written offset (`+0000`, `+05:30`) or as UTC
+ * or GMT by name, else unclear (`offset: null`). null when the written offset cannot exist.
  */
 function clockZone(written: string | undefined, name: string | undefined) {
   if (!written) return { offset: name === 'utc' || name === 'gmt' ? 0 : null };
   const offset = zoneOffsetMinutes(
-    written.includes(':') ? written : \`\${written.slice(0, 3)}:\${written.slice(3)}\`,
+    written.includes(':') ? written : `${written.slice(0, 3)}:${written.slice(3)}`,
   );
   return offset === null ? null : { offset };
 }
 
-/** The time a \`clock\` match names; null when the time or its offset cannot exist. */
+/** The time a `clock` match names; null when the time or its offset cannot exist. */
 function clockOf(time: RegExpExecArray): Clock | null {
   const minute = +(time[2] ?? 0),
     second = +(time[3] ?? 0);
@@ -202,9 +202,9 @@ function onDay(day: Date, clock: Clock | null): Pick<Candidate, 'deadline' | 'pr
 }
 
 /**
- * \`by Friday, March 6\`, \`6 Mar 2026\`. Without a year, the next such date after the email. A time
- * before or after the date is kept only when its zone is clear (\`05:30:00 AM +0000 GMT\`,
- * \`17:00 UTC\`); any other time is allowed but dropped: like an ISO time without an offset, its
+ * `by Friday, March 6`, `6 Mar 2026`. Without a year, the next such date after the email. A time
+ * before or after the date is kept only when its zone is clear (`05:30:00 AM +0000 GMT`,
+ * `17:00 UTC`); any other time is allowed but dropped: like an ISO time without an offset, its
  * zone is unclear (IST is India, Israel or Ireland). "End of day" reads as the day alone.
  */
 function parseNamedDeadline(value: string, anchor: Date | null): Candidate | Rejected {
@@ -226,7 +226,7 @@ function parseNamedDeadline(value: string, anchor: Date | null): Candidate | Rej
   return day instanceof Date ? { ...onDay(day, lead.clock ?? tail.clock), weekday, day } : day;
 }
 
-/** The day a \`namedDate\` match names; without a year, the next such day after the email. */
+/** The day a `namedDate` match names; without a year, the next such day after the email. */
 function writtenDate(match: RegExpExecArray, anchor: Date | null): Date | Rejected {
   const month = months.indexOf((match[1] ?? match[4]).slice(0, 3)) + 1;
   const day = +(match[2] ?? match[3]);
