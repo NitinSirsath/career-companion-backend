@@ -14,6 +14,15 @@ import { SUBMISSION_PLATFORMS, SubmissionIntakeError, canonicalJobUrl } from './
 
 const FUTURE_TOLERANCE_MS = 5 * 60_000;
 export const REASON_LIMIT = 1000;
+const NEEDS_USER_MISSED_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * A job the automation left for the user is missed 7 days after it was logged (owner, 26 Nov
+ * 2026): the posting has moved on, so it no longer counts as needing them. Worked out when read,
+ * like a missed request (`missedRequests.ts`); the entry itself stays in the list.
+ */
+export const needsUserMissed = (job: { outcome: string; loggedAt: Date }) =>
+  job.outcome === 'NEEDS_USER' && job.loggedAt.getTime() < Date.now() - NEEDS_USER_MISSED_AFTER_MS;
 
 /**
  * The not-submitted tool contract. Strict: unknown keys are rejected. `task` (25 Nov 2026) is
