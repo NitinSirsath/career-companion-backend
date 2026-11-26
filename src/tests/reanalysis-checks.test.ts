@@ -419,7 +419,7 @@ describe('agenda dates', () => {
     expect(added).toMatchObject({
       state: 'TENTATIVE',
       retiredAt: null,
-      extractionVersion: 'extraction/v9',
+      extractionVersion: 'extraction/v11',
     });
     const saved = await prisma.aIProcessingResult.findUniqueOrThrow({
       where: { emailId: mail.id },
