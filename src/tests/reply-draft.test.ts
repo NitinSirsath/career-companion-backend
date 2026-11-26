@@ -93,6 +93,7 @@ beforeEach(async () => {
     messages: THREAD,
     replyTo: 'Priya Nair <priya@northwind.example>',
     replyCc: [],
+    canReply: true,
   });
 });
 afterAll(async () => {
@@ -209,6 +210,7 @@ describe('reply choices and "Write with AI" (COM-197)', () => {
       messages: [THREAD[1]],
       replyTo: null,
       replyCc: [],
+      canReply: true,
     });
     const res = await draftFor();
     expect(res.status).toBe(409);
