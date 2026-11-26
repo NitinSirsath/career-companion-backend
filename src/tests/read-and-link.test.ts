@@ -182,6 +182,10 @@ describe('the reader gets the subject and the sender name', () => {
       matchState: 'MATCHED',
       applicationId: app.id,
       aiProcessingResult: { companyName: 'Zenith Labs', contractVersion: 'extraction/v10' },
+    });
+  });
+});
+
 describe('the reader is told when a reply would reach nobody', () => {
   const ASK = {
     companyName: 'Zenith Labs',
