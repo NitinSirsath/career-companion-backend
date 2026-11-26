@@ -34,6 +34,11 @@ let server: Server;
 
 const as = (user: string) => ({ 'X-Development-User': user });
 const at = (day: number, hour = 9) => new Date(Date.UTC(2026, 9, day, hour));
+/**
+ * "Today" for the whole file: the mails are from early October 2026, and on a later day their
+ * requests would be missed (an open one with no deadline must be under 7 days old). 20:00 UTC is still 10 Oct in New York and already 11 Oct in Tokyo.
+ */
+const NOW = new Date(Date.UTC(2026, 9, 10, 20));
 
 type Analysis = {
   category?: 'RECRUITER' | 'INTERVIEW' | 'ASSESSMENT' | 'OFFER' | 'REJECTION' | 'FOLLOW_UP';
@@ -101,6 +106,8 @@ const link = (key: string, body: object = {}, user = OWNER) =>
 const keys = (items: Conversation[]) => items.map((item) => item.key);
 
 beforeAll(async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(NOW);
   await prisma.user.deleteMany({ where: { email: { in: [OWNER, OTHER] } } });
   owner = (await prisma.user.create({ data: { email: OWNER } })).id;
   other = (await prisma.user.create({ data: { email: OTHER } })).id;
@@ -114,6 +121,7 @@ beforeEach(async () => {
   await prisma.application.deleteMany({ where: { userId: { in: [owner, other] } } });
 });
 afterAll(async () => {
+  vi.useRealTimers();
   await new Promise((resolve) => server.close(resolve));
   await prisma.user.deleteMany({ where: { id: { in: [owner, other] } } });
 });
@@ -193,9 +201,9 @@ describe('conversation list', () => {
   });
 
   it('lists open requests first, then newest first; `newest` ignores requests', async () => {
-    await jobMail('old-open', at(1), { actionRequired: true, requestedAction: 'Send dates' });
-    await jobMail('new-quiet', at(5));
-    await jobMail('mid-quiet', at(3));
+    await jobMail('old-open', at(4), { actionRequired: true, requestedAction: 'Send dates' });
+    await jobMail('new-quiet', at(8));
+    await jobMail('mid-quiet', at(6));
     expect(keys(await list())).toEqual(['old-open', 'new-quiet', 'mid-quiet']);
     expect(keys(await list('?sort=newest'))).toEqual(['new-quiet', 'mid-quiet', 'old-open']);
   });
@@ -290,15 +298,15 @@ describe('conversation summary', () => {
     await jobMail('theirs', at(1), ask('Send dates', '2026-10-01'), { userId: other });
 
     const open = await list('?request=open');
-    // 10 Oct 2026 at 20:00 UTC: still 10 Oct in New York, already 11 Oct in Tokyo.
-    const now = new Date(Date.UTC(2026, 9, 10, 20));
-    expect(await conversationSummary(owner, 'America/New_York', now)).toEqual({
+    expect(await conversationSummary(owner, 'America/New_York')).toEqual({
       needsAction: open.length,
       pastDue: 2,
+      missed: 0,
     });
-    expect(await conversationSummary(owner, 'Asia/Tokyo', now)).toEqual({
+    expect(await conversationSummary(owner, 'Asia/Tokyo')).toEqual({
       needsAction: open.length,
       pastDue: 3,
+      missed: 0,
     });
     expect(keys(open)).not.toContain('replied');
   });
@@ -308,10 +316,14 @@ describe('conversation summary', () => {
     for (const query of ['', '?timeZone=Asia/Kolkata', '?timeZone=Not/AZone']) {
       const res = await request(server).get(`/api/conversations/summary${query}`).set(as(OWNER));
       expect(res.status).toBe(200);
-      expect(ConversationSummarySchema.parse(res.body)).toEqual({ needsAction: 1, pastDue: 1 });
+      expect(ConversationSummarySchema.parse(res.body)).toEqual({
+        needsAction: 1,
+        pastDue: 1,
+        missed: 0,
+      });
     }
     const theirs = await request(server).get('/api/conversations/summary').set(as(OTHER));
-    expect(theirs.body).toEqual({ needsAction: 0, pastDue: 0 });
+    expect(theirs.body).toEqual({ needsAction: 0, pastDue: 0, missed: 0 });
     expect((await request(server).get('/api/conversations/summary')).status).toBe(401);
   });
 });
@@ -715,7 +727,7 @@ describe('a job offer that asks for money', () => {
   });
 
   it('shows the safe next step even when the AI saw no request', async () => {
-    await jobMail('thread-quiet', at(1), { category: 'OFFER', fakeOfferWarning: WARNING });
+    await jobMail('thread-quiet', at(5), { category: 'OFFER', fakeOfferWarning: WARNING });
     const [row] = await list();
     expect(row.request).toMatchObject({ kind: 'ACTION', text: FAKE_OFFER_NEXT_STEP });
     expect((await list('?request=open')).map((item) => item.key)).toEqual(['thread-quiet']);
