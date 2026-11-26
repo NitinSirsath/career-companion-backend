@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { DashboardResponseSchema, type DashboardPeriod, type DashboardQuery } from '../contracts';
 import { conversationRows } from './conversationQuery';
+import { needsUserMissed } from './notSubmittedJob';
 import { utcDay } from './ai/usage';
 import {
   automationRows,
@@ -175,6 +176,7 @@ async function needsYouNow(tx: Tx, userId: string, now: Date, timeZone: string) 
   const all = { limit: CONVERSATION_LIMIT, offset: 0 };
   const unseen = await conversationRows(tx, userId, { unseen: 'true' }, all);
   const open = await conversationRows(tx, userId, { request: 'open' }, all);
+  const missed = await conversationRows(tx, userId, { request: 'missed' }, all);
   const today = localDay(now, timeZone);
   const waitingOverADay = await tx.email.count({
     where: {
@@ -190,7 +192,7 @@ async function needsYouNow(tx: Tx, userId: string, now: Date, timeZone: string) 
         (c) => c.lastReceivedAt && localDay(c.lastReceivedAt, timeZone) === today,
       ).length,
     },
-    needsAction: { count: open.length, waitingOverADay },
+    needsAction: { count: open.length, waitingOverADay, missed: missed.length },
     interviews: upcomingInterviews(await interviewMails(tx, userId), now, timeZone),
   };
 }
@@ -287,16 +289,17 @@ async function automationCoverage(
 ) {
   const notSent = await tx.notSubmittedJob.findMany({
     where: { userId, loggedAt: { gte: w.start, lt: w.end } },
-    select: { outcome: true, reason: true },
+    select: { outcome: true, reason: true, loggedAt: true },
   });
   const sent = submissions.filter((s) => s.submittedAt >= w.start && s.submittedAt < w.end).length;
   const skipped = notSent.filter((n) => n.outcome === 'SKIPPED');
-  const needsYou = notSent.length - skipped.length;
+  const missed = notSent.filter(needsUserMissed).length;
   return {
     lookedAt: sent + notSent.length,
     sent,
     skipped: skipped.length,
-    needsYou,
+    needsYou: notSent.length - skipped.length - missed,
+    missed,
     topSkipReasons: topReasons(skipped.map((n) => n.reason)),
   };
 }
