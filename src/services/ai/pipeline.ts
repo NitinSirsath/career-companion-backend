@@ -262,6 +262,7 @@ async function extract(run: EmailRun) {
   const sorted = await prisma.aIProcessingResult.findUniqueOrThrow({
     where: { emailId },
     select: { category: true, bulkMail: true },
+  });
   await prisma.aIProcessingResult.update({
     where: { emailId },
     data: {
