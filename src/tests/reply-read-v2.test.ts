@@ -271,6 +271,9 @@ describe('a reply that declines (owner, 17 Nov 2026)', () => {
 
 describe('a reply that asks them a question (owner, 17 Nov 2026)', () => {
   it('waits for their reply, then the step needs action again', async () => {
+    // The mails are from mid-November 2026: a week after their answer the step would be missed.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at(17));
     const { ask } = await interviewThread('t-asked');
     vi.mocked(fetchMessageBody).mockResolvedValue('Before I confirm: is the interview remote?');
     const sent = await replyRead('t-asked', at(15), (ids) => ({
