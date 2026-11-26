@@ -58,6 +58,8 @@ export const relevanceThreshold = (value?: string) =>
 type Candidate = {
   emailId: string;
   input: RelevanceClassifierInput;
+  /** Set for a mail sent as a mailing (`fetchMessageMetadata`). */
+  bulk?: true;
 };
 type BatchOutcome = 'RELEVANT' | 'IRRELEVANT' | 'UNCERTAIN' | 'UNDECIDED';
 
@@ -220,7 +222,7 @@ export async function classifyBatch(
       },
     });
     for (let index = 0; index < claimed.length; index++) {
-      const { emailId } = claimed[index];
+      const { emailId, bulk } = claimed[index];
       const answer = mapped.decided.get(keys[index]);
       if (!answer) {
         await saveMissingAnswer(tx, run, emailId);
@@ -232,7 +234,7 @@ export async function classifyBatch(
         confidence: answer.confidence,
         category: answer.category,
       };
-      await saveDecision(tx, run, emailId, decision, {
+      await saveDecision(tx, run, { emailId, bulk }, decision, {
         provider: batch.provider!,
         model: batch.model!,
       });
@@ -390,7 +392,7 @@ async function saveMissingAnswer(tx: Prisma.TransactionClient, run: BatchRun, em
 async function saveDecision(
   tx: Prisma.TransactionClient,
   run: BatchRun,
-  emailId: string,
+  { emailId, bulk }: Pick<Candidate, 'emailId' | 'bulk'>,
   decision: Pick<RelevanceBatchItem, 'confidence' | 'category'> & {
     decision: Exclude<BatchOutcome, 'UNDECIDED'>;
   },
@@ -411,6 +413,7 @@ async function saveDecision(
     confidence: decision.confidence,
     category: decision.category,
     deterministic: false,
+    bulkMail: !irrelevant && !!bulk,
     processingStatus: irrelevant ? ('COMPLETED' as const) : ('PROCESSING' as const),
   };
   await tx.aIProcessingResult.upsert({
@@ -696,6 +699,7 @@ export async function runTriage(userId: string, signal?: AbortSignal) {
           emailId: email.id,
           version,
           input: { sender: email.sender, subject: email.subject, labels, snippet: gmail.snippet },
+          bulk: gmail.bulk,
         });
       } catch {
         handled.add(emailId);
