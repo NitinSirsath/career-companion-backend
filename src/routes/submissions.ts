@@ -23,7 +23,7 @@ import {
 import { requireAuth } from '../middleware/auth';
 import { applyTaskSummary, listApplyTasks } from '../services/applyTask';
 import { listPendingSubmissions, resolveSubmission } from '../services/externalSubmission';
-import { listNotSubmittedJobs } from '../services/notSubmittedJob';
+import { listNotSubmittedJobs, needsUserMissed } from '../services/notSubmittedJob';
 import { PortalPasswordUnreadableError, revealPortalPassword } from '../services/portalAccount';
 import { createPaginatedResponse, getPaginationParams } from '../utils/pagination';
 import { logEvent } from '../utils/log';
@@ -54,6 +54,7 @@ router.get('/not-submitted', async (req: Request, res: Response, next: NextFunct
       ...row,
       loggedAt: row.loggedAt.toISOString(),
       receivedAt: row.receivedAt.toISOString(),
+      missed: needsUserMissed(row),
     }));
     res.status(200).json(createPaginatedResponse(items, limit, offset));
   } catch (err) {
