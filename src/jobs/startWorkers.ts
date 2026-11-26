@@ -9,6 +9,7 @@ import { startNotificationWorker, startWebPushNotificationWorker } from './notif
 import { startRelevanceTriageWorker } from './relevanceTriageJob';
 import { startReanalysisWorker } from './reanalysisJob';
 import { startReplyReadingWorker } from './replyReadingJob';
+import { REQUEST_UPKEEP_QUEUE, startRequestUpkeepWorker } from './requestUpkeepJob';
 import { WEB_PUSH_NOTIFICATION_JOB } from '../services/enqueue';
 import { stopQueue, QUEUE_NAMES } from '../services/queue';
 import { errorCategory } from '../utils/errorCategory';
@@ -75,6 +76,11 @@ export function defaultWorkers(): WorkerRegistration[] {
       queue: QUEUE_NAMES[9],
       start: startReanalysisWorker,
       failureEvent: 'reanalysis_worker_start_failed',
+    },
+    {
+      queue: REQUEST_UPKEEP_QUEUE,
+      start: startRequestUpkeepWorker,
+      failureEvent: 'request_upkeep_worker_start_failed',
     },
   ];
 }
