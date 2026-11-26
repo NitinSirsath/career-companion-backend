@@ -1,8 +1,9 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
-import { ActionWithContextResponseSchema, SnoozeAction } from '../contracts';
+import { ActionWithContextResponseSchema, SnoozeAction, type Missed } from '../contracts';
 import { lockUser, LOCK_NAMESPACE } from '../utils/advisoryLock';
 import { AppError, CHANGE_REJECTED } from '../errors';
+import { missedRequests, missedStep } from './missedRequests';
 import { suppressNotifications } from './notificationSuppression';
 import { CLOSES_BY_ITSELF, mayCloseByHand, OPEN_AGAIN } from './threadAsks';
 
@@ -41,13 +42,15 @@ const context = {
   email: { select: { subject: true, sender: true, threadId: true, gmailMessageId: true } },
 } as const;
 type ActionRow = Prisma.ActionGetPayload<{ include: typeof context }>;
-export const serializeAction = (row: ActionRow) =>
+/** `missed`: the user's missed requests by email, from `missedRequests`. */
+export const serializeAction = (row: ActionRow, missed: Map<string, Missed>) =>
   ActionWithContextResponseSchema.parse({
     ...row,
     origin: row.origin ?? (row.emailId ? 'EMAIL' : null),
     snoozedUntil: row.snoozedUntil?.toISOString() ?? null,
     deadline: row.deadline?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
+    missed: missedStep(row, missed),
   });
 async function lockApplication(tx: Prisma.TransactionClient, userId: string, id: string) {
   await tx.$queryRaw`SELECT id FROM applications WHERE id=${id}::uuid AND "userId"=${userId}::uuid FOR UPDATE`;
@@ -75,30 +78,30 @@ async function mutate(
       throw new AppError(409, 'REVISION_CONFLICT', CHANGE_REJECTED);
     if (row.retiredAt) throw new AppError(409, 'ACTION_RETIRED', CHANGE_REJECTED);
     const data = await change(tx, row);
-    if (!Object.keys(data).length) return serializeAction(row);
-    return serializeAction(
-      await tx.action.update({
-        where: { id },
-        data: { ...data, actionRevision: { increment: 1 } },
-        include: context,
-      }),
-    );
+    const saved = Object.keys(data).length
+      ? await tx.action.update({
+          where: { id },
+          data: { ...data, actionRevision: { increment: 1 } },
+          include: context,
+        })
+      : row;
+    return serializeAction(saved, await missedRequests(tx, userId));
   });
 }
 export async function getUserActions(userId: string, status?: string, limit = 20, offset = 0) {
-  return (
-    await prisma.action.findMany({
-      where: {
-        retiredAt: null,
-        application: { userId, archivedAt: null },
-        ...(status ? { status } : {}),
-      },
-      take: limit + 1,
-      skip: offset,
-      orderBy: [{ status: 'desc' }, { deadline: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-      include: context,
-    })
-  ).map(serializeAction);
+  const rows = await prisma.action.findMany({
+    where: {
+      retiredAt: null,
+      application: { userId, archivedAt: null },
+      ...(status ? { status } : {}),
+    },
+    take: limit + 1,
+    skip: offset,
+    orderBy: [{ status: 'desc' }, { deadline: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    include: context,
+  });
+  const missed = await missedRequests(prisma, userId);
+  return rows.map((row) => serializeAction(row, missed));
 }
 export async function updateActionStatus(
   userId: string,
@@ -107,7 +110,16 @@ export async function updateActionStatus(
   revision?: number,
 ) {
   return mutate(userId, id, revision, async (tx, row) => {
-    if (row.status === status) return {};
+    if (row.status === status) {
+      // "Still open" on a missed step: it is pending already, so only the request is told.
+      if (
+        status === 'PENDING' &&
+        row.emailId &&
+        (await missedRequests(tx, userId)).has(row.emailId)
+      )
+        await followRequest(tx, row.emailId, status);
+      return {};
+    }
     if (row.emailId) await followRequest(tx, row.emailId, status);
     return { status, ...(status !== 'PENDING' ? { snoozedUntil: null } : {}) };
   });
