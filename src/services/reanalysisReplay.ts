@@ -431,7 +431,6 @@ async function readMailAgain(
     bulkMail: !!text.bulk,
     saysNoReply,
   };
-  });
   return {
     version,
     data: read.data,
