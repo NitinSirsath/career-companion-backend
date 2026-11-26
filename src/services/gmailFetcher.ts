@@ -1,6 +1,7 @@
 import { gmail_v1 } from './google';
 import { gmailCallOptions } from './googleTransport';
 import { withGmail } from './gmailClient';
+import { header } from './mailbox';
 
 function extractTextFromParts(parts: gmail_v1.Schema$MessagePart[]): string {
   let htmlText = '';
@@ -50,11 +51,19 @@ function extractBody(message: gmail_v1.Schema$Message): string {
   return '';
 }
 
+/**
+ * True for a mail sent as a mailing: it carries a `List-Unsubscribe` header, which a mail one
+ * person writes to another never has.
+ */
+const isMailing = (message: gmail_v1.Schema$Message) =>
+  !!header(message, 'list-unsubscribe')?.trim();
+
+/** What the sorting step reads of a mail. `bulk` is set only for a mail sent as a mailing. */
 export async function fetchMessageMetadata(
   userId: string,
   gmailMessageId: string,
   options: { signal?: AbortSignal } = {},
-): Promise<{ labelIds: string[] | null; snippet: string | null }> {
+): Promise<{ labelIds: string[] | null; snippet: string | null; bulk?: true }> {
   return withGmail(
     userId,
     async (gmail) => {
@@ -62,7 +71,11 @@ export async function fetchMessageMetadata(
         { userId: 'me', id: gmailMessageId, format: 'metadata' },
         gmailCallOptions(options.signal),
       );
-      return { labelIds: data.labelIds ?? null, snippet: data.snippet ?? null };
+      return {
+        labelIds: data.labelIds ?? null,
+        snippet: data.snippet ?? null,
+        ...(isMailing(data) ? { bulk: true as const } : {}),
+      };
     },
     options,
   );
