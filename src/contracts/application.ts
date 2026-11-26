@@ -149,6 +149,7 @@ const ApplicationResponseObjectSchema = z.object({
   updatedAt: z.union([z.date(), z.string()]),
   // Intelligence enrichment
   recentEvent: RecentEventSchema.nullable(),
+  /** The open steps that still need the user: a missed step from a mail is not counted. */
   pendingActionCount: z.number(),
   /** 'AUTOMATION' when a linked or created automation submission exists (ADR-0002). Never a status. */
   submittedVia: SubmittedViaSchema.nullable(),
@@ -227,6 +228,19 @@ export type ListApplicationEventsResponse = PaginatedResponse<ApplicationEventRe
 
 // ─── Action ─────────────────────────────────────────────────────────────────
 
+/**
+ * "Missed" (owner, 26 Nov 2026): set while a request or a step that nothing closed has left Needs
+ * action by itself. DEADLINE_PASSED: its deadline passed more than a day ago. QUIET: it has no
+ * deadline and nothing happened in its thread for 7 days. NO_ANSWER: it has no deadline and they
+ * did not answer the user's own reply for 7 days. `since` is when it left. "Still open" (the
+ * request's or step's own open-again call) brings it back for 7 days.
+ */
+export const MissedSchema = z.object({
+  reason: z.enum(['DEADLINE_PASSED', 'QUIET', 'NO_ANSWER']),
+  since: z.iso.datetime({ offset: true }),
+});
+export type Missed = z.infer<typeof MissedSchema>;
+
 export const ApplicationActionResponseSchema = z.object({
   origin: z.enum(['EMAIL', 'USER']).nullable(),
   actionRevision: z.number().int().nonnegative(),
@@ -269,6 +283,8 @@ export const ApplicationActionListItemSchema = ApplicationActionResponseSchema.e
       'YOU_DECLINED',
     ])
     .nullable(),
+  /** Set while a pending step from a mail is missed: it is not part of `pendingActionCount`. */
+  missed: MissedSchema.nullable(),
 });
 export type ApplicationActionListItem = z.infer<typeof ApplicationActionListItemSchema>;
 export type ListApplicationActionsResponse = PaginatedResponse<ApplicationActionListItem>;
