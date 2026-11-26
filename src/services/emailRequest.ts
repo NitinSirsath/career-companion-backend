@@ -30,10 +30,10 @@ export const TELL_THEM = ', then tell them you did';
  */
 function withTellThem(text: string | null, result: RequestFields, canReply: boolean) {
   if (!text?.trim() || result.askKind !== 'OUTSIDE_MAIL' || !canReply) return text;
-  return \`${text.trim().replace(/[.!\s]+$/, '')}${TELL_THEM}\`;
+  return `${text.trim().replace(/[.!\s]+$/, '')}${TELL_THEM}`;
 }
 
-/** \`Automatic reply: …\`, \`Auto-reply\`, \`Out of office\`: a mailbox answered, not a person. */
+/** `Automatic reply: …`, `Auto-reply`, `Out of office`: a mailbox answered, not a person. */
 const AUTO_REPLY =
   /^(?:automatic reply|auto[- ]?reply|auto[- ]?response|out of (?:the )?office)\b/i;
 
@@ -61,7 +61,7 @@ type AskChange = Partial<
  * to keep on its AI result; empty when the read stands. They are saved with the read, so every
  * view of "does this mail ask for something" agrees.
  * - An automatic or out-of-office reply never asks for anything.
- * - Neither does mass outreach (\`isMassOutreach\`): a mailing is an advert, not a request.
+ * - Neither does mass outreach (`isMassOutreach`): a mailing is an advert, not a request.
  * - A "follow up" counts only with a date the app can read: with none there is nothing to do now
  *   and no day to do it, and an application nobody answers already shows under "gone quiet".
  */
