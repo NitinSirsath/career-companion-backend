@@ -18,6 +18,7 @@ import { AppError } from '../errors';
 import { googleStatus, withGmail } from './gmailClient';
 import { gmailCallOptions } from './googleTransport';
 import { htmlToText } from './mailHtml';
+import { canReplyTo, noReplySenders, saysNoReply } from './mailSender';
 
 const PAGE_SIZE = 20;
 /** Far above any written email; a longer text is cut and marked as cut. */
@@ -175,7 +176,22 @@ export async function readMailThread(userId: string, threadId: string): Promise<
     messages,
     replyTo: answered?.to ?? null,
     replyCc: answered?.cc ?? [],
+    canReply: !answered || (await replyReaches(userId, thread, answered.to)),
   };
+}
+
+/**
+ * Whether a reply to `to` would reach anybody: false for a no-reply or system address
+ * (`canReplyTo`), and for an address whose mail said that nobody reads a reply (`saysNoReply`), in
+ * this thread or in a job mail read before.
+ */
+async function replyReaches(userId: string, thread: gmail_v1.Schema$Thread, to: string) {
+  const saidNoReply = await noReplySenders(prisma, userId);
+  for (const message of thread.messages ?? []) {
+    const text = quotableText(readParts(message.payload));
+    if (text && saysNoReply(text)) saidNoReply.add(mailAddressOf(header(message, 'from') ?? ''));
+  }
+  return splitMailAddresses(to).some((entry) => canReplyTo(entry, saidNoReply));
 }
 
 /** The mail a reply from the app answers, and where that reply goes. */
