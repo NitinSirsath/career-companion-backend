@@ -98,6 +98,12 @@ export const MailThreadSchema = z.object({
    * `replyTo`. A reply to all also goes to them. Empty when nobody else is on the mail.
    */
   replyCc: z.array(z.string()).default([]),
+  /**
+   * False when a reply to `replyTo` would reach nobody (owner, 26 Nov 2026): a no-reply address,
+   * an applicant-tracking system's own address, or an address whose mail said that nobody reads
+   * a reply. The page then offers no reply box. True when `replyTo` is null.
+   */
+  canReply: z.boolean().default(true),
 });
 export type MailThread = z.infer<typeof MailThreadSchema>;
 
