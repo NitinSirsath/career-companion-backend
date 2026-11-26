@@ -8,6 +8,7 @@ import {
   ApplicationResponseSchema,
   ApplicationStatusSchema,
   DeclineQuestionSchema,
+  MissedSchema,
 } from './application';
 import { createPaginatedResponseSchema } from './pagination';
 
@@ -95,6 +96,12 @@ export const ConversationRequestSchema = z.object({
     .nullable(),
   /** THEY_ANSWERED only: when their mail after the user's question arrived. */
   theyAnsweredAt: IsoDateTime.nullable(),
+  /**
+   * Set while an OPEN request is missed (owner, 26 Nov 2026): it left Needs action by itself, is
+   * listed by `request=missed` and counted in no Needs action number. Null for any other state.
+   * `state: OPEN` on the request ("Still open") brings it back.
+   */
+  missed: MissedSchema.nullable(),
 });
 export type ConversationRequest = z.infer<typeof ConversationRequestSchema>;
 
@@ -167,8 +174,11 @@ export const ConversationSortSchema = z.enum(['attention', 'newest']);
 /** Query filters of GET /api/conversations. */
 export const ConversationFiltersSchema = z.object({
   q: z.string().trim().max(100).optional(),
-  /** `none`: conversations that ask for nothing. */
-  request: z.enum(['open', 'replied', 'done', 'none']).optional(),
+  /**
+   * `open`: needs action, without the missed ones. `missed`: open requests that left Needs action
+   * by themselves. `none`: conversations that ask for nothing.
+   */
+  request: z.enum(['open', 'missed', 'replied', 'done', 'none']).optional(),
   category: MailCategorySchema.optional(),
   /** `any`: linked to an application; `none`: not linked; or one application's ID. */
   application: z.union([z.enum(['any', 'none']), z.uuid()]).optional(),
@@ -184,8 +194,21 @@ export const ConversationSummarySchema = z.object({
   needsAction: z.number().int().nonnegative(),
   /** Those whose deadline has passed: a date-only deadline from the next day in the user's time zone. */
   pastDue: z.number().int().nonnegative(),
+  /** The conversations the Missed filter (`request=missed`) lists; none of them is in `needsAction`. */
+  missed: z.number().int().nonnegative(),
 });
 export type ConversationSummary = z.infer<typeof ConversationSummarySchema>;
+
+/**
+ * A deadline the mail names, as a date the app could read from the AI's words (owner, 26 Nov
+ * 2026): the screens show it in the user's own time, and the mail's words only when it is null.
+ * DATE: a calendar day, at 00:00 UTC, with no time of day.
+ */
+export const MailDueSchema = z.object({
+  at: IsoDateTime,
+  precision: z.enum(['DATE', 'DATETIME']),
+});
+export type MailDue = z.infer<typeof MailDueSchema>;
 
 /** One job email of a conversation with what the AI read from it. */
 export const ConversationMailSchema = z.object({
@@ -211,6 +234,10 @@ export const ConversationMailSchema = z.object({
   requestedAction: z.string().nullable(),
   actionDeadline: z.string().nullable(),
   followUpDate: z.string().nullable(),
+  /** `actionDeadline` as a date; null when the mail names none or its words are unclear. */
+  actionDue: MailDueSchema.nullable(),
+  /** `followUpDate` as a date; null when the mail names none or its words are unclear. */
+  followUpDue: MailDueSchema.nullable(),
   /** Set when the mail looks like a fake job offer that asks for money: the signs the AI saw. */
   fakeOfferWarning: z.string().nullable(),
   /** How the user does what this mail asks; null when it asks nothing or was read before. */
@@ -235,7 +262,8 @@ export type ConversationDetail = z.infer<typeof ConversationDetailSchema>;
 
 /**
  * `emailId` names the request the user saw, so an answer never lands on a newer one. DONE is "I
- * did this": refused (409 CLOSES_BY_ITSELF) for a request the user answers by mail. OPEN reopens.
+ * did this": refused (409 CLOSES_BY_ITSELF) for a request the user answers by mail. OPEN reopens
+ * a closed request, and is "Still open" for a missed one.
  */
 export const SetRequestStateSchema = z.strictObject({
   emailId: z.uuid(),
