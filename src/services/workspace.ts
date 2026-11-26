@@ -6,6 +6,7 @@ import {
   WorkspaceBucket,
 } from '../contracts';
 import { serializeAction } from './action';
+import { missedRequests } from './missedRequests';
 import { createPaginatedResponse } from '../utils/pagination';
 
 /** All time predicates run in PostgreSQL against one instant and repeatable-read snapshot.
@@ -79,9 +80,10 @@ export async function readWorkspaceActions(
         },
       });
       const byId = new Map(rows.map((row) => [row.id, row]));
+      const missed = await missedRequests(tx, userId);
       const items = ids.map(({ id }) => {
         const row = byId.get(id)!;
-        return serializeAction(row);
+        return serializeAction(row, missed);
       });
       const { nextTransitionAt, ...counts } = summary;
       return WorkspaceActionsResponseSchema.parse({
