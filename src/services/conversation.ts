@@ -26,9 +26,11 @@ import {
   isEmailId,
   type ConversationRow,
 } from './conversationQuery';
+import { parseActionDeadline } from '../utils/actionDeadline';
 import { localDay } from './dashboardMetrics';
 import { sameCompany } from './matcher';
 import { canReplyTo, FAKE_OFFER_NEXT_STEP, requestOf } from './emailRequest';
+import { noReplySenders } from './mailSender';
 import { CLOSES_BY_ITSELF, mayCloseByHand, OPEN_AGAIN } from './threadAsks';
 import { declineView, newestMail } from './declineQuestion';
 
@@ -75,12 +77,11 @@ const SUMMARY_LIMIT = 1000;
  * "4 mails need you, 2 are past due" on the Mails page: the same conversations as its Needs action
  * filter. A deadline with a time is past once that time is; a date-only deadline from the next day
  * in the user's time zone, as the app shows "Past due". A fake offer's step is the app's own advice,
- * so it is never past due.
+ * so it is never past due. Missed requests are counted apart, as the Missed filter lists them.
  */
 export async function conversationSummary(
   userId: string,
   timeZone: string,
-  now = new Date(),
 ): Promise<ConversationSummary> {
   const rows = await conversationRows(
     prisma,
@@ -89,6 +90,7 @@ export async function conversationSummary(
     { limit: SUMMARY_LIMIT, offset: 0 },
   );
   const open = await describe(prisma, userId, rows);
+  const now = new Date();
   const today = localDay(now, timeZone);
   const pastDue = open.filter((c) => {
     const deadline = c.request?.deadline;
@@ -96,7 +98,13 @@ export async function conversationSummary(
     if (c.request?.deadlinePrecision !== 'DATE') return new Date(deadline) < now;
     return deadline.slice(0, 10) < today;
   }).length;
-  return { needsAction: open.length, pastDue };
+  const missed = await conversationRows(
+    prisma,
+    userId,
+    { request: 'missed' },
+    { limit: SUMMARY_LIMIT, offset: 0 },
+  );
+  return { needsAction: open.length, pastDue, missed: missed.length };
 }
 
 /** A conversation can be opened by the ID of any of its emails, as an application timeline does. */
@@ -113,7 +121,8 @@ export async function getConversation(userId: string, anyKey: string): Promise<C
   const key = await threadKey(userId, anyKey);
   const rows = await conversationRows(prisma, userId, { key });
   if (!rows.length) throw new AppError(404, 'NOT_FOUND', NOT_FOUND);
-  const [conversation] = await describe(prisma, userId, rows);
+  const saidNoReply = await noReplySenders(prisma, userId);
+  const [conversation] = await describe(prisma, userId, rows, saidNoReply);
   const mails = await prisma.email.findMany({
     where: { userId, relevanceState: 'RELEVANT', ...conversationWhere(key) },
     include: { aiProcessingResult: true },
@@ -128,8 +137,10 @@ export async function getConversation(userId: string, anyKey: string): Promise<C
     conversation,
     mails: mails.map(toMail),
     sentAt: sent.map((message) => message.sentAt.toISOString()),
-    // The newest job mail is the one a reply answers.
-    replyChoices: mails.at(-1)?.aiProcessingResult?.replyChoices ?? [],
+    // The newest job mail is the one a reply answers; no choices when a reply reaches nobody.
+    replyChoices: canReplyTo(mails.at(-1)?.sender ?? null, saidNoReply)
+      ? (mails.at(-1)?.aiProcessingResult?.replyChoices ?? [])
+      : [],
   };
 }
 
@@ -144,9 +155,10 @@ export async function markConversationSeen(userId: string, key: string) {
 
 /**
  * The user's own answer to the newest request: "I did this", or open again. Only a request done
- * outside mail closes by hand (owner, 24 Oct 2026); reopening clears why it closed. Where the
- * request already has an application action, that action is finished or reopened too, so every
- * view agrees.
+ * outside mail closes by hand (owner, 24 Oct 2026); reopening clears why it closed. Open again on
+ * a missed request is "Still open": the time it is said is what brings it back (`missedSince`).
+ * Where the request already has an application action, that action is finished or reopened too,
+ * so every view agrees.
  */
 export async function setRequestState(
   userId: string,
@@ -197,8 +209,14 @@ export async function setRequestState(
 }
 
 /** Adds to each row what the list shows: newest email, AI reading, request and application. */
-async function describe(db: Db, userId: string, rows: ConversationRow[]): Promise<Conversation[]> {
+async function describe(
+  db: Db,
+  userId: string,
+  rows: ConversationRow[],
+  known?: ReadonlySet<string>,
+): Promise<Conversation[]> {
   if (!rows.length) return [];
+  const saidNoReply = known ?? (await noReplySenders(db, userId));
   const mails = await db.email.findMany({
     where: {
       userId,
@@ -226,7 +244,7 @@ async function describe(db: Db, userId: string, rows: ConversationRow[]): Promis
     const thread = byKey.get(row.key);
     if (!thread) return []; // deleted between the two reads
     const application = row.applicationId ? applicationById.get(row.applicationId) : undefined;
-    const conversation = toConversation(row, thread, application ?? null);
+    const conversation = toConversation(row, thread, application ?? null, saidNoReply);
     return [{ ...conversation, sameCompanyApplications: offers(conversation) }];
   });
 }
@@ -251,11 +269,15 @@ async function linkOffers(db: Db, userId: string, rows: ConversationRow[]) {
   };
 }
 
-/** `thread` holds the conversation's job emails, newest first. */
+/**
+ * `thread` holds the conversation's job emails, newest first; `saidNoReply` the addresses whose
+ * mails said that nobody reads a reply.
+ */
 function toConversation(
   row: ConversationRow,
   thread: Mail[],
   application: ApplicationSummary | null,
+  saidNoReply: ReadonlySet<string>,
 ): Omit<Conversation, 'sameCompanyApplications'> {
   const latest = thread.find((mail) => mail.id === row.latestEmailId) ?? thread[0];
   const results = thread.flatMap((mail) =>
@@ -277,7 +299,7 @@ function toConversation(
     role: newestOf(results, 'jobTitle'),
     interview: scheduled ? { date: scheduled.interviewDate, time: scheduled.interviewTime } : null,
     assessmentDeadline: newestOf(results, 'assessmentDeadline'),
-    request: toRequest(row, thread),
+    request: toRequest(row, thread, saidNoReply),
     fakeOfferWarning: newestOf(results, 'fakeOfferWarning'),
     link: linkOf(latest, application),
     application: application && {
@@ -303,26 +325,36 @@ function newestOf(
   return results.find((result) => result[field])?.[field] ?? null;
 }
 
-function toRequest(row: ConversationRow, thread: Mail[]): ConversationRequest | null {
+function toRequest(
+  row: ConversationRow,
+  thread: Mail[],
+  saidNoReply: ReadonlySet<string>,
+): ConversationRequest | null {
   const mail = thread.find((candidate) => candidate.id === row.requestEmailId);
   const request =
-    mail?.aiProcessingResult && requestOf(mail.aiProcessingResult, mail.receivedAt, mail.sender);
+    mail?.aiProcessingResult &&
+    requestOf(mail.aiProcessingResult, mail.receivedAt, mail.sender, saidNoReply);
   if (!mail || !request || row.requestState === 'NONE') return null;
   return {
     emailId: mail.id,
-    state: row.requestState,
+    // A missed request is an open one that left Needs action: `missed` says so.
+    state: row.requestState === 'MISSED' ? 'OPEN' : row.requestState,
     kind: request.kind,
     text: request.text?.trim() || null,
     deadline: request.deadline.deadline?.toISOString() ?? null,
     deadlinePrecision: request.deadline.precision,
     repliedAt: repliedAfter(row, mail)?.toISOString() ?? null,
     askKind: mail.aiProcessingResult?.askKind ?? null,
-    canReply: canReplyTo(mail.sender),
+    canReply: canReplyTo(mail.sender, saidNoReply),
     ...closureOf(row, mail),
     replyRead: replyReadOf(row, repliedAfter(row, mail) !== null),
-    theyAnsweredAt:
-      row.requestState === 'OPEN' ? (theyAnsweredAt(row)?.toISOString() ?? null) : null,
+    theyAnsweredAt: isOpen(row) ? (theyAnsweredAt(row)?.toISOString() ?? null) : null,
+    missed: row.missed,
   };
+
+/** Open for the user to act on, missed or not. */
+const isOpen = (row: ConversationRow) =>
+  row.requestState === 'OPEN' || row.requestState === 'MISSED';
 }
 
 /** What the AI made of the user's reply after the request, as the screens show it. */
@@ -331,7 +363,7 @@ function replyReadOf(row: ConversationRow, replied: boolean): ConversationReques
   const read = row.lastReadState;
   if (row.requestState === 'REPLIED')
     return read === 'WAITING' || read === 'NOT_READ' || read === 'ASKED_BACK' ? read : null;
-  if (row.requestState !== 'OPEN') return null;
+  if (!isOpen(row)) return null;
   if (read === 'READ') return 'NOT_ANSWERED';
   return read === 'ASKED_BACK' && theyAnsweredAt(row) ? 'THEY_ANSWERED' : null;
 }
@@ -392,6 +424,10 @@ function toMail(mail: Mail): ConversationMail {
   // A mail that asks for money never shows its own request: the safe next step replaces it.
   if (read.fakeOfferWarning)
     Object.assign(read, { requestedAction: FAKE_OFFER_NEXT_STEP, actionDeadline: null });
+  const due = (text: string | null) => {
+    const { deadline, precision } = parseActionDeadline(text, mail.receivedAt);
+    return deadline && { at: deadline.toISOString(), precision };
+  };
   return {
     id: mail.id,
     gmailMessageId: mail.gmailMessageId,
@@ -402,6 +438,8 @@ function toMail(mail: Mail): ConversationMail {
     company: result?.companyName ?? null,
     role: result?.jobTitle ?? null,
     ...read,
+    actionDue: due(read.actionDeadline),
+    followUpDue: due(read.followUpDate),
     askKind: result?.askKind ?? null,
     analyzedBy: result ? { provider: result.provider, model: result.model } : null,
   };
