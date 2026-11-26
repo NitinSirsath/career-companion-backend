@@ -1,0 +1,108 @@
+[
+  {
+    "id": "subject-viewed-by-company",
+    "input": {
+      "sender": "LinkedIn <jobs-noreply@linkedin.example.com>",
+      "subject": "Your application was viewed by Bluepeak Systems",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Hi Alex,\n\nGood news: your application was viewed.\nSomeone on the hiring team opened it today. Companies often reply within two weeks of viewing an application.\n\nView similar jobs\n\nYou are receiving application updates."
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": ["FOLLOW_UP"],
+      "fields": {
+        "companyName": {
+          "contains": ["bluepeak systems"]
+        }
+      },
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "subject"
+  },
+  {
+    "id": "subject-position-in-subject-rejection",
+    "input": {
+      "sender": "Harbor Grid Talent <no-reply@harborgrid.example.com>",
+      "subject": "Your application - Position: \"Software Engineer - AI Hub\"",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Dear Alex,\n\nThank you for your interest in Harbor Grid. After careful consideration we have decided not to move forward with your application.\n\nWe wish you all the best for your search.\n\nHarbor Grid Talent Acquisition"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": ["REJECTION"],
+      "fields": {
+        "companyName": {
+          "contains": ["harbor grid"]
+        },
+        "jobTitle": {
+          "contains": ["software engineer"]
+        },
+        "rejectionInfo": {
+          "present": true
+        }
+      },
+      "mustBeNull": ["offerInfo"]
+    },
+    "group": "subject"
+  },
+  {
+    "id": "subject-role-and-company-in-subject",
+    "input": {
+      "sender": "Careers <careers@lanternpay.example.com>",
+      "subject": "Application received: Product Designer at Lantern Pay",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Hi Alex,\n\nThanks for applying. We have received your application and our team will review it.\n\nBest regards,\nThe recruiting team"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": ["FOLLOW_UP"],
+      "fields": {
+        "companyName": {
+          "contains": ["lantern pay"]
+        },
+        "jobTitle": {
+          "contains": ["product designer"]
+        }
+      },
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "subject"
+  },
+  {
+    "id": "subject-company-in-sender-name",
+    "input": {
+      "sender": "Quillstone Careers <no-reply@ats-mail.example.com>",
+      "subject": "Thank you for applying",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Hi Alex,\n\nThank you for applying for the Data Analyst role. We received your application and will be in touch if there is a match.\n\nKind regards,\nTalent team"
+    },
+    "expect": {
+      "relevance": "RELEVANT",
+      "category": ["FOLLOW_UP"],
+      "fields": {
+        "companyName": {
+          "contains": ["quillstone"]
+        },
+        "jobTitle": {
+          "contains": ["data analyst"]
+        }
+      },
+      "mustBeNull": ["offerInfo", "rejectionInfo"]
+    },
+    "group": "subject"
+  },
+  {
+    "id": "subject-job-site-is-not-the-company",
+    "input": {
+      "sender": "LinkedIn <jobs-noreply@linkedin.example.com>",
+      "subject": "Alex, your application was sent",
+      "labels": ["INBOX", "CATEGORY_UPDATES"],
+      "body": "Your application was sent.\n\nThe hiring team will review it and contact you if they want to move forward.\n\nTip: applicants who follow up within a week hear back more often."
+    },
+    "expect": {
+      "relevance": "ANY",
+      "mustBeNull": ["companyName", "offerInfo", "rejectionInfo"]
+    },
+    "group": "subject"
+  }
+]
