@@ -351,6 +351,7 @@ function toRequest(
     theyAnsweredAt: isOpen(row) ? (theyAnsweredAt(row)?.toISOString() ?? null) : null,
     missed: row.missed,
   };
+}
 
 /** Open for the user to act on, missed or not. */
 const isOpen = (row: ConversationRow) =>
