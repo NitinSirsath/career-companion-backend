@@ -11,10 +11,8 @@ import { logEvent } from '../utils/log';
 import { getApplication } from './application';
 import { getConversation } from './conversation';
 import { conversationWhere } from './conversationQuery';
-import { applyMatch, candidateApplications, matchEmailToApplication, sameCompany } from './matcher';
-
-/** How many waiting emails are checked for the same company after a link, newest first. */
-const SWEEP_LIMIT = 1000;
+import { applyMatch, candidateApplications } from './matcher';
+import { matchWaitingMails } from './waitingMails';
 
 export async function linkConversation(
   userId: string,
@@ -49,7 +47,9 @@ export async function linkConversation(
   });
 
   for (const mail of mails) await confirmMatch(mail.id, application.id, mail.result);
-  const swept = await sweepSameCompany(userId, key, application);
+  // Without this, each of the company's other conversations would offer to create the same
+  // application again.
+  const swept = await matchWaitingMails(userId, application.companyName, key);
   logEvent('conversation_linked', {
     userId,
     applicationId: application.id,
@@ -145,32 +145,4 @@ async function confirmMatch(emailId: string, applicationId: string, result: Matc
       throw new AppError(409, 'MATCH_CONFLICT', CHANGE_REJECTED);
     throw error;
   }
-}
-
-/**
- * Job emails that waited because the company had no application yet get matched now, by the
- * matcher's own rules. Without this, each of the company's other conversations would offer to
- * create the same application again. No AI call is made.
- */
-async function sweepSameCompany(userId: string, key: string, application: Application) {
-  const waiting = await prisma.email.findMany({
-    where: {
-      userId,
-      relevanceState: 'RELEVANT',
-      matchState: 'UNMATCHED',
-      matchConfirmedBy: null,
-      aiProcessingResult: { companyName: { not: null } },
-      NOT: conversationWhere(key),
-    },
-    select: { id: true, aiProcessingResult: { select: { companyName: true } } },
-    orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
-    take: SWEEP_LIMIT,
-  });
-  const sameCompanyEmails = waiting.filter((email) => {
-    const company = email.aiProcessingResult?.companyName;
-    return !!company && sameCompany(company, application.companyName);
-  });
-  // Oldest first, so the application's timeline records them in the order they arrived.
-  for (const email of sameCompanyEmails.reverse()) await matchEmailToApplication(email.id);
-  return sameCompanyEmails.length;
 }
