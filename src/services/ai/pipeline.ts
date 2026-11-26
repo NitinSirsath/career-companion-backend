@@ -5,6 +5,9 @@ import { NOT_JOB_MAIL_FORGETS } from '../mailRetention';
 import { fetchMessageBody, fetchMessageMetadata } from '../gmailFetcher';
 import { boundedBody } from '../mailText';
 import { matchEmailToApplication } from '../matcher';
+import { askRules } from '../emailRequest';
+import { isMassOutreach, noReplySenders, saysNoReply, senderName } from '../mailSender';
+import { tidyRequestsOf } from '../requestUpkeep';
 import { canReplyTo, closeAsksFromRead, openAsksBefore } from '../threadAsks';
 import { AIAccess, resolveAIAccess } from './access';
 import {
@@ -27,7 +30,7 @@ import {
   JobExtractionResult,
   RelevanceClassifierInput,
 } from './contracts';
-import { EXTRACTION_V9_CONTRACT, extractionContractFor } from './extractionVersions';
+import { EXTRACTION_V11_CONTRACT, extractionContractFor } from './extractionVersions';
 import type { ThreadInput } from './threadRead';
 import { TerminalAIError } from './errors';
 import { runOperation } from './operations';
@@ -146,6 +149,7 @@ async function classify(run: EmailRun, plan: ClassificationPlan): Promise<Decisi
     confidence: relevance.data.confidence,
     category: relevance.data.category ?? null,
     deterministic,
+    bulkMail: decision !== 'IRRELEVANT' && !!gmail.bulk,
     processingStatus: decision === 'IRRELEVANT' ? ('COMPLETED' as const) : ('PROCESSING' as const),
     errorCategory: null,
     errorDetails: null,
@@ -227,7 +231,10 @@ async function extract(run: EmailRun) {
   const emailId = email.id;
   const body = await fetchMessageBody(userId, email.gmailMessageId, run.options);
   const contract = await selectExtractionContract(userId, emailId);
-  const senderCanReply = canReplyTo(email.sender);
+  // No reply reaches a sender whose mail says so, in this mail or an earlier one.
+  const saidNoReply = saysNoReply(body);
+  const senderCanReply =
+    !saidNoReply && canReplyTo(email.sender, await noReplySenders(prisma, userId));
   // The conversation's open asks, so the read can say which of them this mail closes.
   const thread = THREAD_EXTRACTION_VERSIONS.includes(contract.version)
     ? {
@@ -243,12 +250,27 @@ async function extract(run: EmailRun) {
     operation: 'extraction',
     contract,
     access: run.access,
-    call: extractionCall(contract.version, { body, receivedAt: email.receivedAt, thread }),
+    call: extractionCall(contract.version, {
+      body,
+      receivedAt: email.receivedAt,
+      subject: email.subject,
+      sender: email.sender,
+      thread,
+    }),
   });
+  // How the sorting step typed the mail, and whether it was sent as a mailing.
+  const sorted = await prisma.aIProcessingResult.findUniqueOrThrow({
+    where: { emailId },
+    select: { category: true, bulkMail: true },
   await prisma.aIProcessingResult.update({
     where: { emailId },
     data: {
-      ...extractionFields(contract.version, extraction.data, senderCanReply),
+      ...extractionFields(contract.version, extraction.data, {
+        ...email,
+        ...sorted,
+        senderCanReply,
+        saysNoReply: saidNoReply,
+      }),
       ...provenance(extraction, email.aiProcessingResult),
       contractVersion: contract.version,
       processingStatus: 'COMPLETED',
@@ -256,10 +278,16 @@ async function extract(run: EmailRun) {
   });
 }
 
-/** What the detailed read gets besides its version: the mail's text and date, and its thread. */
+/**
+ * What the detailed read gets besides its version: the mail's text, date, subject and sender, and
+ * its thread. Of the sender only the name is sent, and only to the versions that read it.
+ */
 export interface MailReadInput {
   body: string;
   receivedAt: Date | null;
+  subject: string | null;
+  /** The mail's From value. */
+  sender: string | null;
   /** The conversation's open asks, for the versions that read them. */
   thread?: ThreadInput;
 }
@@ -277,6 +305,8 @@ export function extractionCall(version: string, input: MailReadInput) {
       receivedAt: input.receivedAt?.toISOString() ?? null,
       thread: input.thread,
       bodyCut: cut,
+      subject: input.subject?.slice(0, LIMITS.subject) ?? null,
+      senderName: senderName(input.sender)?.slice(0, LIMITS.sender) ?? null,
     });
     if (!schedule) return output;
     const parsed = JobExtractionV3Schema.parse(output.data);
@@ -291,8 +321,32 @@ export function extractionCall(version: string, input: MailReadInput) {
   };
 }
 
-/** The fields a detailed read sets on the mail's AI result. Shared by new mail and Reanalyze. */
-export function extractionFields(version: string, data: unknown, senderCanReply: boolean) {
+/**
+ * The fields a detailed read sets on the mail's AI result, after the app's own rules on its
+ * request (`askRules`), with what the app itself noted about the mail. Shared by new mail and
+ * Reanalyze. `category` and `bulkMail` are the sorting step's: the mail's type, and whether it was
+ * sent as a mailing.
+ */
+export function extractionFields(
+  version: string,
+  data: unknown,
+  mail: {
+    senderCanReply: boolean;
+    subject: string | null;
+    receivedAt: Date | null;
+    category: EmailCategory | null;
+    bulkMail: boolean;
+    /** The mail's own text says nobody reads a reply to it. */
+    saysNoReply: boolean;
+  },
+) {
+  const read = readFields(version, data, mail.senderCanReply);
+  const massOutreach = isMassOutreach(mail);
+  const { bulkMail, saysNoReply } = mail;
+  return { ...read, ...askRules(read, { ...mail, massOutreach }), bulkMail, saysNoReply };
+}
+
+function readFields(version: string, data: unknown, senderCanReply: boolean) {
   return {
     ...JobExtractionSchema.parse(data),
     ...(SCHEDULE_EXTRACTION_VERSIONS.includes(version)
@@ -334,6 +388,8 @@ async function finishEmail(userId: string, emailId: string, decision: string | n
   if (decision !== 'IRRELEVANT') await matchEmailToApplication(emailId);
   // Safe to repeat: an ask that is closed already keeps its own reason.
   if (decision !== 'IRRELEVANT') await closeAsksFromRead(userId, emailId);
+  // This mail may have ended its application, or asked again what an older mail asks.
+  if (decision !== 'IRRELEVANT') await tidyRequestsOf(userId);
   await prisma.email.updateMany({
     where: { id: emailId, userId },
     data: {
@@ -364,7 +420,7 @@ export async function selectExtractionContract(
       throw new TerminalAIError(
         'The AI details of this email have conflicting versions; NorthList must check it',
       );
-    // New mails only: an email that started on an older version (v2 to v7) finishes on it.
+    // New mails only: an email that started on an older version (v2 to v9) finishes on it.
     const version = rows[0]?.version ?? newMailExtractionVersion();
     if (!rows.length)
       await tx.aIOperation.create({ data: { emailId, operation: 'extraction', version } });
@@ -373,8 +429,8 @@ export async function selectExtractionContract(
 }
 
 /**
- * The detailed-read version new mail is read with: v9 (with interview and assessment times) while
- * the agenda switch is on, else v8. One home for new mail and Reanalyze.
+ * The detailed-read version new mail is read with: v11 (with interview and assessment times) while
+ * the agenda switch is on, else v10. One home for new mail and Reanalyze.
  */
 export const newMailExtractionVersion = () =>
-  agendaExtractionV3Enabled() ? EXTRACTION_V9_CONTRACT.version : AI_CONTRACT_VERSIONS.EXTRACTION;
+  agendaExtractionV3Enabled() ? EXTRACTION_V11_CONTRACT.version : AI_CONTRACT_VERSIONS.EXTRACTION;
