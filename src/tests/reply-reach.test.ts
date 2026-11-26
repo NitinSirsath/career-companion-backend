@@ -218,3 +218,188 @@ describe('who can get a reply', () => {
     );
   });
 });
+
+describe('the conversation says when a reply would reach nobody', () => {
+  it("for an applicant-tracking system's address: no tell-them, no reply choices", async () => {
+    await jobMail(
+      { thread: 't-ats', subject: 'Next step', sender: WORKDAY, at: at(20) },
+      PORTAL_ASK,
+    );
+    const { conversation, replyChoices } = await detail('t-ats');
+    expect(conversation.request).toMatchObject({
+      canReply: false,
+      text: 'Create your candidate account.',
+      askKind: 'OUTSIDE_MAIL',
+    });
+    expect(replyChoices).toEqual([]);
+  });
+
+  it('for a mailbox once its mail said nobody reads it, in every conversation', async () => {
+    const ask = { thread: 't-ask', subject: 'Candidate account', sender: MAILBOX, at: at(20) };
+    await jobMail(ask, PORTAL_ASK);
+    await jobMail({ ...ask, thread: 't-second', subject: 'Documents' }, PORTAL_ASK);
+    await jobMail({ ...ask, thread: 't-person', sender: PERSON }, PORTAL_ASK);
+    const before = await detail('t-ask');
+    expect(before.conversation.request).toMatchObject({
+      canReply: true,
+      text: 'Create your candidate account, then tell them you did',
+    });
+    expect(before.replyChoices).toEqual(PORTAL_ASK.replyChoices);
+
+    // The user told them, and the mailbox answered by itself that nobody reads it.
+    await notReadReply('t-ask');
+    for (const key of ['t-ask', 't-second']) {
+      const after = await detail(key);
+      expect(after.conversation.request, key).toMatchObject({
+        canReply: false,
+        text: 'Create your candidate account.',
+      });
+      expect(after.replyChoices, key).toEqual([]);
+    }
+    const list = await request(app).get('/api/conversations?request=open').set(as);
+    const row = (list.body.items as { key: string; request: { canReply: boolean } }[]).find(
+      (item) => item.key === 't-second',
+    );
+    expect(row?.request.canReply).toBe(false);
+    // A person at the same company still gets replies.
+    expect((await detail('t-person')).conversation.request).toMatchObject({ canReply: true });
+  });
+
+  it('writes the to-do of an application again once its sender is known to be a mailbox', async () => {
+    const app = await prisma.application.create({
+      data: { userId: owner, companyName: 'Lumen Works' },
+    });
+    const ask = await jobMail(
+      { thread: 't-step', subject: 'Candidate account', sender: MAILBOX, at: at(20) },
+      { ...PORTAL_ASK, companyName: 'Lumen Works' },
+    );
+    await matchEmailToApplication(ask.id);
+    const step = () => prisma.action.findFirstOrThrow({ where: { applicationId: app.id } });
+    expect((await step()).description).toBe(
+      'Create your candidate account, then tell them you did',
+    );
+    await tidyAllRequests();
+    expect((await step()).description).toBe(
+      'Create your candidate account, then tell them you did',
+    );
+
+    await notReadReply('t-step');
+    await tidyAllRequests();
+    expect(await step()).toMatchObject({
+      description: 'Create your candidate account.',
+      status: 'PENDING',
+    });
+    // A step made after that mail never says it.
+    const later = await jobMail(
+      { thread: 't-later', subject: 'Documents', sender: MAILBOX, at: at(23) },
+      { ...PORTAL_ASK, requestedAction: 'Upload your documents.', companyName: 'Lumen Works' },
+    );
+    await matchEmailToApplication(later.id);
+    expect(
+      (await prisma.action.findFirstOrThrow({ where: { emailId: later.id } })).description,
+    ).toBe('Upload your documents.');
+  });
+});
+
+describe('the live conversation offers no reply box when a reply reaches nobody', () => {
+  const b64 = (text: string) => Buffer.from(text, 'utf8').toString('base64url');
+  type Extra = { sent?: boolean; text?: string };
+  const message = (id: string, day: number, headers: Record<string, string>, o: Extra = {}) => ({
+    id,
+    internalDate: String(at(day).getTime()),
+    labelIds: [o.sent ? 'SENT' : 'INBOX'],
+    payload: {
+      mimeType: 'text/plain',
+      headers: Object.entries(headers).map(([name, value]) => ({ name, value })),
+      body: { data: b64(o.text ?? 'Synthetic mail text') },
+    },
+  });
+  const read = async (messages: ReturnType<typeof message>[]) => {
+    mocks.threadsGet.mockResolvedValue({ data: { id: 't-live', messages } });
+    const res = await request(app).get('/api/mailbox/threads/t-live').set(as);
+    expect(res.status).toBe(200);
+    return MailThreadSchema.parse(res.body);
+  };
+  const mine = (day: number) =>
+    message(`sent-${day}`, day, { From: OWNER, Subject: 'Re: Candidate account' }, { sent: true });
+
+  beforeEach(async () => {
+    await prisma.gmailConnection.create({
+      data: {
+        userId: owner,
+        gmailEmail: OWNER,
+        status: 'CONNECTED',
+        accessToken: encryptToken('access'),
+        refreshToken: encryptToken('refresh'),
+      },
+    });
+    mocks.labelsList.mockResolvedValue({ data: { labels: [] } });
+  });
+
+  it('for a person: a reply box as before', async () => {
+    const thread = await read([message('m-1', 20, { From: PERSON, Subject: 'Interview' })]);
+    expect(thread).toMatchObject({ replyTo: PERSON, canReply: true });
+  });
+
+  it("for an applicant-tracking system's own address: none", async () => {
+    const thread = await read([message('m-1', 20, { From: WORKDAY, Subject: 'Next step' })]);
+    expect(thread).toMatchObject({ replyTo: WORKDAY, canReply: false });
+  });
+
+  it('for a system mail that names a person to reply to: a reply box', async () => {
+    const thread = await read([
+      message('m-1', 20, { From: WORKDAY, 'Reply-To': PERSON, Subject: 'Next step' }),
+    ]);
+    expect(thread).toMatchObject({ replyTo: PERSON, canReply: true });
+  });
+
+  it('for a mailbox whose mail in this conversation says nobody reads it: none', async () => {
+    const ask = message('m-1', 20, { From: MAILBOX, Subject: 'Candidate account' });
+    expect(await read([ask])).toMatchObject({ canReply: true });
+    const auto = { From: MAILBOX, Subject: 'Automatic reply: Candidate account' };
+    expect(await read([ask, mine(21), message('m-2', 22, auto, { text: NOT_READ })])).toMatchObject(
+      { replyTo: MAILBOX, canReply: false },
+    );
+    // A person who writes after it gets a reply box again.
+    const person = message('m-4', 23, { From: PERSON, Subject: 'Re: Candidate account' });
+    expect(
+      await read([ask, mine(21), message('m-2', 22, auto, { text: NOT_READ }), person]),
+    ).toMatchObject({ replyTo: PERSON, canReply: true });
+  });
+
+  it('for a person who is out of office: a reply box as before', async () => {
+    const thread = await read([
+      message('m-1', 20, { From: PERSON, Subject: 'Interview' }),
+      mine(21),
+      message(
+        'm-2',
+        22,
+        { From: PERSON, Subject: 'Automatic reply: Interview' },
+        { text: 'I am out of the office until Monday and will answer then.' },
+      ),
+    ]);
+    expect(thread).toMatchObject({ replyTo: PERSON, canReply: true });
+  });
+
+  it('for a notification that says "do not reply" in its own text: none', async () => {
+    const thread = await read([
+      message(
+        'm-1',
+        20,
+        { From: 'Lumen Works <updates@lumen-works.example>', Subject: 'Next step' },
+        { text: 'Complete your profile in the portal.\n\nPlease do not reply to this email.' },
+      ),
+    ]);
+    expect(thread.canReply).toBe(false);
+  });
+
+  it('for a mailbox whose earlier job mail said so: none', async () => {
+    await notReadReply('t-elsewhere');
+    const thread = await read([message('m-1', 23, { From: MAILBOX, Subject: 'Documents' })]);
+    expect(thread).toMatchObject({ replyTo: MAILBOX, canReply: false });
+  });
+
+  it('says nothing new when nobody else wrote', async () => {
+    expect(await read([mine(20)])).toMatchObject({ replyTo: null, canReply: true });
+  });
+});
