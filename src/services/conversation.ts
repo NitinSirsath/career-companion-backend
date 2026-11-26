@@ -356,7 +356,6 @@ function toRequest(
 /** Open for the user to act on, missed or not. */
 const isOpen = (row: ConversationRow) =>
   row.requestState === 'OPEN' || row.requestState === 'MISSED';
-}
 
 /** What the AI made of the user's reply after the request, as the screens show it. */
 function replyReadOf(row: ConversationRow, replied: boolean): ConversationRequest['replyRead'] {
