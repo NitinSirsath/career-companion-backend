@@ -84,7 +84,7 @@ export function askRules(
   const plainFollowUp = !!read.followUpRequired && !read.actionRequired;
   if (plainFollowUp && !parseActionDeadline(read.followUpDate, mail.receivedAt).deadline)
     return { followUpRequired: false };
-  return {}
+  return {};
 }
 
 /**
