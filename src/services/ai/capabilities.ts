@@ -10,6 +10,7 @@ import {
   SCHEDULE_EXTRACTION_VERSIONS,
   THREAD_EXTRACTION_VERSIONS,
   CUT_FLAG_EXTRACTION_VERSIONS,
+  SUBJECT_EXTRACTION_VERSIONS,
   NO_THREAD,
   EmailAnalyzer,
   RelevanceClassifier,
@@ -61,8 +62,8 @@ async function run<T>(
 
 /**
  * The versions that read times also get the received time, the thread versions also the
- * conversation's open asks, and the newest ones also whether the body was cut; the others get the
- * body only.
+ * conversation's open asks, the cut-flag ones also whether the body was cut, and the newest ones
+ * also the subject and the sender's name; the others get the body only.
  */
 function extractionInput(
   body: string,
@@ -71,14 +72,23 @@ function extractionInput(
 ): string {
   const receivedAt = options?.receivedAt ?? null;
   const thread = options?.thread ?? NO_THREAD;
+  const bodyCut = options?.bodyCut ?? false;
+  if (SUBJECT_EXTRACTION_VERSIONS.includes(contract.version))
+    return JSON.stringify({ receivedAt, ...subjectAndSender(options), body, bodyCut, ...thread });
   if (CUT_FLAG_EXTRACTION_VERSIONS.includes(contract.version))
-    return JSON.stringify({ receivedAt, body, bodyCut: options?.bodyCut ?? false, ...thread });
+    return JSON.stringify({ receivedAt, body, bodyCut, ...thread });
   if (THREAD_EXTRACTION_VERSIONS.includes(contract.version))
-    return JSON.stringify({ receivedAt, body, ...(options?.thread ?? NO_THREAD) });
+    return JSON.stringify({ receivedAt, body, ...thread });
   if (SCHEDULE_EXTRACTION_VERSIONS.includes(contract.version))
     return JSON.stringify({ receivedAt, body });
   return body;
 }
+
+/** The subject line and the sender's name as the newest versions read them; null when missing. */
+const subjectAndSender = (options: Parameters<EmailAnalyzer['extractJobData']>[1]) => ({
+  subject: options?.subject ?? null,
+  senderName: options?.senderName ?? null,
+});
 
 /** Feature-facing capabilities bound to one provider client and the models for each role. */
 export function bindCapabilities(client: ProviderClient, models: BoundModels): AICapabilities {
