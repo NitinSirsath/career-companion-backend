@@ -16,7 +16,9 @@ import {
 import { enqueueNotificationJob } from './enqueue';
 import { recordStatusChange, retireStatusChangesOfEmail } from './statusLog';
 import { logEvent, logError } from '../utils/log';
+import { sameCompany } from './companyName';
 import { sameJobTitle } from './jobTitle';
+import { isMassOutreach, noReplySenders } from './mailSender';
 
 // Messages for a match correction that fails.
 const MATCH_GONE = 'Email or application no longer available';
@@ -62,6 +64,8 @@ export async function matchEmailToApplication(emailId: string): Promise<void> {
   if (aiProcessingResult.fakeOfferWarning) return;
   // A career contact is about the user's work, not a job: it never gets an application.
   if (aiProcessingResult.category === 'CAREER_CONTACT') return;
+  // Mass outreach is an advert sent to many people: the app never links it by itself.
+  if (isMassOutreach(aiProcessingResult)) return;
 
   // 1. Thread Match
   const decision = await threadDecision(prisma, email);
@@ -122,8 +126,7 @@ function normalize(str: string): string {
     .trim();
 }
 
-/** Two company names that the matcher treats as the same company. */
-export const sameCompany = (a: string, b: string) => normalize(a) === normalize(b);
+export { sameCompany };
 
 /**
  * The user's active applications an email about this company and role may belong to: the same
@@ -727,7 +730,8 @@ async function createActionFromEmail(
   aiResult: AIProcessingResult,
   carried: { actionStatus: Action['status']; snoozedUntil: Date | null },
 ) {
-  const request = requestOf(aiResult, email.receivedAt, email.sender);
+  const saidNoReply = await noReplySenders(tx, email.userId);
+  const request = requestOf(aiResult, email.receivedAt, email.sender, saidNoReply);
   if (!request) throw new Error('EMAIL_HAS_NO_REQUEST');
   const parsed = request.deadline;
   if (request.deadlineText?.trim() && !parsed.deadline)
