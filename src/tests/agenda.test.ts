@@ -131,11 +131,11 @@ it('pins v2/v3 held/completed/pending claims and keeps selected v5 after disable
         selectExtractionContract(userId, emailId),
       ])
     ).map((c) => c.version),
-  ).toEqual(['extraction/v9', 'extraction/v9']);
+  ).toEqual(['extraction/v11', 'extraction/v11']);
   vi.stubEnv('AGENDA_EXTRACTION_V3_ENABLED', 'false');
-  expect((await selectExtractionContract(userId, emailId)).version).toBe('extraction/v9');
+  expect((await selectExtractionContract(userId, emailId)).version).toBe('extraction/v11');
   await prisma.aIOperation.deleteMany({ where: { emailId } });
-  expect((await selectExtractionContract(userId, emailId)).version).toBe('extraction/v8');
+  expect((await selectExtractionContract(userId, emailId)).version).toBe('extraction/v10');
 });
 it('adopts completed v2 to v5 without fetching Gmail or calling a provider', async () => {
   const fetch = vi

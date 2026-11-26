@@ -460,6 +460,12 @@ model AIProcessingResult {
   category          EmailCategory?
   confidence        Float?
   deterministic     Boolean              @default(false)
+  /// True for a job mail sent as a mailing (it carries an unsubscribe header). With a recruiter's
+  /// or career contact's type it is mass outreach: it asks for nothing and is never linked by itself.
+  bulkMail          Boolean              @default(false)
+  /// True when the mail's own text says that nobody reads a reply to it ("do not reply to this
+  /// email", "this mailbox is not monitored"). Its sender then gets no reply box.
+  saysNoReply       Boolean              @default(false)
 
   companyName        String?
   jobTitle           String?

@@ -15,6 +15,8 @@ function result(fields: Partial<AIProcessingResult>): AIProcessingResult {
     category: null,
     confidence: null,
     deterministic: false,
+    bulkMail: false,
+    saysNoReply: false,
     companyName: null,
     jobTitle: null,
     recruiterName: null,

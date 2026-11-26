@@ -25,6 +25,8 @@ import {
   relevanceBatchContractFor,
 } from '../services/ai/contracts';
 import {
+  EXTRACTION_V10_CONTRACT,
+  EXTRACTION_V11_CONTRACT,
   EXTRACTION_V8_CONTRACT,
   EXTRACTION_V9_CONTRACT,
   LONG_MAIL_RULES,
@@ -239,6 +241,8 @@ const FINGERPRINTS: Record<string, string> = {
   'extraction/v7': '5b3e618584fa1129db01f31d155a9a6873390c8ed55edf8156141ba34f1ac6c4',
   'extraction/v8': '580b53eaf49e6eae3faee1a24ceccbfcc57f0d7b694d267afbb5ee8ccf1fab20',
   'extraction/v9': '390de2f54a048972b1127f48eed3ef25c2dc439576035e63e7310882803caf6f',
+  'extraction/v10': 'f4977a56a6930d255346d38f92c9bbd3ba3b7d8b938d8220334c0dc14a8e7616',
+  'extraction/v11': 'a6140c654e58ffded0fbedddc3eee169f0fa25d7ee7d163333b0d80f9c38e1c2',
   'reply-read/v1': '05c061e1271722e8a69ad8cafb0001953798d39f876935244ab03dfd98960194',
   'reply-read/v2': 'ce8defac6002249e1aa6d5cc6111f247dd2c23e81e234e327658cb5a3f0dedc3',
   'reply-draft/v1': 'ee4f41efa4161099642fb9725dddbe0942ce001aac84fac7dd1e808ab608fa35',
@@ -284,6 +288,8 @@ describe('provider-neutral AI contracts', () => {
     EXTRACTION_V7_CONTRACT,
     EXTRACTION_V8_CONTRACT,
     EXTRACTION_V9_CONTRACT,
+    EXTRACTION_V10_CONTRACT,
+    EXTRACTION_V11_CONTRACT,
     REPLY_READ_CONTRACT,
     REPLY_READ_V2_CONTRACT,
     REPLY_DRAFT_CONTRACT,
@@ -337,9 +343,11 @@ describe('strict relevance contracts', () => {
     expect(extractionContractFor('extraction/v7')).toBe(EXTRACTION_V7_CONTRACT);
     expect(extractionContractFor('extraction/v8')).toBe(EXTRACTION_V8_CONTRACT);
     expect(extractionContractFor('extraction/v9')).toBe(EXTRACTION_V9_CONTRACT);
+    expect(extractionContractFor('extraction/v10')).toBe(EXTRACTION_V10_CONTRACT);
+    expect(extractionContractFor('extraction/v11')).toBe(EXTRACTION_V11_CONTRACT);
     expect(() => classificationContractFor('classification/v9')).toThrow(TerminalAIError);
     expect(() => relevanceBatchContractFor('relevance-batch/v9')).toThrow(TerminalAIError);
-    expect(() => extractionContractFor('extraction/v10')).toThrow(TerminalAIError);
+    expect(() => extractionContractFor('extraction/v12')).toThrow(TerminalAIError);
   });
 });
 
@@ -412,6 +420,8 @@ describe('extraction read with the conversation (owner, 24 Oct 2026)', () => {
       'extraction/v7',
       'extraction/v8',
       'extraction/v9',
+      'extraction/v10',
+      'extraction/v11',
     ]);
     for (const [contract, base] of [
       [EXTRACTION_V6_CONTRACT, EXTRACTION_V4_CONTRACT],
@@ -484,7 +494,7 @@ describe('career contact and job platform rules (owner, 17 Nov 2026)', () => {
     expect(AI_CONTRACT_VERSIONS).toEqual({
       CLASSIFICATION: 'classification/v5',
       RELEVANCE_BATCH: 'relevance-batch/v4',
-      EXTRACTION: 'extraction/v8',
+      EXTRACTION: 'extraction/v10',
     });
   });
 

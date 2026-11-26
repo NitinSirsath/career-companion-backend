@@ -23,6 +23,7 @@ import {
   THREAD_EXTRACTION_VERSIONS,
 } from '../../services/ai/contracts';
 import { canReplyTo } from '../../services/emailRequest';
+import { senderName } from '../../services/mailSender';
 import { REPLY_READ_V2_CONTRACT, replyOutcomes } from '../../services/ai/replyRead';
 import { evaluateCall } from './call';
 import { longMailCases } from './longMails';
@@ -194,6 +195,8 @@ async function main() {
             ai.analyzer.extractJobData(bounded.body, {
               version: extractionVersion,
               bodyCut: bounded.cut,
+              subject: c.input.subject ?? null,
+              senderName: senderName(c.input.sender),
               receivedAt: c.input.receivedAt ?? null,
               thread: withThread
                 ? {

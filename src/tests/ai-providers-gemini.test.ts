@@ -371,6 +371,8 @@ describe('Gemini adapter', () => {
         model: 'gemini-2.5-flash',
         contents: JSON.stringify({
           receivedAt: null,
+          subject: null,
+          senderName: null,
           body: 'test body',
           bodyCut: false,
           senderCanReply: true,

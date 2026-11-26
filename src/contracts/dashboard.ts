@@ -91,8 +91,11 @@ export const DashboardResponseSchema = z.object({
   now: z.object({
     /** Conversations not opened yet; `today` = those whose newest mail came today. */
     newJobMails: z.object({ count, today: count }),
-    /** Open requests (Mails "Needs action"); `waitingOverADay` = answers by mail waiting > 24 h. */
-    needsAction: z.object({ count, waitingOverADay: count }),
+    /**
+     * Open requests (Mails "Needs action"); `waitingOverADay` = answers by mail waiting > 24 h;
+     * `missed` = requests that left Needs action by themselves (Mails "Missed"), not in `count`.
+     */
+    needsAction: z.object({ count, waitingOverADay: count, missed: count }),
     /** Interviews from today on, by the dates the AI read off job mails. */
     interviews: z.object({ count, next: InterviewSchema.nullable() }),
   }),
@@ -142,7 +145,10 @@ export const DashboardResponseSchema = z.object({
     lookedAt: count,
     sent: count,
     skipped: count,
+    /** Jobs left for the user in the period that still need them. */
     needsYou: count,
+    /** Jobs left for the user in the period more than 7 days ago: missed, not in `needsYou`. */
+    missed: count,
     topSkipReasons: z.array(z.object({ reason: z.string(), count })),
   }),
 });

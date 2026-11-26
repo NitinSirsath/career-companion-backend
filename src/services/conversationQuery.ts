@@ -4,7 +4,9 @@
  */
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
+import type { Missed } from '../contracts';
 import type { ConversationFilters } from '../contracts/conversation';
+import { missedRequests } from './missedRequests';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -16,7 +18,10 @@ export interface ConversationRow {
   category: string | null;
   /** The newest email that asks the user for something; null when none does. */
   requestEmailId: string | null;
-  requestState: 'NONE' | 'OPEN' | 'REPLIED' | 'DONE';
+  /** MISSED: an open request that left Needs action by itself (`missedRequests.ts`). */
+  requestState: 'NONE' | 'OPEN' | 'MISSED' | 'REPLIED' | 'DONE';
+  /** Why and since when, for a MISSED request; null otherwise. */
+  missed: Missed | null;
   applicationId: string | null;
   mailCount: number;
   sentCount: number;
@@ -53,7 +58,13 @@ export function conversationsWhere(keys: string[]): Prisma.EmailWhereInput {
   };
 }
 
-const REQUEST_FILTER = { open: 'OPEN', replied: 'REPLIED', done: 'DONE', none: 'NONE' } as const;
+const REQUEST_FILTER = {
+  open: 'OPEN',
+  missed: 'MISSED',
+  replied: 'REPLIED',
+  done: 'DONE',
+  none: 'NONE',
+} as const;
 
 function filterConditions(filters: ConversationFilters, pattern: string | null): Prisma.Sql[] {
   const conditions: Prisma.Sql[] = [];
@@ -79,9 +90,15 @@ function filterConditions(filters: ConversationFilters, pattern: string | null):
  * application closing), or, while it has no action, when the user marked it done; REPLIED when
  * the user sent a message after it, unless they reopened it later or the AI read that message
  * and it did not settle the request (a message that asked them a question stays REPLIED until
- * their next mail); otherwise OPEN.
+ * their next mail); otherwise it is open: MISSED when it is one of `missed` (the emails whose
+ * request went stale, from `missedRequests`), else OPEN.
  */
-function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql): Prisma.Sql {
+function conversationsCte(
+  userId: string,
+  hit: Prisma.Sql,
+  onlyKey: Prisma.Sql,
+  missed: string[],
+): Prisma.Sql {
   return Prisma.sql`
     WITH relevant AS (
       SELECT e.id, e."receivedAt", e."applicationId", e."matchState", e."seenAt",
@@ -145,6 +162,7 @@ function conversationsCte(userId: string, hit: Prisma.Sql, onlyKey: Prisma.Sql):
                  OR (s."lastReadState" = 'ASKED_BACK'
                    AND NOT COALESCE(w."lastMailAt" > s."lastSentAt", FALSE))
                ) THEN 'REPLIED'
+               WHEN q."requestEmailId" = ANY(${missed}::uuid[]) THEN 'MISSED'
                ELSE 'OPEN'
              END AS "requestState"
       FROM latest l
@@ -240,9 +258,10 @@ export async function conversationRows(
     : Prisma.empty;
   const attentionFirst =
     filters.sort === 'newest' ? Prisma.empty : Prisma.sql`(c."requestState" = 'OPEN') DESC,`;
+  const missed = await missedRequests(db, userId);
 
-  return db.$queryRaw<ConversationRow[]>`
-    ${conversationsCte(userId, hit, onlyKey)}
+  const rows = await db.$queryRaw<Omit<ConversationRow, 'missed'>[]>`
+    ${conversationsCte(userId, hit, onlyKey, [...missed.keys()])}
     SELECT c.key, c."latestEmailId", c."lastReceivedAt", c.category, c."requestEmailId",
            c."requestState", c."applicationId", c."mailCount", c."sentCount", c."lastSentAt",
            c."lastReadState", c."lastMailAt", c."isNew"
@@ -251,4 +270,8 @@ export async function conversationRows(
     ${where}
     ORDER BY ${attentionFirst} c."lastReceivedAt" DESC NULLS LAST, c.key DESC
     LIMIT ${page.limit} OFFSET ${page.offset}`;
+  return rows.map((row) => ({
+    ...row,
+    missed: row.requestState === 'MISSED' ? (missed.get(row.requestEmailId ?? '') ?? null) : null,
+  }));
 }

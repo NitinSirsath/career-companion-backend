@@ -33,6 +33,7 @@ import { runUserCall } from './ai/userCall';
 import { conversationWhere } from './conversationQuery';
 import { googleStatus } from './gmailClient';
 import { fetchMessageBody, fetchMessageMetadata } from './gmailFetcher';
+import { noReplySenders, saysNoReply as mailSaysNoReply } from './mailSender';
 import { ReanalysisStop } from './reanalysisRuns';
 import { CLOSES_AS, NOTHING_READ, ownText, readReply } from './replyReading';
 import { canReplyTo, openAsksAmong, type AskSource, type OpenAsk } from './threadAsks';
@@ -230,6 +231,8 @@ interface MailText {
   body: string;
   labelIds: string[] | null;
   snippet: string | null;
+  /** Set for a mail sent as a mailing (`fetchMessageMetadata`). */
+  bulk?: true;
 }
 
 /** Reads from Gmail; null when Gmail no longer has the message. */
@@ -402,7 +405,9 @@ async function readMailAgain(
   const category = type && JOB_TYPES.includes(type) ? type : null;
   const version = newMailExtractionVersion();
   const contract = extractionContractFor(version);
-  const senderCanReply = canReplyTo(mail.sender);
+  const saysNoReply = mailSaysNoReply(text.body);
+  const senderCanReply =
+    !saysNoReply && canReplyTo(mail.sender, await noReplySenders(prisma, userId));
   const thread = THREAD_EXTRACTION_VERSIONS.includes(version)
     ? {
         senderCanReply,
@@ -413,12 +418,23 @@ async function readMailAgain(
     userId,
     purpose: 'reanalyze-read',
     contract,
-    call: extractionCall(version, { body: text.body, receivedAt: mail.receivedAt, thread }),
+    call: extractionCall(version, {
+      body: text.body,
+      receivedAt: mail.receivedAt,
+      subject: mail.subject,
+      sender: mail.sender,
+      thread,
+    }),
   });
+  const sortedAs = {
+    category: category ?? mail.aiProcessingResult?.category ?? null,
+    bulkMail: !!text.bulk,
+    saysNoReply,
+  };
   return {
     version,
     data: read.data,
-    fields: extractionFields(version, read.data, senderCanReply),
+    fields: extractionFields(version, read.data, { ...mail, ...sortedAs, senderCanReply }),
     category,
     provider: read.provider,
     model: read.model,

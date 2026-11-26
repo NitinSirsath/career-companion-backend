@@ -143,6 +143,11 @@ export const NotSubmittedJobSchema = z.object({
   /** When the automation wrote the entry. */
   loggedAt: IsoDateTime,
   receivedAt: IsoDateTime,
+  /**
+   * True for a NEEDS_USER job logged more than 7 days ago (owner, 26 Nov 2026): it is missed and
+   * no longer counts as needing the user. Always false for a skipped job.
+   */
+  missed: z.boolean(),
 });
 export type NotSubmittedJob = z.infer<typeof NotSubmittedJobSchema>;
 

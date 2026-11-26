@@ -113,7 +113,7 @@ describe("the AI reads again with today's rules (traps 1-6)", () => {
     expect(run).toMatchObject({ state: 'SAVED', savedKeys: ['t-read'], stopReason: null });
     expect(ai).toHaveBeenCalledTimes(2);
     expect(await resultOf(mail.id)).toMatchObject({
-      contractVersion: 'extraction/v8',
+      contractVersion: 'extraction/v10',
       category: 'INTERVIEW',
       offerInfo: null,
       interviewDate: '2026-11-18',
@@ -123,7 +123,7 @@ describe("the AI reads again with today's rules (traps 1-6)", () => {
     });
     expect(ledger).toHaveLength(1);
     expect(ledger[0]).toMatchObject({
-      version: 'extraction/v8',
+      version: 'extraction/v10',
       status: 'COMPLETED',
       startedAt: at(10),
     });
@@ -501,7 +501,7 @@ describe('Gmail and changes during a run (traps 23-28)', () => {
     expect(run).toMatchObject({ state: 'SAVED', gone: 1 });
     expect(await mailNow(ask.id)).toMatchObject({ requestClosedReason: 'CONFIRMED_BY_MAIL' });
     expect(await resultOf(gone.id)).toMatchObject({ contractVersion: 'extraction/v6' });
-    expect(await resultOf(ask.id)).toMatchObject({ contractVersion: 'extraction/v8' });
+    expect(await resultOf(ask.id)).toMatchObject({ contractVersion: 'extraction/v10' });
   });
 
   it('stops before any AI read when Gmail is disconnected', async () => {

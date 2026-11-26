@@ -7,6 +7,7 @@ import { NotificationProviderType, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { discordUserId, vapidKeys } from '../../utils/config';
 import { logDebug, logError, logEvent, logWarn } from '../../utils/log';
+import { missedRequests } from '../missedRequests';
 import { suppressNotifications } from '../notificationSuppression';
 import { isSuspended } from '../suspension';
 import {
@@ -87,13 +88,19 @@ export async function deliverActionPushAlert(actionId: string) {
   reportResult(actionId, 'WEB_PUSH', result);
 }
 
+/** A step from a mail whose request is missed already: an old mail read late (`missedRequests.ts`). */
+async function isMissed(action: ActionWithApplication) {
+  if (!action.emailId) return false;
+  return (await missedRequests(prisma, action.application.userId)).has(action.emailId);
+}
+
 /**
- * Open, not archived or snoozed (those are suppressed for good), not sent on this channel yet,
- * and of a kind worth a notification.
+ * Open, not archived, snoozed or missed (those are suppressed for good), not sent on this channel
+ * yet, and of a kind worth a notification.
  */
 async function stillWanted(action: ActionWithApplication, provider: NotificationProviderType) {
   if (!isOpen(action)) return false;
-  if (isHidden(action)) {
+  if (isHidden(action) || (await isMissed(action))) {
     await suppressNotifications(prisma, [action.id]);
     return false;
   }

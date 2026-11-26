@@ -13,7 +13,8 @@ import {
 } from '../contracts';
 import { logError } from '../utils/log';
 import { repliedRequests } from './conversationQuery';
-import { closeAsksOfApplication } from './threadAsks';
+import { missedRequests, missedStep, missedStepCounts } from './missedRequests';
+import { closeAsksOfApplication, ENDED_STATUSES } from './threadAsks';
 import { recordStatusChange } from './statusLog';
 import { SETTLED, archiveFilter, groupFilters } from './applicationGroups';
 import { declineView, newestMail } from './declineQuestion';
@@ -246,11 +247,12 @@ export async function listApplications(
     include: enrichment,
   });
 
-  const recent = await loadRecentEvents(
-    prisma,
-    applications.map((app) => app.id),
+  const ids = applications.map((app) => app.id);
+  const recent = await loadRecentEvents(prisma, ids);
+  const missed = await missedStepCounts(prisma, userId, ids);
+  return applications.map((app) =>
+    mapToResponse(userId, app, { recent: recent.get(app.id) ?? null, missed: missed.get(app.id) }),
   );
-  return applications.map((app) => mapToResponse(userId, app, recent.get(app.id) ?? null));
 }
 
 export async function getApplication(
@@ -261,11 +263,12 @@ export async function getApplication(
   const app = await db.application.findFirst({ where: { id, userId }, include: enrichment });
   if (!app) return null;
   const recent = await loadRecentEvents(db, [app.id]);
-  return mapToResponse(userId, app, recent.get(app.id) ?? null);
+  const missed = await missedStepCounts(db, userId, [app.id]);
+  return mapToResponse(userId, app, { recent: recent.get(app.id) ?? null, missed: missed.get(id) });
 }
 
 /** The statuses that close the application's open asks (owner, 24 Oct 2026). */
-const CLOSING_STATUSES: readonly (string | null)[] = ['REJECTED', 'CLOSED'];
+const CLOSING_STATUSES: readonly (string | null)[] = ENDED_STATUSES;
 
 /**
  * Owned manual status correction. One transaction locks the application row by id AND owner,
@@ -480,6 +483,7 @@ export async function getApplicationActions(
     a.status === 'PENDING' && a.email ? [a.email] : [],
   );
   const replied = await repliedRequests(prisma, userId, pendingEmails);
+  const missed = await missedRequests(prisma, userId);
 
   return actions.map((a) => ({
     id: a.id,
@@ -499,6 +503,7 @@ export async function getApplicationActions(
       a.status === 'PENDING' && a.emailId ? (replied.get(a.emailId)?.toISOString() ?? null) : null,
     askKind: a.email?.aiProcessingResult?.askKind ?? null,
     closedReason: a.status === 'COMPLETED' ? (a.email?.requestClosedReason ?? null) : null,
+    missed: missedStep(a, missed),
   }));
 }
 
@@ -506,7 +511,7 @@ export async function getApplicationActions(
 function mapToResponse(
   userId: string,
   app: EnrichedApplication,
-  recent: RecentEventRow | null,
+  { recent, missed = 0 }: { recent: RecentEventRow | null; missed?: number },
 ): ApplicationResponse {
   const aiStatus = app.aiStatus as ApplicationResponse['aiStatus'];
   const userStatus = app.userStatus as ApplicationResponse['userStatus'];
@@ -540,7 +545,7 @@ function mapToResponse(
           }),
         }
       : null,
-    pendingActionCount: app._count.actions,
+    pendingActionCount: app._count.actions - missed,
     submittedVia: app._count.externalSubmissions > 0 ? 'AUTOMATION' : null,
     automation: toAutomation(userId, app.externalSubmissions[0]),
     ...declineView(app, app.emails[0]?.receivedAt ?? null),

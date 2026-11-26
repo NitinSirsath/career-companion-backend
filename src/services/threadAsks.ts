@@ -231,6 +231,156 @@ export async function closeAsksFromRead(userId: string, emailId: string) {
   );
 }
 
+/** The statuses that end an application: its open asks close with it. */
+export const ENDED_STATUSES = ['REJECTED', 'CLOSED'] as const;
+
+/** An open step of an application with the mail that asks for it. */
+const stepWithMail = {
+  type: true,
+  applicationId: true,
+  email: {
+    select: {
+      id: true,
+      threadId: true,
+      subject: true,
+      sender: true,
+      receivedAt: true,
+      gmailMessageId: true,
+      requestUserState: true,
+      requestUserStateAt: true,
+      aiProcessingResult: true,
+    },
+  },
+} satisfies Prisma.ActionSelect;
+type StepMail = NonNullable<Prisma.ActionGetPayload<{ select: typeof stepWithMail }>['email']>;
+
+/** The user's open steps that come from mails whose request nothing closed yet. */
+const openStepsOf = (tx: Prisma.TransactionClient, userId: string, applicationId?: string) =>
+  tx.action.findMany({
+    where: {
+      application: { userId },
+      ...(applicationId ? { applicationId } : {}),
+      status: 'PENDING',
+      retiredAt: null,
+      email: { requestClosedReason: null },
+    },
+    select: stepWithMail,
+  });
+
+/** The user said it is open (Reopen or "Still open") after this moment: nothing closes it again. */
+const keptOpenAfter = (mail: StepMail, moment: Date) =>
+  mail.requestUserState === 'OPEN' && !!mail.requestUserStateAt && mail.requestUserStateAt > moment;
+
+/**
+ * An application that ended closes the open asks of the mails that came before it did (owner,
+ * 26 Nov 2026), whoever ended it: the user, or a mail the AI read as a rejection, which is then
+ * named as the mail that closed them. An ask that arrived later, or that the user opened again
+ * since, stays. Reopen still works. Returns how many closed.
+ */
+export async function closeAsksOfEndedApplications(userId: string) {
+  const ended = await prisma.application.findMany({
+    where: {
+      userId,
+      OR: [
+        { userStatus: { in: [...ENDED_STATUSES] } },
+        { userStatus: null, aiStatus: { in: [...ENDED_STATUSES] } },
+      ],
+      actions: { some: { status: 'PENDING', retiredAt: null, emailId: { not: null } } },
+    },
+    select: {
+      id: true,
+      userStatusSetAt: true,
+      statusChanges: {
+        where: { retiredAt: null, toStatus: { in: [...ENDED_STATUSES] } },
+        orderBy: [{ changedAt: 'desc' }, { id: 'desc' }],
+        take: 1,
+        select: { changedAt: true, source: true, email: { select: { gmailMessageId: true } } },
+      },
+    },
+  });
+  let closed = 0;
+  for (const app of ended) {
+    const [change] = app.statusChanges;
+    const endedAt = change?.changedAt ?? app.userStatusSetAt;
+    if (!endedAt) continue;
+    const byMessageId = change?.source === 'AI' ? (change.email?.gmailMessageId ?? null) : null;
+    closed += await prisma.$transaction(async (tx) => {
+      await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
+      const steps = await openStepsOf(tx, userId, app.id);
+      const emailIds = steps.flatMap(({ email }) =>
+        email?.receivedAt && email.receivedAt < endedAt && !keptOpenAfter(email, endedAt)
+          ? [email.id]
+          : [],
+      );
+      return closeAsks(tx, [...new Set(emailIds)], { reason: 'APPLICATION_CLOSED', byMessageId });
+    });
+  }
+  if (closed) logEvent('asks_closed', { userId, closed, by: 'application_ended' });
+  return closed;
+}
+
+const REPEAT_PREFIX = /^(?:(?:re|fwd?|(?:gentle |kind |friendly )?reminder)\s*[:-]\s*)+/;
+
+/** A mail's subject without "Re:", "Fwd:" or "Reminder:" before it; '' when it has none. */
+const subjectKey = (subject: string | null) =>
+  (subject ?? '').toLowerCase().replace(/\s+/g, ' ').trim().replace(REPEAT_PREFIX, '').trim();
+
+/** The sender's address alone, without the name. */
+const senderKey = (sender: string | null) =>
+  (sender?.match(/<([^>]+)>/)?.[1] ?? sender ?? '').trim().toLowerCase();
+
+/**
+ * What makes two asks the same ask: one application, one kind of step, one sender address, one
+ * subject, and one deadline (or none on both). null for a mail with no subject or sender: such an
+ * ask is never taken for another.
+ */
+function repeatKey(step: { type: string; applicationId: string }, mail: StepMail) {
+  const subject = subjectKey(mail.subject);
+  const sender = senderKey(mail.sender);
+  const request =
+    mail.aiProcessingResult && requestOf(mail.aiProcessingResult, mail.receivedAt, mail.sender);
+  if (!subject || !sender || !request) return null;
+  const deadline = request.deadline.deadline?.toISOString() ?? 'none';
+  return [step.applicationId, step.type, sender, subject, deadline].join('\n');
+}
+
+/**
+ * The same ask sent again in another conversation (a reminder mail) closes the older one as
+ * replaced by the newer mail (owner, 26 Nov 2026): only the newest stays open. Asks inside one
+ * conversation are the AI's to close when it reads the newer mail. One the user opened again after
+ * the newer mail came stays. Returns how many closed.
+ */
+export async function closeRepeatedAsks(userId: string) {
+  const closed = await prisma.$transaction(async (tx) => {
+    await lockUser(tx, LOCK_NAMESPACE.emailMatches, userId);
+    const groups = new Map<string, StepMail[]>();
+    for (const step of await openStepsOf(tx, userId)) {
+      const key = step.email && repeatKey(step, step.email);
+      if (key && step.email) groups.set(key, [...(groups.get(key) ?? []), step.email]);
+    }
+    let count = 0;
+    for (const mails of groups.values()) {
+      const dated = mails.flatMap((mail) =>
+        mail.receivedAt ? [{ mail, at: mail.receivedAt }] : [],
+      );
+      if (dated.length < 2) continue;
+      const newest = dated.reduce((a, b) => (b.at > a.at ? b : a));
+      const thread = (mail: StepMail) => mail.threadId ?? mail.id;
+      const older = dated.filter(
+        ({ mail, at }) =>
+          at < newest.at && thread(mail) !== thread(newest.mail) && !keptOpenAfter(mail, newest.at),
+      );
+      count += await closeAsks(tx, [...new Set(older.map(({ mail }) => mail.id))], {
+        reason: 'REPLACED_BY_MAIL',
+        byMessageId: newest.mail.gmailMessageId,
+      });
+    }
+    return count;
+  });
+  if (closed) logEvent('asks_closed', { userId, closed, by: 'asked_again' });
+  return closed;
+}
+
 /**
  * The user set the application to Rejected or Closed: the open asks that came from its mails
  * close too (owner, 24 Oct 2026). Reopen still works.

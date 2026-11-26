@@ -7,6 +7,7 @@ AI_EVAL_API_KEY=<key> npm run ai:eval -- --provider <gemini|openai|anthropic|ope
 ```
 
 - `dataset-thread/` holds the cases for the thread extraction versions (v6, the default, and v7): mails read with the conversation's open asks. They check that a mail closes the asks it replaces or confirms, and keeps open the ones a short mail, a reminder or text that tells the AI to close asks do not settle; the kind of ask; and the reply choices. They run only with a thread version, together with the cases for reading the user's own reply (`replyRead.ts`, reply-read/v1): no wrong close, and at least 90% exactly right.
+- `dataset/subject.json` (owner, 26 Nov 2026) holds mails that name the company or the job only in the subject line or the sender's name, and one where the sender is a job site that must not become the company. Their reading needs single mode and `extraction/v10` (the default) or `v11`; batch mode (the CI run) only sorts them.
 - `dataset/` holds synthetic emails only. Use fictitious people and companies and reserved domains (`example.com`, `example.org`, `example.net`, `*.test`). The dataset test enforces the domains.
 - `score.ts` holds the metrics and pass criteria. `eval.test.ts` covers them in CI, with no network.
 - `run.ts` is the manual runner. It uses the production adapters and contracts and touches no database, Gmail or ledger.

@@ -13,7 +13,11 @@ import { z } from 'zod';
 import { prisma } from '../db/prisma';
 import { LOCK_NAMESPACE, lockUser } from '../utils/advisoryLock';
 import { submissionDailyLimit } from '../utils/config';
+import { logError } from '../utils/log';
 import { CanonicalTask, parseTaskInput, saveTask } from './applyTask';
+import { companyKey } from './companyName';
+import { titleKey } from './jobTitle';
+import { matchWaitingMails } from './waitingMails';
 import {
   CanonicalPortalAccount,
   PORTAL_ACCOUNT_SELECT,
@@ -39,21 +43,6 @@ const QUESTION_LIMIT = 500;
 const ANSWER_LIMIT = 2000;
 const FUTURE_TOLERANCE_MS = 5 * 60_000;
 const JOB_URL_QUERY_ALLOWLIST = new Set(['jk', 'currentJobId', 'gh_jid', 'jobId']);
-const LEGAL_SUFFIXES = new Set([
-  'inc',
-  'incorporated',
-  'llc',
-  'llp',
-  'ltd',
-  'limited',
-  'pvt',
-  'private',
-  'corp',
-  'corporation',
-  'co',
-  'plc',
-  'gmbh',
-]);
 
 // Optional fields may be omitted or null; both mean "not reported".
 const optionalText = (max: number) => z.string().trim().max(max).nullish();
@@ -237,18 +226,9 @@ export function parseSubmissionInput(raw: unknown, now = new Date()): CanonicalS
 
 // ─── Matching keys (ADR-0002 decision 7 plus the edge-case rules below) ─────
 
-/** The existing normalization, shared with the Gmail matcher's behaviour: lowercase a–z and 0–9 only. */
-export const titleKey = (title: string) => title.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-/** Like titleKey, after dropping trailing legal-suffix words (always keeping the first word). */
-export function companyKey(name: string): string {
-  const words = name
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
-  while (words.length > 1 && LEGAL_SUFFIXES.has(words[words.length - 1])) words.pop();
-  return words.join('');
-}
+// The keys are shared with the Gmail matcher: one rule for a company (`companyName.ts`) and one
+// for a job title (`jobTitle.ts`).
+export { companyKey, titleKey };
 
 type Candidate = { id: string; companyName: string; jobTitle: string | null };
 export type MatchDecision =
@@ -448,6 +428,30 @@ export async function recordSubmission(
   now = new Date(),
 ): Promise<IntakeOutcome> {
   const submission = parseSubmissionInput(raw, now);
+  const outcome = await saveSubmission(userId, tokenId, submission, now);
+  if (outcome.result !== 'needs_review') await matchMailsOf(userId, submission.company);
+  return outcome;
+}
+
+/**
+ * The company's job mails that waited for an application are matched now (`matchWaitingMails`):
+ * a confirmation often arrives before the automation reports the job. The entry is saved already,
+ * so a failure here is logged and never refuses it.
+ */
+async function matchMailsOf(userId: string, company: string) {
+  try {
+    await matchWaitingMails(userId, company);
+  } catch (err) {
+    logError('waiting_mails_match_failed', { userId }, err);
+  }
+}
+
+async function saveSubmission(
+  userId: string,
+  tokenId: string | null,
+  submission: CanonicalSubmission,
+  now: Date,
+): Promise<IntakeOutcome> {
   const limit = submissionDailyLimit();
   const ref = {
     userId,
@@ -545,7 +549,7 @@ export async function resolveSubmission(
   resolution: ResolveAction,
   now = new Date(),
 ) {
-  return prisma.$transaction(async (tx) => {
+  const { company, ...resolved } = await prisma.$transaction(async (tx) => {
     await lockUser(tx, LOCK_NAMESPACE.externalSubmissions, userId);
     const submission = await tx.externalSubmission.findFirst({
       where: { id: submissionId, userId },
@@ -579,8 +583,10 @@ export async function resolveSubmission(
     });
     if (updated.count !== 1) throw notResolvable();
     if (applicationId) await addEvent(tx, applicationId, submissionId);
-    return { id: submissionId, matchState, applicationId };
+    return { id: submissionId, matchState, applicationId, company: submission.company };
   }, TX_OPTIONS);
+  if (resolved.applicationId) await matchMailsOf(userId, company);
+  return resolved;
 }
 
 export async function listPendingSubmissions(userId: string, limit: number, offset: number) {

@@ -3,7 +3,8 @@
  * the user's own application does not have: "Front-end Developer (only for folks graduated in 2026
  * or earlier)" is the same job as "Front-end Developer". The company is checked by the caller.
  */
-import { titleKey } from './externalSubmission';
+/** A title in lower case, letters and digits only. */
+export const titleKey = (title: string) => title.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 /** Text in brackets, and everything after a dash or bar with a space before it, is dropped. */
 const EXTRA_TEXT = /\([^)]*\)|\[[^\]]*\]|\{[^}]*\}|\s[-–—|].*$/g;

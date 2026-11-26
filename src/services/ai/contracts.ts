@@ -10,7 +10,7 @@ export { NO_THREAD, ThreadReadSchema, type ThreadInput, type ThreadRead } from '
 export const AI_CONTRACT_VERSIONS = {
   CLASSIFICATION: 'classification/v5',
   RELEVANCE_BATCH: 'relevance-batch/v4',
-  EXTRACTION: 'extraction/v8',
+  EXTRACTION: 'extraction/v10',
 } as const;
 
 /**
@@ -64,8 +64,10 @@ export const EXTRACTION_VERSIONS: readonly string[] = [
   'extraction/v5',
   'extraction/v6',
   'extraction/v7',
-  AI_CONTRACT_VERSIONS.EXTRACTION,
+  'extraction/v8',
   'extraction/v9',
+  AI_CONTRACT_VERSIONS.EXTRACTION,
+  'extraction/v11',
 ];
 /** Extraction versions that also read interview and assessment times. */
 export const SCHEDULE_EXTRACTION_VERSIONS: readonly string[] = [
@@ -73,6 +75,7 @@ export const SCHEDULE_EXTRACTION_VERSIONS: readonly string[] = [
   'extraction/v5',
   'extraction/v7',
   'extraction/v9',
+  'extraction/v11',
 ];
 /** Extraction versions that warn about a job offer asking for money. */
 export const FAKE_OFFER_EXTRACTION_VERSIONS: readonly string[] = [
@@ -80,8 +83,10 @@ export const FAKE_OFFER_EXTRACTION_VERSIONS: readonly string[] = [
   'extraction/v5',
   'extraction/v6',
   'extraction/v7',
-  AI_CONTRACT_VERSIONS.EXTRACTION,
+  'extraction/v8',
   'extraction/v9',
+  AI_CONTRACT_VERSIONS.EXTRACTION,
+  'extraction/v11',
 ];
 /**
  * Extraction versions that read the mail with the conversation's open asks: they say how the user
@@ -90,16 +95,28 @@ export const FAKE_OFFER_EXTRACTION_VERSIONS: readonly string[] = [
 export const THREAD_EXTRACTION_VERSIONS: readonly string[] = [
   'extraction/v6',
   'extraction/v7',
-  AI_CONTRACT_VERSIONS.EXTRACTION,
+  'extraction/v8',
   'extraction/v9',
+  AI_CONTRACT_VERSIONS.EXTRACTION,
+  'extraction/v11',
 ];
 /**
  * Extraction versions told when the mail was too long and only its beginning is read (owner,
- * 17 Nov 2026): v6 and v7 with `bodyCut`. The newest two, used for new mail.
+ * 17 Nov 2026): v6 and v7 with `bodyCut`.
  */
 export const CUT_FLAG_EXTRACTION_VERSIONS: readonly string[] = [
-  AI_CONTRACT_VERSIONS.EXTRACTION,
+  'extraction/v8',
   'extraction/v9',
+  AI_CONTRACT_VERSIONS.EXTRACTION,
+  'extraction/v11',
+];
+/**
+ * Extraction versions that also get the mail's subject and the sender's name (owner, 26 Nov
+ * 2026): v8 and v9 with `subject` and `senderName`. The newest two, used for new mail.
+ */
+export const SUBJECT_EXTRACTION_VERSIONS: readonly string[] = [
+  AI_CONTRACT_VERSIONS.EXTRACTION,
+  'extraction/v11',
 ];
 
 /**
@@ -311,6 +328,9 @@ export interface EmailAnalyzer {
       thread?: ThreadInput;
       /** The cut-flag versions: true when the body holds only the mail's beginning. */
       bodyCut?: boolean;
+      /** The subject versions: the mail's subject line and the sender's display name. */
+      subject?: string | null;
+      senderName?: string | null;
     },
   ): Promise<
     AIResult<

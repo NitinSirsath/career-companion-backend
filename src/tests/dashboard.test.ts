@@ -189,7 +189,7 @@ it('needs you now counts what the Mails page lists', async () => {
   expect(now.newJobMails.count).toBe((await mailsPage('unseen=true')).length);
   expect(now.newJobMails.count).toBe(4);
   expect(now.needsAction.count).toBe((await mailsPage('request=open')).length);
-  expect(now.needsAction).toEqual({ count: 2, waitingOverADay: 1 });
+  expect(now.needsAction).toEqual({ count: 2, waitingOverADay: 1, missed: 0 });
   expect(now.newJobMails.today).toBeGreaterThanOrEqual(1);
   expect(now.newJobMails.today).toBeLessThanOrEqual(2);
 });
