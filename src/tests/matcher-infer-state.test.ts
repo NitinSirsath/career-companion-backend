@@ -103,3 +103,68 @@ describe('inferState: a stage name alone', () => {
     );
   });
 });
+
+// As the AI read them on the owner's real mails (27 Nov 2026).
+const recruiterPitch = result({
+  category: 'RECRUITER',
+  companyName: 'Meridial by Invisible',
+  recruiterName: 'Ishan Patnaik',
+  assessmentInfo:
+    'Complete a language fluency introduction with two recorded responses and a JSON Skills Assessment.',
+});
+const pitchWithPay = result({
+  category: 'RECRUITER',
+  companyName: 'Turing',
+  assessmentInfo: 'Candidates must complete and pass the Astra assessment before onboarding.',
+  offerInfo:
+    'A remote, part-time role (20-40 hours per week) for 16 weeks, paying $19-$25 per hour.',
+});
+const confirmation = result({
+  category: 'FOLLOW_UP',
+  companyName: 'Genpact',
+  assessmentInfo: 'Assessments will only be triggered for specific positions.',
+});
+
+describe('inferState: a confirmation or a recruiter mail only describes the job', () => {
+  it("does not make a recruiter's test steps an assessment", () => {
+    expect(inferState(recruiterPitch)).toBe(ApplicationStatus.RECRUITER_CONTACT);
+  });
+
+  it("does not make the pay of a recruiter's role an offer", () => {
+    expect(inferState(pitchWithPay)).toBe(ApplicationStatus.RECRUITER_CONTACT);
+  });
+
+  it('keeps a confirmation that names tests as applied', () => {
+    expect(inferState(confirmation)).toBe(ApplicationStatus.APPLIED);
+    expect(inferState(result({ category: 'FOLLOW_UP', offerInfo: 'Salary: 20 LPA' }))).toBe(
+      ApplicationStatus.APPLIED,
+    );
+  });
+
+  it('still ends the job on a no, and still moves on to an interview', () => {
+    expect(inferState(result({ ...recruiterPitch, rejectionInfo: 'Not moving forward' }))).toBe(
+      ApplicationStatus.REJECTED,
+    );
+    expect(inferState(result({ ...confirmation, interviewDate: 'Monday, 30 November 2026' }))).toBe(
+      ApplicationStatus.INTERVIEW,
+    );
+  });
+
+  it('still takes the details as a step on any other mail, and the type always', () => {
+    expect(inferState(result({ assessmentInfo: 'Take-home task, due Friday' }))).toBe(
+      ApplicationStatus.ASSESSMENT,
+    );
+    expect(inferState(result({ offerInfo: 'Offer letter attached' }))).toBe(
+      ApplicationStatus.OFFER,
+    );
+    expect(inferState(result({ category: 'OFFER' }))).toBe(ApplicationStatus.OFFER);
+    expect(inferState(codingAssessment)).toBe(ApplicationStatus.ASSESSMENT);
+  });
+
+  it('lets a real test after the confirmation move the application on', () => {
+    expect(aiStatusFromEvidence([confirmation])).toBe(ApplicationStatus.APPLIED);
+    expect(aiStatusFromEvidence([confirmation, codingAssessment])).toBe(
+      ApplicationStatus.ASSESSMENT,
+    );
+  });
+});

@@ -351,13 +351,18 @@ async function saveTimeline(save: Save, mail: SnapMail, app: Application) {
   });
 }
 
+async function saveStatus(save: Save, app: Application) {
+  if (await rebuildAiStatus(save.tx, app, save.now)) save.changed++;
+}
+
 /**
  * The AI status from all the application's mails (it may go down), and its AI status history
  * rebuilt in mail order, dated by each mail, with no entry for a step the user's own status hid.
- * The user's status and its history are not touched.
+ * The user's status and its history are not touched. True when the status the user sees changed.
+ * Reanalyze uses it, and so does the hourly upkeep when a rule on statuses changed.
  */
-async function saveStatus(save: Save, app: Application) {
-  const mails = await save.tx.email.findMany({
+export async function rebuildAiStatus(tx: Tx, app: Application, now: Date) {
+  const mails = await tx.email.findMany({
     where: { userId: app.userId, applicationId: app.id, matchState: 'MATCHED' },
     include: { aiProcessingResult: true },
     orderBy: [{ receivedAt: 'asc' }, { id: 'asc' }],
@@ -366,10 +371,8 @@ async function saveStatus(save: Save, app: Application) {
     mail.aiProcessingResult ? [mail.aiProcessingResult] : [],
   );
   const aiStatus = aiStatusFromEvidence(results);
-  if (aiStatus !== app.aiStatus) {
-    await save.tx.application.update({ where: { id: app.id }, data: { aiStatus } });
-    if (!app.userStatus) save.changed++;
-  }
+  if (aiStatus !== app.aiStatus)
+    await tx.application.update({ where: { id: app.id }, data: { aiStatus } });
   const wanted: {
     emailId: string;
     from: ApplicationStatus | null;
@@ -385,7 +388,7 @@ async function saveStatus(save: Save, app: Application) {
     if (!hidden) wanted.push({ emailId: mail.id, from: running, to: next, at });
     running = next;
   }
-  const live = await save.tx.statusChange.findMany({
+  const live = await tx.statusChange.findMany({
     where: { applicationId: app.id, source: 'AI', retiredAt: null },
   });
   const same = (row: (typeof live)[number], want: (typeof wanted)[number]) =>
@@ -394,13 +397,13 @@ async function saveStatus(save: Save, app: Application) {
     row.changedAt.getTime() === want.at.getTime();
   const stale = live.filter((row) => !wanted.some((want) => same(row, want)));
   if (stale.length)
-    await save.tx.statusChange.updateMany({
+    await tx.statusChange.updateMany({
       where: { id: { in: stale.map((row) => row.id) } },
-      data: { retiredAt: save.now },
+      data: { retiredAt: now },
     });
   const missing = wanted.filter((want) => !live.some((row) => same(row, want)));
   if (missing.length)
-    await save.tx.statusChange.createMany({
+    await tx.statusChange.createMany({
       data: missing.map((want) => ({
         applicationId: app.id,
         emailId: want.emailId,
@@ -410,6 +413,7 @@ async function saveStatus(save: Save, app: Application) {
         changedAt: want.at,
       })),
     });
+  return aiStatus !== app.aiStatus && !app.userStatus;
 }
 
 /** Each reply read again: answered, asked them a question, or not read (nothing was open). */

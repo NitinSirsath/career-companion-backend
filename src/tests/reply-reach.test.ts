@@ -104,6 +104,9 @@ const detail = async (key: string) => {
 };
 
 beforeAll(async () => {
+  // The sample mails are from 20 to 23 Nov 2026, and a request 7 quiet days old is Missed.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(at(24, 12));
   await prisma.user.deleteMany({ where: { email: { in: [OWNER, OTHER] } } });
   owner = (await prisma.user.create({ data: { email: OWNER } })).id;
   other = (await prisma.user.create({ data: { email: OTHER } })).id;
@@ -119,6 +122,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 afterAll(async () => {
+  vi.useRealTimers();
   await prisma.user.deleteMany({ where: { id: { in: [owner, other] } } });
 });
 

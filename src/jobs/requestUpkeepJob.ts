@@ -1,6 +1,7 @@
 import type { PgBoss } from 'pg-boss';
 import { getQueue, type QUEUE_NAMES } from '../services/queue';
 import { tidyAllRequests } from '../services/requestUpkeep';
+import { tidyAllStatuses } from '../services/statusUpkeep';
 import { matchAllWaitingMails } from '../services/waitingMails';
 import { logDebug } from '../utils/log';
 
@@ -14,7 +15,7 @@ const workers = new WeakSet<PgBoss>();
  * Keeps stored requests in step with today's rules (`requestUpkeep.ts`), every hour and once when
  * the server starts: the start is what brings mails saved before a rule up to date. Before that,
  * job mails that wait for an application are matched again (`waitingMails.ts`), so what they link
- * is tidied in the same run.
+ * is tidied in the same run. Last, AI statuses a changed rule left behind (`statusUpkeep.ts`).
  */
 export async function startRequestUpkeepWorker() {
   const boss = await getQueue();
@@ -23,6 +24,7 @@ export async function startRequestUpkeepWorker() {
     await boss.work(REQUEST_UPKEEP_QUEUE, { batchSize: 1 }, async () => {
       await matchAllWaitingMails();
       await tidyAllRequests();
+      await tidyAllStatuses();
     });
     workers.add(boss);
     await boss.send(REQUEST_UPKEEP_QUEUE, {}, { ...options, singletonKey: 'startup' });
