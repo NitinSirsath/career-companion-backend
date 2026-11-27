@@ -8,6 +8,7 @@ import { requestOf } from './emailRequest';
 import { prisma } from '../db/prisma';
 import {
   ApplicationStatus,
+  EmailCategory,
   EmailMatchState,
   EmailRelevanceState,
   AIProcessingResult,
@@ -540,6 +541,20 @@ function isInterview(aiResult: AIProcessingResult): boolean {
   );
 }
 
+/**
+ * Mail types that describe the job and how hiring goes there, not a step the user reached: a
+ * confirmation of the application and a recruiter's mail about a role (owner, 27 Nov 2026). The
+ * pay the AI reads from them as an offer, or the test it reads as an assessment, was never given to
+ * the user: a recruiter's pitch and an application confirmation both showed as Assessment.
+ */
+export const DESCRIBES_THE_JOB: readonly EmailCategory[] = ['FOLLOW_UP', 'RECRUITER'];
+
+/** Offer and test details that are a step by themselves: none on a mail that describes the job. */
+const stepDetails = (aiResult: AIProcessingResult) =>
+  aiResult.category && DESCRIBES_THE_JOB.includes(aiResult.category)
+    ? { offerInfo: null, assessmentInfo: null }
+    : aiResult;
+
 /** The status an email suggests. A mail that asks for money suggests none: it is not evidence. */
 export function inferState(aiResult: AIProcessingResult): ApplicationStatus | null {
   if (aiResult.fakeOfferWarning) return null;
@@ -547,10 +562,10 @@ export function inferState(aiResult: AIProcessingResult): ApplicationStatus | nu
   if (aiResult.category === 'CAREER_CONTACT') return null;
   if (aiResult.rejectionInfo || aiResult.category === 'REJECTION')
     return ApplicationStatus.REJECTED;
-  if (aiResult.offerInfo || aiResult.category === 'OFFER') return ApplicationStatus.OFFER;
+  const { offerInfo, assessmentInfo } = stepDetails(aiResult);
+  if (offerInfo || aiResult.category === 'OFFER') return ApplicationStatus.OFFER;
   if (isInterview(aiResult)) return ApplicationStatus.INTERVIEW;
-  if (aiResult.assessmentInfo || aiResult.category === 'ASSESSMENT')
-    return ApplicationStatus.ASSESSMENT;
+  if (assessmentInfo || aiResult.category === 'ASSESSMENT') return ApplicationStatus.ASSESSMENT;
   if (aiResult.recruiterName || aiResult.category === 'RECRUITER')
     return ApplicationStatus.RECRUITER_CONTACT;
   // A confirmation or status update with no stronger signal: the company has the application.
